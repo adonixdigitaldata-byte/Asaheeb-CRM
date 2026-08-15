@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 500 560" width="100%" height="100%">
+  <defs>
+    <linearGradient id="asaheebBlue" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#1E3A8A"/>
+      <stop offset="100%" stop-color="#172554"/>
+    </linearGradient>
+  </defs>
+  <!-- Artistic Arabic Calligraphy stylized flame symbol of Asaheeb Real Estate -->
+  <path fill="url(#asaheebBlue)" d="M250 20 C258 45 264 70 252 100 C238 136 200 170 195 210 C188 266 230 310 280 310 C320 310 355 285 365 245 C350 270 320 285 290 280 C260 275 235 248 240 215 C244 185 275 165 295 140 C320 110 330 65 315 25 C345 60 365 110 360 160 C356 205 330 245 350 290 C365 325 400 345 425 310 C410 355 370 395 315 405 C240 420 165 375 150 295 C140 235 170 175 205 130 C230 95 245 60 250 20 Z"/>
+  
+  <text x="250" y="460" font-family="'Plus Jakarta Sans', sans-serif" font-size="34" font-weight="700" fill="#1E3A8A" text-anchor="middle" letter-spacing="10">ASAHEEB</text>
+  <text x="250" y="500" font-family="'Tajawal', sans-serif" font-size="28" font-weight="700" fill="#1E3A8A" text-anchor="middle">العقارية</text>
+  <text x="250" y="535" font-family="'Plus Jakarta Sans', sans-serif" font-size="16" font-weight="600" fill="#64748B" text-anchor="middle" letter-spacing="4">REAL ESTATE</text>
+</svg>
