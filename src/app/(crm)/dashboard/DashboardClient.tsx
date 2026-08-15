@@ -362,40 +362,51 @@ export default function DashboardClient({
             </div>
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              {followups.slice(0, 5).map((f) => (
-                <div
-                  key={f.id}
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                    padding: '9px 12px',
-                    borderRadius: 6,
-                    border: '1px solid var(--border)',
-                    background: '#FAFAFA',
-                  }}
-                >
-                  <div>
-                    <div style={{ fontWeight: 600, fontSize: 13, color: '#0F172A' }}>
-                      {f.note || 'Follow-up call'}
+              {followups.slice(0, 5).map((f) => {
+                const leadId = f.lead_id || f.lead?.id
+                return (
+                  <Link
+                    key={f.id}
+                    href={leadId ? `/leads/${leadId}` : '/leads'}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      padding: '9px 12px',
+                      borderRadius: 6,
+                      border: '1px solid var(--border)',
+                      background: '#FAFAFA',
+                      textDecoration: 'none',
+                      transition: 'all 0.15s ease',
+                      cursor: 'pointer',
+                    }}
+                    className="hover:bg-slate-50"
+                  >
+                    <div>
+                      <div style={{ fontWeight: 600, fontSize: 13, color: '#0F172A' }}>
+                        {f.note || 'Follow-up call'}
+                      </div>
+                      <div style={{ fontSize: 11.5, color: '#64748B', marginTop: 2 }}>
+                        Lead: <strong style={{ color: 'var(--accent)' }}>{f.lead?.name || 'Lead'}</strong> · {f.lead?.phone || 'No phone'}
+                      </div>
                     </div>
-                    <div style={{ fontSize: 11.5, color: '#64748B', marginTop: 2 }}>
-                      Lead: <strong style={{ color: '#0F172A' }}>{f.lead?.name || 'Lead'}</strong> · {f.lead?.phone || ''}
-                    </div>
-                  </div>
 
-                  <div style={{ textAlign: 'right' }}>
-                    <span style={{ fontSize: 11.5, fontWeight: 600, color: 'var(--info)' }}>
-                      {new Date(f.scheduled_at).toLocaleDateString('en-GB', {
-                        month: 'short',
-                        day: 'numeric',
-                        hour: '2-digit',
-                        minute: '2-digit',
-                      })}
-                    </span>
-                  </div>
-                </div>
-              ))}
+                    <div style={{ textAlign: 'right' }}>
+                      <span style={{ fontSize: 11.5, fontWeight: 600, color: 'var(--info)' }}>
+                        {new Date(f.scheduled_at).toLocaleDateString('en-GB', {
+                          month: 'short',
+                          day: 'numeric',
+                          hour: '2-digit',
+                          minute: '2-digit',
+                        })}
+                      </span>
+                      <div style={{ fontSize: 11, color: '#94A3B8', marginTop: 2 }}>
+                        View lead &rarr;
+                      </div>
+                    </div>
+                  </Link>
+                )
+              })}
 
               {followups.length === 0 && (
                 <div style={{ textAlign: 'center', padding: '24px 0', color: '#94A3B8', fontSize: 13 }}>
