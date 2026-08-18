@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import { X, Building } from 'lucide-react'
 import type { LeadStage, Project, AdCampaign } from '@/types/database'
+import { PREDEFINED_CITIES } from '@/lib/cities'
 
 interface Props {
   stages: LeadStage[]
@@ -41,7 +42,9 @@ export default function AddLeadModal({
     name: '',
     phone: '',
     email: '',
+    cityMode: 'PREDEFINED' as 'PREDEFINED' | 'CUSTOM',
     city: '',
+    customCity: '',
     propertyMode: 'NONE' as 'NONE' | 'DB' | 'CUSTOM',
     property_id: '',
     customProperty: '',
@@ -83,6 +86,12 @@ export default function AddLeadModal({
       resolvedInterest = form.customProperty.trim()
     }
 
+    // Resolve city
+    const resolvedCity =
+      form.cityMode === 'CUSTOM'
+        ? form.customCity.trim() || null
+        : form.city.trim() || null
+
     try {
       const res = await fetch('/api/leads/create', {
         method: 'POST',
@@ -91,7 +100,7 @@ export default function AddLeadModal({
           name: form.name.trim(),
           phone: form.phone.trim() || null,
           email: form.email.trim() || null,
-          city: form.city.trim() || null,
+          city: resolvedCity,
           interest: resolvedInterest,
           potential_value: form.potential_value ? parseFloat(form.potential_value) : null,
           source: form.source,
@@ -102,6 +111,7 @@ export default function AddLeadModal({
           notes: form.notes.trim() || null,
         }),
       })
+
 
       const data = await res.json()
       if (!res.ok) {
@@ -196,16 +206,51 @@ export default function AddLeadModal({
                 />
               </div>
 
-              {/* City */}
+              {/* City / Region */}
               <div className="form-group">
                 <label className="form-label">City / Region</label>
-                <input
-                  type="text"
-                  value={form.city}
-                  onChange={(e) => setForm({ ...form, city: e.target.value })}
-                  placeholder="e.g. Riyadh, Jeddah, Dammam"
-                  className="form-input"
-                />
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  <select
+                    value={form.cityMode === 'CUSTOM' ? 'CUSTOM' : form.city}
+                    onChange={(e) => {
+                      const val = e.target.value
+                      if (val === 'CUSTOM') {
+                        setForm({ ...form, cityMode: 'CUSTOM', city: '', customCity: '' })
+                      } else {
+                        setForm({ ...form, cityMode: 'PREDEFINED', city: val, customCity: '' })
+                      }
+                    }}
+                    className="form-select"
+                  >
+                    <option value="">Select City / None</option>
+                    <optgroup label="Saudi Arabia">
+                      {PREDEFINED_CITIES.filter((c) => c.group === 'Saudi Arabia').map((c) => (
+                        <option key={c.value} value={c.value}>
+                          {c.label}
+                        </option>
+                      ))}
+                    </optgroup>
+                    <optgroup label="UAE & GCC">
+                      {PREDEFINED_CITIES.filter((c) => c.group === 'UAE & GCC').map((c) => (
+                        <option key={c.value} value={c.value}>
+                          {c.label}
+                        </option>
+                      ))}
+                    </optgroup>
+                    <option value="CUSTOM">➕ Custom City (Free text)</option>
+                  </select>
+
+                  {form.cityMode === 'CUSTOM' && (
+                    <input
+                      type="text"
+                      autoFocus
+                      value={form.customCity}
+                      onChange={(e) => setForm({ ...form, customCity: e.target.value })}
+                      placeholder="Type custom city name..."
+                      className="form-input"
+                    />
+                  )}
+                </div>
               </div>
 
               {/* Lead Source */}

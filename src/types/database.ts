@@ -64,6 +64,27 @@ export interface Ad {
   created_at: string
 }
 
+export interface ProjectImage {
+  url: string
+  captionEn?: string
+  captionAr?: string
+}
+
+export interface Landmark {
+  nameEn: string
+  nameAr: string
+  distEn: string
+  distAr: string
+}
+
+export interface Amenity {
+  badge: string
+  titleEn: string
+  titleAr: string
+  descEn: string
+  descAr: string
+}
+
 export interface Project {
   id: string
   name_en: string
@@ -92,15 +113,61 @@ export interface Project {
   floors_ar?: string | null
   overview_en?: string | null
   overview_ar?: string | null
-  highlights_en?: any
-  highlights_ar?: any
+  highlights_en?: string[] | null
+  highlights_ar?: string[] | null
+  images?: ProjectImage[] | null
   video_url?: string | null
   map_embed_url?: string | null
-  landmarks?: any
-  amenities?: any
+  google_maps_url?: string | null
+  landmarks?: Landmark[] | null
+  amenities?: Amenity[] | null
   brochure_url?: string | null
   brochure_size_en?: string | null
   brochure_size_ar?: string | null
+  is_published: boolean
+  sort_order: number
+  created_by?: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface BlogSection {
+  heading: string
+  body: string
+  highlights?: string[]
+}
+
+export interface BlogStatBox {
+  val: string
+  labelEn: string
+  labelAr: string
+}
+
+export interface Blog {
+  id: string
+  category: string
+  category_en: string
+  category_ar: string
+  accent?: string | null
+  date_en?: string | null
+  date_ar?: string | null
+  read_time_en?: string | null
+  read_time_ar?: string | null
+  author_en?: string | null
+  author_ar?: string | null
+  title_en: string
+  title_ar: string
+  excerpt_en?: string | null
+  excerpt_ar?: string | null
+  summary_en?: string[] | null
+  summary_ar?: string[] | null
+  sections_en?: BlogSection[] | null
+  sections_ar?: BlogSection[] | null
+  stat_box?: BlogStatBox[] | null
+  quote_en?: string | null
+  quote_ar?: string | null
+  cover_image_url?: string | null
+  featured: boolean
   is_published: boolean
   sort_order: number
   created_by?: string | null
@@ -180,4 +247,13 @@ export interface LeadActivity {
   metadata?: Record<string, any> | null
   created_at: string
   performer?: Profile | null
+}
+
+export interface NewsletterSubscriber {
+  id: string
+  email: string
+  source?: string
+  status?: string
+  created_at: string
+  updated_at?: string
 }

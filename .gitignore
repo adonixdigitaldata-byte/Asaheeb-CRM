@@ -34,3 +34,11 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# backups / local scratch
+/leads/
+/leads copy/
+/dashboard/
+
+# documentation / local notes
+FRONTEND_INTEGRATION_GUIDE.md

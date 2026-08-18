@@ -12,6 +12,8 @@ import {
 } from 'lucide-react'
 import type { Lead, LeadStage } from '@/types/database'
 import { formatCurrency, formatDate } from '@/lib/utils'
+import ConfirmModal from '@/components/ConfirmModal'
+import Pagination from '@/components/Pagination'
 
 interface Props {
   leads: Lead[]
@@ -21,6 +23,8 @@ interface Props {
   onRefresh: () => void
 }
 
+const PAGE_SIZE = 15
+
 export default function LeadsTable({
   leads,
   stages,
@@ -28,17 +32,25 @@ export default function LeadsTable({
   isAdmin,
   onRefresh,
 }: Props) {
+  const [currentPage, setCurrentPage] = useState(1)
   const [selectedIds, setSelectedIds] = useState<string[]>([])
   const [bulkAgentId, setBulkAgentId] = useState<string>('')
   const [loadingAction, setLoadingAction] = useState(false)
+  const [showBulkDeleteModal, setShowBulkDeleteModal] = useState(false)
+  const [leadToDelete, setLeadToDelete] = useState<{ id: string; name: string } | null>(null)
 
-  const allSelected = leads.length > 0 && selectedIds.length === leads.length
+  // Sliced leads for pagination
+  const totalPages = Math.ceil(leads.length / PAGE_SIZE) || 1
+  const effectivePage = Math.min(currentPage, totalPages)
+  const displayedLeads = leads.slice((effectivePage - 1) * PAGE_SIZE, effectivePage * PAGE_SIZE)
+
+  const allSelected = displayedLeads.length > 0 && displayedLeads.every((l) => selectedIds.includes(l.id))
 
   function toggleSelectAll() {
     if (allSelected) {
-      setSelectedIds([])
+      setSelectedIds((prev) => prev.filter((id) => !displayedLeads.some((l) => l.id === id)))
     } else {
-      setSelectedIds(leads.map((l) => l.id))
+      setSelectedIds((prev) => Array.from(new Set([...prev, ...displayedLeads.map((l) => l.id)])))
     }
   }
 
@@ -68,18 +80,45 @@ export default function LeadsTable({
     setLoadingAction(false)
   }
 
-  async function handleDelete(leadId: string) {
-    if (!confirm('Are you sure you want to delete this lead?')) return
+  async function executeBulkDelete() {
+    if (selectedIds.length === 0) return
+    setLoadingAction(true)
+
+    const res = await fetch('/api/leads/bulk-delete', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ leadIds: selectedIds }),
+    })
+
+    if (res.ok) {
+      setSelectedIds([])
+      setShowBulkDeleteModal(false)
+      onRefresh()
+    } else {
+      const data = await res.json().catch(() => ({}))
+      alert(data.error || 'Failed to delete selected leads')
+    }
+    setLoadingAction(false)
+  }
+
+  async function executeSingleDelete() {
+    if (!leadToDelete) return
+    const deletedId = leadToDelete.id
     setLoadingAction(true)
 
     const res = await fetch('/api/leads/delete', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ leadId }),
+      body: JSON.stringify({ leadId: deletedId }),
     })
 
     if (res.ok) {
+      setSelectedIds((prev) => prev.filter((id) => id !== deletedId))
+      setLeadToDelete(null)
       onRefresh()
+    } else {
+      const data = await res.json().catch(() => ({}))
+      alert(data.error || 'Failed to delete lead')
     }
     setLoadingAction(false)
   }
@@ -103,7 +142,7 @@ export default function LeadsTable({
             {selectedIds.length} lead{selectedIds.length > 1 ? 's' : ''} selected
           </div>
 
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
             <select
               value={bulkAgentId}
               onChange={(e) => setBulkAgentId(e.target.value)}
@@ -125,6 +164,17 @@ export default function LeadsTable({
             >
               Assign Selected
             </button>
+
+            <button
+              onClick={() => setShowBulkDeleteModal(true)}
+              disabled={loadingAction}
+              className="btn btn-danger btn-sm"
+              style={{ display: 'flex', alignItems: 'center', gap: 5 }}
+              title="Delete all selected leads"
+            >
+              <Trash2 size={13} />
+              <span>Delete Selected</span>
+            </button>
           </div>
         </div>
       )}
@@ -145,6 +195,7 @@ export default function LeadsTable({
                 </th>
               )}
               <th>Lead Name</th>
+              <th>City</th>
               <th>Contact Info</th>
               <th>Stage</th>
               <th>Source</th>
@@ -157,7 +208,7 @@ export default function LeadsTable({
           </thead>
 
           <tbody>
-            {leads.map((lead) => {
+            {displayedLeads.map((lead) => {
               const isSelected = selectedIds.includes(lead.id)
               return (
                 <tr key={lead.id} style={{ backgroundColor: isSelected ? '#EFF6FF' : undefined }}>
@@ -180,10 +231,15 @@ export default function LeadsTable({
                     >
                       {lead.name || 'Unnamed Lead'}
                     </Link>
-                    {lead.city && (
-                      <div style={{ fontSize: 11.5, color: '#64748B', marginTop: 2 }}>
+                  </td>
+
+                  <td>
+                    {lead.city ? (
+                      <span style={{ fontSize: 12.5, fontWeight: 600, color: '#334155' }}>
                         {lead.city}
-                      </div>
+                      </span>
+                    ) : (
+                      <span style={{ color: '#94A3B8', fontSize: 12.5 }}>—</span>
                     )}
                   </td>
 
@@ -271,7 +327,7 @@ export default function LeadsTable({
 
                       {isAdmin && (
                         <button
-                          onClick={() => handleDelete(lead.id)}
+                          onClick={() => setLeadToDelete({ id: lead.id, name: lead.name || 'Unnamed Lead' })}
                           className="btn btn-ghost btn-sm"
                           style={{ color: '#EF4444' }}
                           title="Delete Lead"
@@ -288,7 +344,7 @@ export default function LeadsTable({
             {leads.length === 0 && (
               <tr>
                 <td
-                  colSpan={isAdmin ? 10 : 9}
+                  colSpan={isAdmin ? 11 : 10}
                   style={{ textAlign: 'center', padding: '36px 0', color: '#94A3B8', fontSize: 13 }}
                 >
                   No leads found matching current filters.
@@ -297,7 +353,48 @@ export default function LeadsTable({
             )}
           </tbody>
         </table>
+
+        {/* 15-Item Pagination with Smooth Auto-Scroll to Top */}
+        <Pagination
+          currentPage={effectivePage}
+          totalItems={leads.length}
+          pageSize={PAGE_SIZE}
+          onPageChange={(p) => setCurrentPage(p)}
+          itemLabel="leads"
+        />
       </div>
+
+      {/* On-page Bulk Delete Confirmation Modal */}
+      <ConfirmModal
+        isOpen={showBulkDeleteModal}
+        title={`Delete ${selectedIds.length} Selected Lead${selectedIds.length > 1 ? 's' : ''}`}
+        message={
+          <>
+            Are you sure you want to permanently delete <strong>{selectedIds.length}</strong> selected lead{selectedIds.length > 1 ? 's' : ''}? This will also delete all associated follow-ups, notes, and activity history. This action cannot be undone.
+          </>
+        }
+        confirmLabel={`Delete ${selectedIds.length} Lead${selectedIds.length > 1 ? 's' : ''}`}
+        variant="danger"
+        loading={loadingAction}
+        onConfirm={executeBulkDelete}
+        onCancel={() => setShowBulkDeleteModal(false)}
+      />
+
+      {/* On-page Single Delete Confirmation Modal */}
+      <ConfirmModal
+        isOpen={!!leadToDelete}
+        title="Delete Lead"
+        message={
+          <>
+            Are you sure you want to permanently delete <strong>"{leadToDelete?.name}"</strong>? All associated notes, activities, and follow-ups will be removed. This action cannot be undone.
+          </>
+        }
+        confirmLabel="Delete Lead"
+        variant="danger"
+        loading={loadingAction}
+        onConfirm={executeSingleDelete}
+        onCancel={() => setLeadToDelete(null)}
+      />
     </div>
   )
 }

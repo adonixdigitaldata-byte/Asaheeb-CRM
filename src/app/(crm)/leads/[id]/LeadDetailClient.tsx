@@ -22,6 +22,8 @@ import {
   X,
   Check,
   Loader2,
+  ExternalLink,
+  Globe,
 } from 'lucide-react'
 import type {
   Lead,
@@ -34,6 +36,9 @@ import type {
 } from '@/types/database'
 import Link from 'next/link'
 import { formatCurrency, formatDate } from '@/lib/utils'
+import { PREDEFINED_CITIES } from '@/lib/cities'
+import ConfirmModal from '@/components/ConfirmModal'
+import { useEffect } from 'react'
 
 interface Props {
   lead: Lead
@@ -45,6 +50,8 @@ interface Props {
   activities: LeadActivity[]
   projects?: Project[]
 }
+
+const WEBSITE_URL = process.env.NEXT_PUBLIC_WEBSITE_URL || 'https://asaheebrealestate.com'
 
 export default function LeadDetailClient({
   lead: initialLead,
@@ -65,13 +72,65 @@ export default function LeadDetailClient({
   const [followups, setFollowups] = useState<LeadFollowup[]>(initialFollowups)
   const [activities, setActivities] = useState<LeadActivity[]>(initialActivities)
 
+  // Realtime subscription for activities and notes
+  useEffect(() => {
+    const channel = supabase
+      .channel(`lead-realtime-${lead.id}`)
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'lead_activities', filter: `lead_id=eq.${lead.id}` },
+        (payload) => {
+          const newAct = payload.new as LeadActivity
+          setActivities((prev) => {
+            if (prev.some((a) => a.id === newAct.id)) return prev
+            return [{ ...newAct, performer: profile }, ...prev]
+          })
+        }
+      )
+      .subscribe()
+
+    return () => {
+      supabase.removeChannel(channel)
+    }
+  }, [supabase, lead.id, profile])
+
+  // Helper to record activity locally and to Supabase
+  async function logActivity(activityType: string, metadata: any = {}) {
+    const optimisticAct: LeadActivity = {
+      id: crypto.randomUUID(),
+      lead_id: lead.id,
+      activity_type: activityType,
+      created_at: new Date().toISOString(),
+      performed_by: profile.id,
+      performer: profile,
+      metadata,
+    }
+    setActivities((prev) => [optimisticAct, ...prev])
+
+    try {
+      await supabase.from('lead_activities').insert({
+        lead_id: lead.id,
+        activity_type: activityType,
+        performed_by: profile.id,
+        metadata,
+      })
+    } catch (err) {
+      console.error('Failed to log activity:', err)
+    }
+  }
+
   // Edit Lead Modal / Inline State
   const [isEditingLead, setIsEditingLead] = useState(false)
+  const isInitialCityPredefined = initialLead.city
+    ? PREDEFINED_CITIES.some((c) => c.value.toLowerCase() === initialLead.city?.toLowerCase())
+    : true
   const [editForm, setEditForm] = useState({
     name: initialLead.name || '',
     phone: initialLead.phone || '',
     email: initialLead.email || '',
-    city: initialLead.city || '',
+    cityMode: isInitialCityPredefined ? ('PREDEFINED' as 'PREDEFINED' | 'CUSTOM') : ('CUSTOM' as 'PREDEFINED' | 'CUSTOM'),
+    city: isInitialCityPredefined ? (initialLead.city || '') : 'CUSTOM',
+    customCity: isInitialCityPredefined ? '' : (initialLead.city || ''),
     potential_value: initialLead.potential_value ? String(initialLead.potential_value) : '',
   })
   const [savingLead, setSavingLead] = useState(false)
@@ -96,8 +155,11 @@ export default function LeadDetailClient({
   const [editingNoteId, setEditingNoteId] = useState<string | null>(null)
   const [editNoteBody, setEditNoteBody] = useState('')
 
-  // Delete lead state
+  // Delete modals state
+  const [showDeleteLeadModal, setShowDeleteLeadModal] = useState(false)
   const [isDeleting, setIsDeleting] = useState(false)
+  const [noteIdToDelete, setNoteIdToDelete] = useState<string | null>(null)
+  const [followupIdToDelete, setFollowupIdToDelete] = useState<string | null>(null)
 
   const isAdmin = profile?.role === 'ADMIN'
 
@@ -124,19 +186,10 @@ export default function LeadDetailClient({
 
     // Instant local state update
     setLead((prev) => ({ ...prev, stage_id: newStageId, stage: newStage || prev.stage }))
-
-    const newActivity: LeadActivity = {
-      id: crypto.randomUUID(),
-      lead_id: lead.id,
-      activity_type: 'STAGE_CHANGE',
-      created_at: new Date().toISOString(),
-      performer: profile,
-      metadata: {
-        from_stage: oldStage?.label || '—',
-        to_stage: newStage?.label || '—',
-      },
-    }
-    setActivities((prev) => [newActivity, ...prev])
+    logActivity('STAGE_CHANGE', {
+      from_stage: oldStage?.label || '—',
+      to_stage: newStage?.label || '—',
+    })
 
     // Background sync
     await Promise.all([
@@ -146,15 +199,6 @@ export default function LeadDetailClient({
         from_stage_id: lead.stage_id,
         to_stage_id: newStageId,
         changed_by: profile.id,
-      }),
-      supabase.from('lead_activities').insert({
-        lead_id: lead.id,
-        activity_type: 'STAGE_CHANGE',
-        performed_by: profile.id,
-        metadata: {
-          from_stage: oldStage?.label || '—',
-          to_stage: newStage?.label || '—',
-        },
       }),
     ])
   }
@@ -168,25 +212,8 @@ export default function LeadDetailClient({
       assigned_agent: targetAgent || null,
     }))
 
-    const newActivity: LeadActivity = {
-      id: crypto.randomUUID(),
-      lead_id: lead.id,
-      activity_type: 'ASSIGNED',
-      created_at: new Date().toISOString(),
-      performer: profile,
-      metadata: { agent_name: targetAgent?.name || 'Unassigned' },
-    }
-    setActivities((prev) => [newActivity, ...prev])
-
-    await Promise.all([
-      supabase.from('leads').update({ assigned_agent_id: newAgentId || null }).eq('id', lead.id),
-      supabase.from('lead_activities').insert({
-        lead_id: lead.id,
-        activity_type: 'ASSIGNED',
-        performed_by: profile.id,
-        metadata: { agent_name: targetAgent?.name || 'Unassigned' },
-      }),
-    ])
+    logActivity('ASSIGNED', { agent_name: targetAgent?.name || 'Unassigned' })
+    await supabase.from('leads').update({ assigned_agent_id: newAgentId || null }).eq('id', lead.id)
   }
 
   // Save Lead Contact Details (Edit Lead)
@@ -195,11 +222,16 @@ export default function LeadDetailClient({
     if (!editForm.name.trim()) return
 
     setSavingLead(true)
+    const resolvedCity =
+      editForm.cityMode === 'CUSTOM'
+        ? editForm.customCity.trim() || null
+        : editForm.city.trim() || null
+
     const updatedFields = {
       name: editForm.name.trim(),
       phone: editForm.phone.trim() || null,
       email: editForm.email.trim() || null,
-      city: editForm.city.trim() || null,
+      city: resolvedCity,
       potential_value: editForm.potential_value ? parseFloat(editForm.potential_value) : null,
     }
 
@@ -207,6 +239,7 @@ export default function LeadDetailClient({
     setLead((prev) => ({ ...prev, ...updatedFields }))
     setIsEditingLead(false)
 
+    logActivity('LEAD_UPDATED', { fields: Object.keys(updatedFields) })
     await supabase.from('leads').update(updatedFields).eq('id', lead.id)
     setSavingLead(false)
   }
@@ -239,20 +272,14 @@ export default function LeadDetailClient({
     }))
     setIsEditingProperty(false)
 
-    await Promise.all([
-      supabase.from('leads').update({
-        property_id: updatedPropertyId,
-        interest: updatedInterest,
-      }).eq('id', lead.id),
-      supabase.from('lead_activities').insert({
-        lead_id: lead.id,
-        activity_type: 'PROPERTY_UPDATED',
-        performed_by: profile.id,
-        metadata: {
-          property: updatedPropertyObj?.name_en || updatedInterest || 'General Inquiry',
-        },
-      }),
-    ])
+    logActivity('PROPERTY_UPDATED', {
+      property: updatedPropertyObj?.name_en || updatedInterest || 'General Inquiry',
+    })
+
+    await supabase.from('leads').update({
+      property_id: updatedPropertyId,
+      interest: updatedInterest,
+    }).eq('id', lead.id)
 
     setSavingProperty(false)
   }
@@ -274,8 +301,9 @@ export default function LeadDetailClient({
       author: profile,
     }
     setNotes((prev) => [optimisticNote, ...prev])
+    logActivity('NOTE_ADDED', { snippet: noteBody.slice(0, 50) })
 
-    const { data, error } = await supabase
+    const { data } = await supabase
       .from('lead_notes')
       .insert({
         lead_id: lead.id,
@@ -288,12 +316,6 @@ export default function LeadDetailClient({
     if (data) {
       setNotes((prev) => [data, ...prev.filter((n) => n.id !== optimisticNote.id)])
     }
-
-    await supabase.from('lead_activities').insert({
-      lead_id: lead.id,
-      activity_type: 'NOTE_ADDED',
-      performed_by: profile.id,
-    })
   }
 
   // Edit Note
@@ -304,16 +326,20 @@ export default function LeadDetailClient({
       prev.map((n) => (n.id === noteId ? { ...n, body: editNoteBody.trim() } : n))
     )
     setEditingNoteId(null)
+    logActivity('NOTE_UPDATED', { snippet: editNoteBody.slice(0, 50) })
 
     await supabase.from('lead_notes').update({ body: editNoteBody.trim() }).eq('id', noteId)
   }
 
   // Delete Note
-  async function handleDeleteNote(noteId: string) {
-    if (!confirm('Are you sure you want to delete this note?')) return
+  async function executeDeleteNote() {
+    if (!noteIdToDelete) return
+    const id = noteIdToDelete
+    setNotes((prev) => prev.filter((n) => n.id !== id))
+    setNoteIdToDelete(null)
+    logActivity('NOTE_DELETED')
 
-    setNotes((prev) => prev.filter((n) => n.id !== noteId))
-    await supabase.from('lead_notes').delete().eq('id', noteId)
+    await supabase.from('lead_notes').delete().eq('id', id)
   }
 
   // Save / Schedule Followup
@@ -335,6 +361,7 @@ export default function LeadDetailClient({
       )
       setShowFollowupForm(false)
       setEditingFollowupId(null)
+      logActivity('FOLLOWUP_UPDATED', { date: followupDate })
 
       await supabase
         .from('lead_followups')
@@ -355,6 +382,7 @@ export default function LeadDetailClient({
       }
       setFollowups((prev) => [optimisticFollowup, ...prev])
       setShowFollowupForm(false)
+      logActivity('FOLLOWUP_SCHEDULED', { date: followupDate })
 
       const { data } = await supabase
         .from('lead_followups')
@@ -371,13 +399,6 @@ export default function LeadDetailClient({
       if (data) {
         setFollowups((prev) => [data, ...prev.filter((f) => f.id !== optimisticFollowup.id)])
       }
-
-      await supabase.from('lead_activities').insert({
-        lead_id: lead.id,
-        activity_type: 'FOLLOWUP_SCHEDULED',
-        performed_by: profile.id,
-        metadata: { date: followupDate },
-      })
     }
 
     setFollowupDate('')
@@ -396,34 +417,30 @@ export default function LeadDetailClient({
       )
     )
 
-    await Promise.all([
-      supabase
-        .from('lead_followups')
-        .update({
-          is_completed: nextStatus,
-          completed_at: nextStatus ? new Date().toISOString() : null,
-        })
-        .eq('id', followupId),
-      supabase.from('lead_activities').insert({
-        lead_id: lead.id,
-        activity_type: nextStatus ? 'FOLLOWUP_COMPLETED' : 'FOLLOWUP_UPDATED',
-        performed_by: profile.id,
-      }),
-    ])
+    logActivity(nextStatus ? 'FOLLOWUP_COMPLETED' : 'FOLLOWUP_UPDATED')
+
+    await supabase
+      .from('lead_followups')
+      .update({
+        is_completed: nextStatus,
+        completed_at: nextStatus ? new Date().toISOString() : null,
+      })
+      .eq('id', followupId)
   }
 
   // Delete Follow-up
-  async function handleDeleteFollowup(followupId: string) {
-    if (!confirm('Are you sure you want to delete this follow-up?')) return
+  async function executeDeleteFollowup() {
+    if (!followupIdToDelete) return
+    const id = followupIdToDelete
+    setFollowups((prev) => prev.filter((f) => f.id !== id))
+    setFollowupIdToDelete(null)
+    logActivity('FOLLOWUP_DELETED')
 
-    setFollowups((prev) => prev.filter((f) => f.id !== followupId))
-    await supabase.from('lead_followups').delete().eq('id', followupId)
+    await supabase.from('lead_followups').delete().eq('id', id)
   }
 
   // Delete Lead
-  async function handleDeleteLead() {
-    if (!confirm(`Are you sure you want to completely delete "${lead.name}"? This action cannot be undone.`)) return
-
+  async function executeDeleteLead() {
     setIsDeleting(true)
     const res = await fetch('/api/leads/delete', {
       method: 'POST',
@@ -436,6 +453,7 @@ export default function LeadDetailClient({
     } else {
       alert('Failed to delete lead')
       setIsDeleting(false)
+      setShowDeleteLeadModal(false)
     }
   }
 
@@ -504,13 +522,13 @@ export default function LeadDetailClient({
           {/* Delete Lead Button */}
           {isAdmin && (
             <button
-              onClick={handleDeleteLead}
+              onClick={() => setShowDeleteLeadModal(true)}
               disabled={isDeleting}
               className="btn btn-danger btn-sm"
               title="Delete Lead"
             >
               <Trash2 size={14} />
-              <span>{isDeleting ? 'Deleting...' : 'Delete Lead'}</span>
+              <span>Delete Lead</span>
             </button>
           )}
         </div>
@@ -527,11 +545,20 @@ export default function LeadDetailClient({
                 <h3 className="text-section-header">Contact Information</h3>
                 <button
                   onClick={() => {
+                    const isPredefined = lead.city
+                      ? PREDEFINED_CITIES.some((c) => c.value.toLowerCase() === lead.city?.toLowerCase())
+                      : true
+                    const matchedCity = isPredefined && lead.city
+                      ? PREDEFINED_CITIES.find((c) => c.value.toLowerCase() === lead.city?.toLowerCase())?.value || lead.city
+                      : ''
+
                     setEditForm({
                       name: lead.name || '',
                       phone: lead.phone || '',
                       email: lead.email || '',
-                      city: lead.city || '',
+                      cityMode: isPredefined ? 'PREDEFINED' : 'CUSTOM',
+                      city: isPredefined ? matchedCity : 'CUSTOM',
+                      customCity: isPredefined ? '' : (lead.city || ''),
                       potential_value: lead.potential_value ? String(lead.potential_value) : '',
                     })
                     setIsEditingLead(true)
@@ -619,12 +646,36 @@ export default function LeadDetailClient({
               </div>
 
               <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                  <Building size={16} style={{ color: '#D97706' }} />
+                <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+                  <Building size={16} style={{ color: '#D97706', marginTop: '2px' }} />
                   <div>
                     <div className="text-label" style={{ fontSize: 11 }}>PROJECT / PROPERTY</div>
-                    <div style={{ color: '#0F172A', fontWeight: 600, fontSize: 13.5 }}>
-                      {lead.property ? lead.property.name_en : (lead.interest || 'General Inquiry')}
+                    <div style={{ color: '#0F172A', fontWeight: 600, fontSize: 13.5, display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                      <span>{lead.property ? lead.property.name_en : (lead.interest || 'General Inquiry')}</span>
+                      {(lead.property_id || lead.property?.id) && (
+                        <a
+                          href={`${WEBSITE_URL}/projects/${lead.property_id || lead.property?.id}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="btn btn-ghost btn-sm"
+                          style={{
+                            fontSize: '11px',
+                            color: '#2563EB',
+                            padding: '1px 6px',
+                            height: '22px',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '4px',
+                            backgroundColor: '#EFF6FF',
+                            borderRadius: '4px',
+                          }}
+                          title="Open Property Page on Public Website"
+                        >
+                          <Globe size={11} />
+                          <span>View on Website</span>
+                          <ExternalLink size={10} />
+                        </a>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -642,6 +693,106 @@ export default function LeadDetailClient({
                 )}
               </div>
             </div>
+
+            {/* Website Form Submission / Ingestion Data Card */}
+            {lead.form_data && Object.keys(lead.form_data).length > 0 && (
+              <div className="card">
+                <div className="flex items-center justify-between" style={{ marginBottom: 12, borderBottom: '1px solid #F1F5F9', paddingBottom: 8 }}>
+                  <h3 className="text-section-header" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <MessageSquare size={15} style={{ color: '#0284C7' }} />
+                    <span>Website Inquiry Details</span>
+                  </h3>
+                  <span
+                    style={{
+                      fontSize: '11px',
+                      fontWeight: 700,
+                      backgroundColor: '#EFF6FF',
+                      color: '#1D4ED8',
+                      padding: '2px 8px',
+                      borderRadius: '4px',
+                    }}
+                  >
+                    {lead.form_data.form_type || lead.source}
+                  </span>
+                </div>
+
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                  {lead.form_data.message && (
+                    <div>
+                      <div className="text-label" style={{ fontSize: 11, marginBottom: 4 }}>MESSAGE</div>
+                      <div
+                        style={{
+                          padding: '10px 12px',
+                          backgroundColor: '#F8FAFC',
+                          border: '1px solid #E2E8F0',
+                          borderRadius: '6px',
+                          color: '#0F172A',
+                          fontSize: '13px',
+                          lineHeight: 1.5,
+                          whiteSpace: 'pre-wrap',
+                        }}
+                      >
+                        {lead.form_data.message}
+                      </div>
+                    </div>
+                  )}
+
+                  {lead.form_data.budget && (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                      <DollarSign size={16} style={{ color: '#10B981' }} />
+                      <div>
+                        <div className="text-label" style={{ fontSize: 11 }}>BUDGET RANGE</div>
+                        <div style={{ color: '#0F172A', fontWeight: 600, fontSize: 13 }}>
+                          {lead.form_data.budget}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {lead.form_data.project_name && (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                      <Building size={16} style={{ color: '#D97706' }} />
+                      <div>
+                        <div className="text-label" style={{ fontSize: 11 }}>TARGET PROPERTY</div>
+                        <div style={{ color: '#0F172A', fontWeight: 600, fontSize: 13, display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                          <span>{lead.form_data.project_name}</span>
+                          {(lead.property_id || lead.property?.id) && (
+                            <a
+                              href={`${WEBSITE_URL}/projects/${lead.property_id || lead.property?.id}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="btn btn-ghost btn-sm"
+                              style={{
+                                fontSize: '11px',
+                                color: '#2563EB',
+                                padding: '1px 6px',
+                                height: '22px',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '4px',
+                                backgroundColor: '#EFF6FF',
+                                borderRadius: '4px',
+                              }}
+                              title="Open Property on Public Website"
+                            >
+                              <Globe size={11} />
+                              <span>View on Website</span>
+                              <ExternalLink size={10} />
+                            </a>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {lead.form_data.submitted_at && (
+                    <div style={{ fontSize: '11.5px', color: '#64748B', borderTop: '1px dashed #E2E8F0', paddingTop: '8px', marginTop: '2px' }}>
+                      Submitted on website: {new Date(lead.form_data.submitted_at).toLocaleString()}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Right Column: Follow-ups, Notes & Activity */}
@@ -776,7 +927,7 @@ export default function LeadDetailClient({
                       </button>
 
                       <button
-                        onClick={() => handleDeleteFollowup(f.id)}
+                        onClick={() => setFollowupIdToDelete(f.id)}
                         className="btn btn-ghost btn-icon btn-sm"
                         style={{ color: '#EF4444' }}
                         title="Delete Follow-up"
@@ -856,7 +1007,7 @@ export default function LeadDetailClient({
                           <Edit2 size={12} />
                         </button>
                         <button
-                          onClick={() => handleDeleteNote(n.id)}
+                          onClick={() => setNoteIdToDelete(n.id)}
                           className="btn btn-ghost btn-icon btn-sm"
                           style={{ color: '#EF4444', padding: 2 }}
                           title="Delete Note"
@@ -995,12 +1146,48 @@ export default function LeadDetailClient({
 
                 <div className="form-group">
                   <label className="form-label">City / Region</label>
-                  <input
-                    type="text"
-                    value={editForm.city}
-                    onChange={(e) => setEditForm({ ...editForm, city: e.target.value })}
-                    className="form-input"
-                  />
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    <select
+                      value={editForm.cityMode === 'CUSTOM' ? 'CUSTOM' : editForm.city}
+                      onChange={(e) => {
+                        const val = e.target.value
+                        if (val === 'CUSTOM') {
+                          setEditForm({ ...editForm, cityMode: 'CUSTOM', city: 'CUSTOM', customCity: '' })
+                        } else {
+                          setEditForm({ ...editForm, cityMode: 'PREDEFINED', city: val, customCity: '' })
+                        }
+                      }}
+                      className="form-select"
+                    >
+                      <option value="">Select City / None</option>
+                      <optgroup label="Saudi Arabia">
+                        {PREDEFINED_CITIES.filter((c) => c.group === 'Saudi Arabia').map((c) => (
+                          <option key={c.value} value={c.value}>
+                            {c.label}
+                          </option>
+                        ))}
+                      </optgroup>
+                      <optgroup label="UAE & GCC">
+                        {PREDEFINED_CITIES.filter((c) => c.group === 'UAE & GCC').map((c) => (
+                          <option key={c.value} value={c.value}>
+                            {c.label}
+                          </option>
+                        ))}
+                      </optgroup>
+                      <option value="CUSTOM">➕ Custom City (Free text)</option>
+                    </select>
+
+                    {editForm.cityMode === 'CUSTOM' && (
+                      <input
+                        type="text"
+                        autoFocus
+                        value={editForm.customCity}
+                        onChange={(e) => setEditForm({ ...editForm, customCity: e.target.value })}
+                        placeholder="Type custom city name..."
+                        className="form-input"
+                      />
+                    )}
+                  </div>
                 </div>
 
                 <div className="form-group">
@@ -1128,6 +1315,44 @@ export default function LeadDetailClient({
           </div>
         </div>
       )}
+
+      {/* Delete Lead Confirmation Modal */}
+      <ConfirmModal
+        isOpen={showDeleteLeadModal}
+        title="Delete Lead"
+        message={
+          <>
+            Are you sure you want to completely delete <strong>"{lead.name || 'this lead'}"</strong>? This will permanently remove all associated notes, scheduled follow-ups, and activity history. This action cannot be undone.
+          </>
+        }
+        confirmLabel="Delete Lead"
+        variant="danger"
+        loading={isDeleting}
+        onConfirm={executeDeleteLead}
+        onCancel={() => setShowDeleteLeadModal(false)}
+      />
+
+      {/* Delete Note Confirmation Modal */}
+      <ConfirmModal
+        isOpen={!!noteIdToDelete}
+        title="Delete Discussion Note"
+        message="Are you sure you want to delete this note? This action cannot be undone."
+        confirmLabel="Delete Note"
+        variant="danger"
+        onConfirm={executeDeleteNote}
+        onCancel={() => setNoteIdToDelete(null)}
+      />
+
+      {/* Delete Follow-up Confirmation Modal */}
+      <ConfirmModal
+        isOpen={!!followupIdToDelete}
+        title="Delete Scheduled Follow-up"
+        message="Are you sure you want to delete this scheduled follow-up reminder?"
+        confirmLabel="Delete Follow-up"
+        variant="danger"
+        onConfirm={executeDeleteFollowup}
+        onCancel={() => setFollowupIdToDelete(null)}
+      />
     </div>
   )
 }

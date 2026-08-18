@@ -119,13 +119,50 @@ create table if not exists projects (
   overview_ar text,
   highlights_en jsonb default '[]',
   highlights_ar jsonb default '[]',
+  images jsonb default '[]',
   video_url text,
   map_embed_url text,
+  google_maps_url text,
   landmarks jsonb default '[]',
   amenities jsonb default '[]',
   brochure_url text,
   brochure_size_en text,
   brochure_size_ar text,
+  is_published boolean not null default true,
+  sort_order int default 0,
+  created_by uuid references profiles(id) on delete set null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+-- ============================================================
+-- 4.1 BLOG ARTICLES / MARKET INSIGHTS
+-- ============================================================
+create table if not exists blogs (
+  id text primary key, -- Slug identifier, e.g. 'capital-appreciation-vs-rental-yield'
+  category text not null default 'guide',
+  category_en text not null default '',
+  category_ar text not null default '',
+  accent text default '#B8873B',
+  date_en text default '',
+  date_ar text default '',
+  read_time_en text default '',
+  read_time_ar text default '',
+  author_en text default 'Asaheeb Research',
+  author_ar text default 'فريق أبحاث أساهيب',
+  title_en text not null,
+  title_ar text not null,
+  excerpt_en text default '',
+  excerpt_ar text default '',
+  summary_en jsonb default '[]',
+  summary_ar jsonb default '[]',
+  sections_en jsonb default '[]',
+  sections_ar jsonb default '[]',
+  stat_box jsonb default '[]',
+  quote_en text,
+  quote_ar text,
+  cover_image_url text,
+  featured boolean not null default false,
   is_published boolean not null default true,
   sort_order int default 0,
   created_by uuid references profiles(id) on delete set null,
@@ -381,3 +418,12 @@ create policy "Public can read published projects" on projects for select using 
 
 drop policy if exists "Admins full access projects" on projects;
 create policy "Admins full access projects" on projects for all using (is_admin());
+
+-- Blogs Policies
+alter table blogs enable row level security;
+drop policy if exists "Public can read published blogs" on blogs;
+create policy "Public can read published blogs" on blogs for select using (is_published = true);
+
+drop policy if exists "Admins full access blogs" on blogs;
+create policy "Admins full access blogs" on blogs for all using (is_admin());
+

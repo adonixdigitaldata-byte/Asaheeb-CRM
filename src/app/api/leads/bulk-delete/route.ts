@@ -20,16 +20,15 @@ export async function POST(request: NextRequest) {
   }
 
   const body = await request.json()
-  const { leadId, leadIds } = body
+  const { leadIds } = body
 
-  const idsToDelete: string[] = Array.isArray(leadIds)
-    ? leadIds.filter((id) => typeof id === 'string' && id.trim().length > 0)
-    : leadId
-    ? [leadId]
-    : []
+  if (!Array.isArray(leadIds) || leadIds.length === 0) {
+    return NextResponse.json({ error: 'leadIds array is required' }, { status: 400 })
+  }
 
+  const idsToDelete = leadIds.filter((id) => typeof id === 'string' && id.trim().length > 0)
   if (idsToDelete.length === 0) {
-    return NextResponse.json({ error: 'leadId or leadIds array is required' }, { status: 400 })
+    return NextResponse.json({ error: 'No valid lead IDs provided' }, { status: 400 })
   }
 
   const serviceClient = await createServiceClient()
@@ -40,7 +39,7 @@ export async function POST(request: NextRequest) {
   await serviceClient.from('lead_activities').delete().in('lead_id', idsToDelete)
   await serviceClient.from('lead_stage_history').delete().in('lead_id', idsToDelete)
 
-  // Delete the lead(s)
+  // Delete the leads
   const { error: deleteError } = await serviceClient
     .from('leads')
     .delete()
@@ -52,4 +51,3 @@ export async function POST(request: NextRequest) {
 
   return NextResponse.json({ success: true, count: idsToDelete.length })
 }
-

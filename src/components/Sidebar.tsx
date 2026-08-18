@@ -8,10 +8,12 @@ import {
   Users,
   Megaphone,
   Building2,
+  BookOpen,
   Settings,
   LogOut,
   ChevronRight,
   TrendingUp,
+  Mail,
 } from 'lucide-react'
 import { logout } from '@/app/login/actions'
 import type { Profile } from '@/types/database'
@@ -28,6 +30,14 @@ const adminNav = [
       { href: '/leads', label: 'Leads Pipeline', icon: Users },
     ],
   },
+  {
+    section: 'Content Management',
+    items: [
+      { href: '/projects', label: 'Projects CMS', icon: Building2 },
+      // { href: '/blogs', label: 'Blog Articles', icon: BookOpen },
+      // { href: '/newsletter', label: 'Subscribers', icon: Mail },
+    ],
+  },
 ]
 
 const agentNav = [
@@ -36,6 +46,14 @@ const agentNav = [
     items: [
       { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
       { href: '/leads', label: 'My Leads', icon: Users },
+    ],
+  },
+  {
+    section: 'Content & Resources',
+    items: [
+      { href: '/projects', label: 'Projects & Brochures', icon: Building2 },
+      // { href: '/blogs', label: 'Market Articles', icon: BookOpen },
+      // { href: '/newsletter', label: 'Subscribers', icon: Mail },
     ],
   },
 ]
