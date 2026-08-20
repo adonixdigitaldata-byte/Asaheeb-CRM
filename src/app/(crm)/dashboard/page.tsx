@@ -3,6 +3,7 @@ import { redirect } from 'next/navigation'
 import type { Metadata } from 'next'
 import DashboardClient from './DashboardClient'
 import type { Profile, LeadStage } from '@/types/database'
+import { sortLeadStages } from '@/types/database'
 
 export const metadata: Metadata = { title: 'Dashboard' }
 
@@ -53,10 +54,12 @@ export default async function DashboardPage() {
     sourceCounts[l.source] = (sourceCounts[l.source] ?? 0) + 1
   })
 
+  const sortedStages = sortLeadStages((stages as LeadStage[]) ?? [])
+
   return (
     <DashboardClient
       profile={profile as Profile}
-      stages={(stages as LeadStage[]) ?? []}
+      stages={sortedStages}
       stageCounts={stageCounts}
       sourceCounts={sourceCounts}
       totalLeads={totalLeads}

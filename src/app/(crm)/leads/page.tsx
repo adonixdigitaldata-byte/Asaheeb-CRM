@@ -3,6 +3,7 @@ import { redirect } from 'next/navigation'
 import type { Metadata } from 'next'
 import LeadsClient from './LeadsClient'
 import type { Profile, LeadStage, AdCampaign, Project } from '@/types/database'
+import { sortLeadStages } from '@/types/database'
 
 export const metadata: Metadata = { title: 'Leads Pipeline' }
 
@@ -45,10 +46,12 @@ export default async function LeadsPage({
       .order('sort_order'),
   ])
 
+  const sortedStages = sortLeadStages((stages as LeadStage[]) ?? [])
+
   return (
     <LeadsClient
       profile={profile as Profile}
-      stages={(stages as LeadStage[]) ?? []}
+      stages={sortedStages}
       campaigns={(campaigns as AdCampaign[]) ?? []}
       agents={agents ?? []}
       projects={(projects as Project[]) ?? []}

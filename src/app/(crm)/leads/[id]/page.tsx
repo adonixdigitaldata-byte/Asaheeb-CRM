@@ -3,6 +3,7 @@ import { notFound, redirect } from 'next/navigation'
 import type { Metadata } from 'next'
 import LeadDetailClient from './LeadDetailClient'
 import type { Profile, Lead, LeadStage, LeadNote, LeadFollowup, LeadActivity, Project } from '@/types/database'
+import { sortLeadStages } from '@/types/database'
 
 export const metadata: Metadata = { title: 'Lead Details' }
 
@@ -47,7 +48,7 @@ export default async function LeadDetailPage({
       `)
       .eq('id', id)
       .single(),
-    supabase.from('lead_stages').select('*').order('sort_order'),
+    supabase.from('lead_stages').select('*'),
     supabase.from('profiles').select('id, name, email').eq('is_active', true).order('name'),
     supabase
       .from('lead_notes')
@@ -68,7 +69,7 @@ export default async function LeadDetailPage({
       .from('projects')
       .select('*')
       .eq('is_published', true)
-      .order('name_en'),
+      .order('sort_order'),
   ])
 
   if (!lead) {
@@ -80,11 +81,13 @@ export default async function LeadDetailPage({
     redirect('/leads')
   }
 
+  const sortedStages = sortLeadStages((stages as LeadStage[]) ?? [])
+
   return (
     <LeadDetailClient
-      lead={lead as Lead}
+      lead={lead as unknown as Lead}
       profile={profile as Profile}
-      stages={(stages as LeadStage[]) ?? []}
+      stages={sortedStages}
       agents={agents ?? []}
       notes={(notes as LeadNote[]) ?? []}
       followups={(followups as LeadFollowup[]) ?? []}

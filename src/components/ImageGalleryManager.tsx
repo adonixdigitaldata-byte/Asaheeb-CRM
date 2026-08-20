@@ -27,6 +27,8 @@ interface Props {
   images: ProjectImage[]
   onChange: (images: ProjectImage[]) => void
   folder?: string
+  title?: string
+  description?: string
 }
 
 // Utility to clean and extract direct image URL from Google Images, search redirects, etc.
@@ -63,6 +65,8 @@ export default function ImageGalleryManager({
   images = [],
   onChange,
   folder = 'asaheeb/projects',
+  title,
+  description,
 }: Props) {
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [uploading, setUploading] = useState(false)
@@ -380,7 +384,7 @@ export default function ImageGalleryManager({
       >
         <div>
           <div style={{ fontSize: '13px', fontWeight: 700, color: '#0F172A', display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-            <span>Project Photo Gallery ({images.length} {images.length === 1 ? 'image' : 'images'})</span>
+            <span>{title || `Project Photo Gallery (${images.length} ${images.length === 1 ? 'image' : 'images'})`}</span>
             {images.length > 1 && (
               <span
                 style={{
@@ -424,7 +428,7 @@ export default function ImageGalleryManager({
             )}
           </div>
           <div style={{ fontSize: '11.5px', color: '#64748B', marginTop: '2px' }}>
-            Upload photos via Cloudinary, direct files, or Google Image URLs. The first image is the cover photo.
+            {description || 'Upload photos via Cloudinary, direct files, or Google Image URLs. The first image is the cover photo.'}
           </div>
         </div>
 

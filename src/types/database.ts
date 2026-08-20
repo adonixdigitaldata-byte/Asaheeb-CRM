@@ -32,6 +32,26 @@ export interface LeadStage {
   color_hex: string
 }
 
+export const STAGE_ORDER_MAP: Record<string, number> = {
+  new: 1,
+  contacted: 2,
+  no_reply: 3,
+  followup: 4,
+  qualified: 5,
+  proposal: 6,
+  negotiation: 7,
+  won: 8,
+  lost: 9,
+}
+
+export function sortLeadStages(stages: LeadStage[]): LeadStage[] {
+  return [...stages].sort((a, b) => {
+    const orderA = STAGE_ORDER_MAP[a.key] ?? a.sort_order ?? 99
+    const orderB = STAGE_ORDER_MAP[b.key] ?? b.sort_order ?? 99
+    return orderA - orderB
+  })
+}
+
 export interface AdCampaign {
   id: string
   meta_campaign_id?: string | null
@@ -68,6 +88,12 @@ export interface ProjectImage {
   url: string
   captionEn?: string
   captionAr?: string
+}
+
+export interface ProjectVideo {
+  url: string
+  titleEn?: string
+  titleAr?: string
 }
 
 export interface Landmark {
@@ -117,13 +143,19 @@ export interface Project {
   highlights_ar?: string[] | null
   images?: ProjectImage[] | null
   video_url?: string | null
+  video_items?: ProjectVideo[] | null
   map_embed_url?: string | null
   google_maps_url?: string | null
   landmarks?: Landmark[] | null
   amenities?: Amenity[] | null
   brochure_url?: string | null
+  brochure_url_en?: string | null
+  brochure_url_ar?: string | null
   brochure_size_en?: string | null
   brochure_size_ar?: string | null
+  payment_terms_en?: string | null
+  payment_terms_ar?: string | null
+  floor_plans?: ProjectImage[] | null
   is_published: boolean
   sort_order: number
   created_by?: string | null

@@ -17,8 +17,14 @@ import {
   Loader2,
   Check,
   Pencil,
+  Layout,
+  CreditCard,
+  ArrowUp,
+  ArrowDown,
+  Star,
+  GripVertical,
 } from 'lucide-react'
-import type { Project, ProjectImage, Landmark, Amenity } from '@/types/database'
+import type { Project, ProjectImage, ProjectVideo, Landmark, Amenity } from '@/types/database'
 import ImageGalleryManager from '@/components/ImageGalleryManager'
 
 interface Props {
@@ -28,7 +34,7 @@ interface Props {
   onSuccess: () => void
 }
 
-type TabType = 'basic' | 'specs' | 'content' | 'amenities' | 'brochure' | 'gallery'
+type TabType = 'basic' | 'specs' | 'content' | 'amenities' | 'brochure' | 'floorplans' | 'gallery'
 
 function slugify(text: string): string {
   return text
@@ -52,6 +58,13 @@ export default function ProjectEditorModal({
   const [error, setError] = useState<string | null>(null)
   const [slugManuallyEdited, setSlugManuallyEdited] = useState(isEdit)
 
+  // Derive initial video_items if project has legacy video_url but no video_items
+  const initialVideos: ProjectVideo[] = project?.video_items?.length
+    ? project.video_items
+    : project?.video_url
+    ? [{ url: project.video_url, titleEn: 'Showcase Video', titleAr: 'فيديو المشروع' }]
+    : []
+
   const [form, setForm] = useState<Partial<Project>>({
     id: project?.id || '',
     name_en: project?.name_en || '',
@@ -66,6 +79,8 @@ export default function ProjectEditorModal({
     starting_price_ar: project?.starting_price_ar || '',
     price_range_en: project?.price_range_en || '',
     price_range_ar: project?.price_range_ar || '',
+    payment_terms_en: project?.payment_terms_en || 'Cash + Installment Available',
+    payment_terms_ar: project?.payment_terms_ar || 'كاش + أقساط متاحة',
     size_en: project?.size_en || '',
     size_ar: project?.size_ar || '',
     type_en: project?.type_en || '',
@@ -83,17 +98,26 @@ export default function ProjectEditorModal({
     highlights_en: project?.highlights_en || [],
     highlights_ar: project?.highlights_ar || [],
     images: project?.images || [],
+    floor_plans: project?.floor_plans || [],
     video_url: project?.video_url || '',
+    video_items: initialVideos,
     map_embed_url: project?.map_embed_url || '',
     google_maps_url: project?.google_maps_url || '',
     landmarks: project?.landmarks || [],
     amenities: project?.amenities || [],
-    brochure_url: project?.brochure_url || '',
+    brochure_url: project?.brochure_url || project?.brochure_url_en || '',
+    brochure_url_en: project?.brochure_url_en || project?.brochure_url || '',
+    brochure_url_ar: project?.brochure_url_ar || '',
     brochure_size_en: project?.brochure_size_en || '',
     brochure_size_ar: project?.brochure_size_ar || '',
     is_published: project ? project.is_published : true,
     sort_order: project?.sort_order || 0,
   })
+
+  // Dynamic Video items state
+  const [newVideo, setNewVideo] = useState<ProjectVideo>({ url: '', titleEn: '', titleAr: '' })
+  const [editingVideoIndex, setEditingVideoIndex] = useState<number | null>(null)
+  const [editVideo, setEditVideo] = useState<ProjectVideo>({ url: '', titleEn: '', titleAr: '' })
 
   // Dynamic Landmark items
   const [newLandmark, setNewLandmark] = useState<Landmark>({ nameEn: '', nameAr: '', distEn: '', distAr: '' })
@@ -101,9 +125,9 @@ export default function ProjectEditorModal({
   const [editLandmark, setEditLandmark] = useState<Landmark>({ nameEn: '', nameAr: '', distEn: '', distAr: '' })
 
   // Dynamic Amenity items
-  const [newAmenity, setNewAmenity] = useState<Amenity>({ badge: '✨', titleEn: '', titleAr: '', descEn: '', descAr: '' })
+  const [newAmenity, setNewAmenity] = useState<Amenity>({ badge: '', titleEn: '', titleAr: '', descEn: '', descAr: '' })
   const [editingAmenityIndex, setEditingAmenityIndex] = useState<number | null>(null)
-  const [editAmenity, setEditAmenity] = useState<Amenity>({ badge: '✨', titleEn: '', titleAr: '', descEn: '', descAr: '' })
+  const [editAmenity, setEditAmenity] = useState<Amenity>({ badge: '', titleEn: '', titleAr: '', descEn: '', descAr: '' })
 
   // Highlights input temporary state
   const [newHighlightEn, setNewHighlightEn] = useState('')
@@ -120,6 +144,95 @@ export default function ProjectEditorModal({
       updates.id = slugify(val)
     }
     setForm((prev) => ({ ...prev, ...updates }))
+  }
+
+  // Video Management Functions
+  function addVideo() {
+    if (!newVideo.url.trim()) return
+    const updatedVideos = [...(form.video_items || []), { ...newVideo, url: newVideo.url.trim() }]
+    setForm({
+      ...form,
+      video_items: updatedVideos,
+      video_url: updatedVideos[0]?.url || '',
+    })
+    setNewVideo({ url: '', titleEn: '', titleAr: '' })
+  }
+
+  function startEditVideo(index: number) {
+    const item = (form.video_items || [])[index]
+    if (!item) return
+    setEditingVideoIndex(index)
+    setEditVideo({ ...item })
+  }
+
+  function saveEditVideo() {
+    if (editingVideoIndex === null || !editVideo.url.trim()) return
+    const updated = [...(form.video_items || [])]
+    updated[editingVideoIndex] = { ...editVideo, url: editVideo.url.trim() }
+    setForm({
+      ...form,
+      video_items: updated,
+      video_url: updated[0]?.url || '',
+    })
+    setEditingVideoIndex(null)
+    setEditVideo({ url: '', titleEn: '', titleAr: '' })
+  }
+
+  function cancelEditVideo() {
+    setEditingVideoIndex(null)
+    setEditVideo({ url: '', titleEn: '', titleAr: '' })
+  }
+
+  function removeVideo(index: number) {
+    if (editingVideoIndex === index) {
+      setEditingVideoIndex(null)
+    } else if (editingVideoIndex !== null && editingVideoIndex > index) {
+      setEditingVideoIndex(editingVideoIndex - 1)
+    }
+    const updated = (form.video_items || []).filter((_, i) => i !== index)
+    setForm({
+      ...form,
+      video_items: updated,
+      video_url: updated[0]?.url || '',
+    })
+  }
+
+  function moveVideoUp(index: number) {
+    if (index <= 0 || !form.video_items) return
+    const updated = [...form.video_items]
+    const temp = updated[index]
+    updated[index] = updated[index - 1]
+    updated[index - 1] = temp
+    setForm({
+      ...form,
+      video_items: updated,
+      video_url: updated[0]?.url || '',
+    })
+  }
+
+  function moveVideoDown(index: number) {
+    if (!form.video_items || index >= form.video_items.length - 1) return
+    const updated = [...form.video_items]
+    const temp = updated[index]
+    updated[index] = updated[index + 1]
+    updated[index + 1] = temp
+    setForm({
+      ...form,
+      video_items: updated,
+      video_url: updated[0]?.url || '',
+    })
+  }
+
+  function makeVideoPrimary(index: number) {
+    if (index === 0 || !form.video_items) return
+    const updated = [...form.video_items]
+    const [selected] = updated.splice(index, 1)
+    updated.unshift(selected)
+    setForm({
+      ...form,
+      video_items: updated,
+      video_url: updated[0]?.url || '',
+    })
   }
 
   function addLandmark() {
@@ -171,9 +284,9 @@ export default function ProjectEditorModal({
     if (!newAmenity.titleEn.trim()) return
     setForm({
       ...form,
-      amenities: [...(form.amenities || []), { ...newAmenity }],
+      amenities: [...(form.amenities || []), { ...newAmenity, badge: '' }],
     })
-    setNewAmenity({ badge: '✨', titleEn: '', titleAr: '', descEn: '', descAr: '' })
+    setNewAmenity({ badge: '', titleEn: '', titleAr: '', descEn: '', descAr: '' })
   }
 
   function startEditAmenity(index: number) {
@@ -400,12 +513,22 @@ export default function ProjectEditorModal({
 
           <button
             type="button"
+            onClick={() => setActiveTab('floorplans')}
+            className={`btn btn-sm ${activeTab === 'floorplans' ? 'btn-primary' : 'btn-ghost'}`}
+            style={{ fontSize: '12.5px', padding: '5px 12px' }}
+          >
+            <Layout size={14} />
+            <span>6. Floor Plans ({(form.floor_plans || []).length})</span>
+          </button>
+
+          <button
+            type="button"
             onClick={() => setActiveTab('gallery')}
             className={`btn btn-sm ${activeTab === 'gallery' ? 'btn-primary' : 'btn-ghost'}`}
             style={{ fontSize: '12.5px', padding: '5px 12px' }}
           >
             <ImageIcon size={14} />
-            <span>6. Photos ({(form.images || []).length})</span>
+            <span>7. Photos ({(form.images || []).length})</span>
           </button>
         </div>
 
@@ -580,7 +703,7 @@ export default function ProjectEditorModal({
                 </div>
 
                 {/* Map Links */}
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px', marginTop: '6px' }}>
+                <div style={{ marginTop: '6px' }}>
                   <div className="form-group">
                     <label className="form-label">Google Maps Embed URL (iframe src)</label>
                     <input
@@ -590,17 +713,9 @@ export default function ProjectEditorModal({
                       placeholder="https://www.google.com/maps/embed?pb=..."
                       className="form-input"
                     />
-                  </div>
-
-                  <div className="form-group">
-                    <label className="form-label">Direct Google Maps Link</label>
-                    <input
-                      type="url"
-                      value={form.google_maps_url || ''}
-                      onChange={(e) => setForm({ ...form, google_maps_url: e.target.value })}
-                      placeholder="https://maps.app.goo.gl/..."
-                      className="form-input"
-                    />
+                    <span style={{ fontSize: '11px', color: '#94A3B8', marginTop: '2px' }}>
+                      Paste Google Maps iframe src URL to display the interactive location map on the website project page.
+                    </span>
                   </div>
                 </div>
               </div>
@@ -629,6 +744,49 @@ export default function ProjectEditorModal({
                       value={form.starting_price_ar || ''}
                       onChange={(e) => setForm({ ...form, starting_price_ar: e.target.value })}
                       placeholder="مثال: ابتداءً من ٦٠٠ ألف ر.س"
+                      className="form-input"
+                    />
+                  </div>
+                </div>
+
+                {/* Payment Terms / Options */}
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px' }}>
+                  <div className="form-group">
+                    <label className="form-label" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <CreditCard size={13} style={{ color: '#2563EB' }} />
+                      <span>Payment Terms / Method</span>
+                    </label>
+                    <select
+                      className="form-input"
+                      value={
+                        form.payment_terms_en === 'Cash Only'
+                          ? 'Cash Only'
+                          : form.payment_terms_en === 'Installment Available'
+                          ? 'Installment Available'
+                          : 'Cash + Installment Available'
+                      }
+                      onChange={(e) => {
+                        const val = e.target.value
+                        let arVal = 'كاش + أقساط متاحة'
+                        if (val === 'Cash Only') arVal = 'كاش فقط'
+                        else if (val === 'Installment Available') arVal = 'أقساط متاحة'
+                        setForm({ ...form, payment_terms_en: val, payment_terms_ar: arVal })
+                      }}
+                    >
+                      <option value="Cash + Installment Available">Cash + Installment Available (كاش + أقساط متاحة)</option>
+                      <option value="Cash Only">Cash Only (كاش فقط)</option>
+                      <option value="Installment Available">Installment Available (أقساط متاحة)</option>
+                    </select>
+                  </div>
+
+                  <div className="form-group">
+                    <label className="form-label" style={{ textAlign: 'right' }}>طريقة الدفع (بالعربية)</label>
+                    <input
+                      type="text"
+                      dir="rtl"
+                      value={form.payment_terms_ar || ''}
+                      onChange={(e) => setForm({ ...form, payment_terms_ar: e.target.value })}
+                      placeholder="مثال: كاش + أقساط متاحة"
                       className="form-input"
                     />
                   </div>
@@ -709,36 +867,52 @@ export default function ProjectEditorModal({
                   </div>
                 </div>
 
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '12px' }}>
+                {/* Project Status & Expected Delivery */}
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '14px' }}>
                   <div className="form-group">
-                    <label className="form-label">Project Status (EN)</label>
+                    <label className="form-label">Project Status (EN) *</label>
+                    <select
+                      className="form-input"
+                      value={
+                        form.status_en === 'Under Construction'
+                          ? 'Under Construction'
+                          : form.status_en === 'Ready to Move' || form.status_en === 'Ready'
+                          ? 'Ready to Move'
+                          : 'Off-Plan'
+                      }
+                      onChange={(e) => {
+                        const val = e.target.value
+                        let arVal = 'على المخطط'
+                        if (val === 'Under Construction') arVal = 'تحت الإنشاء'
+                        else if (val === 'Ready to Move') arVal = 'جاهز للسكن'
+                        setForm({ ...form, status_en: val, status_ar: arVal })
+                      }}
+                    >
+                      <option value="Off-Plan">Off-Plan (على المخطط)</option>
+                      <option value="Under Construction">Under Construction (تحت الإنشاء)</option>
+                      <option value="Ready to Move">Ready to Move (جاهز للسكن)</option>
+                    </select>
+                  </div>
+
+                  <div className="form-group">
+                    <label className="form-label" style={{ textAlign: 'right' }}>حالة المشروع (بالعربية) *</label>
                     <input
                       type="text"
-                      value={form.status_en || ''}
-                      onChange={(e) => setForm({ ...form, status_en: e.target.value })}
-                      placeholder="e.g. Off-Plan / Ready"
+                      dir="rtl"
+                      value={form.status_ar || 'على المخطط'}
+                      onChange={(e) => setForm({ ...form, status_ar: e.target.value })}
+                      placeholder="مثال: على المخطط / تحت الإنشاء / جاهز للسكن"
                       className="form-input"
                     />
                   </div>
 
                   <div className="form-group">
-                    <label className="form-label">Delivery Date (EN)</label>
+                    <label className="form-label">Delivery Date (EN / AR)</label>
                     <input
                       type="text"
                       value={form.expected_delivery_en || ''}
                       onChange={(e) => setForm({ ...form, expected_delivery_en: e.target.value })}
-                      placeholder="e.g. Q4 2026"
-                      className="form-input"
-                    />
-                  </div>
-
-                  <div className="form-group">
-                    <label className="form-label">Units Count (EN)</label>
-                    <input
-                      type="text"
-                      value={form.units_count_en || ''}
-                      onChange={(e) => setForm({ ...form, units_count_en: e.target.value })}
-                      placeholder="e.g. 48 Luxury Units"
+                      placeholder="e.g. Q4 2026 / جاهز للتسليم"
                       className="form-input"
                     />
                   </div>
@@ -922,15 +1096,7 @@ export default function ProjectEditorModal({
                     Project Amenities &amp; Facilities ({(form.amenities || []).length})
                   </h4>
 
-                  <div style={{ display: 'grid', gridTemplateColumns: '60px 1fr 1fr 1fr 1fr auto', gap: '8px', marginBottom: '12px' }}>
-                    <input
-                      type="text"
-                      placeholder="Icon"
-                      value={newAmenity.badge}
-                      onChange={(e) => setNewAmenity({ ...newAmenity, badge: e.target.value })}
-                      className="form-input"
-                      title="Emoji or icon badge e.g. 🏊‍♂️, 🅿️, 🏋️"
-                    />
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr auto', gap: '8px', marginBottom: '12px' }}>
                     <input
                       type="text"
                       placeholder="Title (EN)"
@@ -980,7 +1146,7 @@ export default function ProjectEditorModal({
                             key={idx}
                             style={{
                               display: 'grid',
-                              gridTemplateColumns: '60px 1fr 1fr 1fr 1fr auto auto',
+                              gridTemplateColumns: '1fr 1fr 1fr 1fr auto auto',
                               gap: '8px',
                               alignItems: 'center',
                               padding: '8px 10px',
@@ -989,15 +1155,6 @@ export default function ProjectEditorModal({
                               borderRadius: '6px',
                             }}
                           >
-                            <input
-                              type="text"
-                              placeholder="Icon"
-                              value={editAmenity.badge}
-                              onChange={(e) => setEditAmenity({ ...editAmenity, badge: e.target.value })}
-                              className="form-input"
-                              style={{ backgroundColor: '#FFFFFF' }}
-                              title="Emoji or icon badge"
-                            />
                             <input
                               type="text"
                               placeholder="Title (EN)"
@@ -1070,7 +1227,6 @@ export default function ProjectEditorModal({
                           }}
                         >
                           <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flex: 1, minWidth: 0 }}>
-                            <span style={{ fontSize: '18px', flexShrink: 0 }}>{am.badge}</span>
                             <span style={{ fontWeight: 600, color: '#0F172A', whiteSpace: 'nowrap' }}>{am.titleEn}</span>
                             <span style={{ color: '#64748B', whiteSpace: 'nowrap' }}>({am.titleAr})</span>
                             <span style={{ fontSize: '11.5px', color: '#94A3B8', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>— {am.descEn}</span>
@@ -1283,15 +1439,35 @@ export default function ProjectEditorModal({
                     Provide direct download links (PDF link, Google Drive direct link, or Cloudinary file) for website visitors to download brochures.
                   </p>
 
-                  <div className="form-group">
-                    <label className="form-label">Direct Brochure URL (PDF / File Link)</label>
-                    <input
-                      type="url"
-                      value={form.brochure_url || ''}
-                      onChange={(e) => setForm({ ...form, brochure_url: e.target.value })}
-                      placeholder="https://.../Suhail-Compound-Brochure.pdf"
-                      className="form-input"
-                    />
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px' }}>
+                    <div className="form-group">
+                      <label className="form-label">English Brochure URL (PDF / File Link)</label>
+                      <input
+                        type="url"
+                        value={form.brochure_url_en || form.brochure_url || ''}
+                        onChange={(e) => setForm({ ...form, brochure_url_en: e.target.value, brochure_url: e.target.value })}
+                        placeholder="https://.../Suhail-Compound-EN.pdf"
+                        className="form-input"
+                      />
+                      <span style={{ fontSize: '11px', color: '#94A3B8', marginTop: '2px' }}>
+                        Used for English website visitors (fallback for Arabic if Arabic is not provided).
+                      </span>
+                    </div>
+
+                    <div className="form-group">
+                      <label className="form-label" style={{ textAlign: 'right' }}>رابط كتيب المشروع بالعربية (PDF / ملف)</label>
+                      <input
+                        type="url"
+                        dir="ltr"
+                        value={form.brochure_url_ar || ''}
+                        onChange={(e) => setForm({ ...form, brochure_url_ar: e.target.value })}
+                        placeholder="https://.../Suhail-Compound-AR.pdf"
+                        className="form-input"
+                      />
+                      <span style={{ fontSize: '11px', color: '#94A3B8', marginTop: '2px', display: 'block', textAlign: 'right' }}>
+                        يُستخدم لزوار الموقع باللغة العربية (اختياري).
+                      </span>
+                    </div>
                   </div>
 
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginTop: '10px' }}>
@@ -1321,26 +1497,240 @@ export default function ProjectEditorModal({
                 </div>
 
                 <div className="card" style={{ padding: '16px', backgroundColor: '#F8FAFC' }}>
-                  <h4 style={{ fontSize: '13.5px', fontWeight: 700, color: '#0F172A', display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '8px' }}>
-                    <Video size={16} style={{ color: '#D97706' }} />
-                    <span>Project Showcase Video</span>
-                  </h4>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
+                    <h4 style={{ fontSize: '13.5px', fontWeight: 700, color: '#0F172A', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <Video size={16} style={{ color: '#D97706' }} />
+                      <span>Project Showcase Videos ({(form.video_items || []).length})</span>
+                    </h4>
+                    <span style={{ fontSize: '11px', color: '#64748B' }}>
+                      Add multiple YouTube embed links, Vimeo links, or direct MP4 URLs.
+                    </span>
+                  </div>
 
-                  <div className="form-group">
-                    <label className="form-label">Video URL (YouTube Embed or Direct Video)</label>
+                  {/* Add Video Inputs */}
+                  <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr auto', gap: '8px', marginBottom: '12px' }}>
                     <input
                       type="url"
-                      value={form.video_url || ''}
-                      onChange={(e) => setForm({ ...form, video_url: e.target.value })}
-                      placeholder="https://www.youtube.com/embed/... or https://.../video.mp4"
+                      placeholder="Video URL (e.g. https://www.youtube.com/embed/...)"
+                      value={newVideo.url}
+                      onChange={(e) => setNewVideo({ ...newVideo, url: e.target.value })}
                       className="form-input"
                     />
+                    <input
+                      type="text"
+                      placeholder="Title (EN) e.g. Virtual Tour"
+                      value={newVideo.titleEn || ''}
+                      onChange={(e) => setNewVideo({ ...newVideo, titleEn: e.target.value })}
+                      className="form-input"
+                    />
+                    <input
+                      type="text"
+                      dir="rtl"
+                      placeholder="العنوان (AR) مثال: جولة افتراضية"
+                      value={newVideo.titleAr || ''}
+                      onChange={(e) => setNewVideo({ ...newVideo, titleAr: e.target.value })}
+                      className="form-input"
+                    />
+                    <button
+                      type="button"
+                      onClick={addVideo}
+                      className="btn btn-outline btn-sm"
+                      style={{ whiteSpace: 'nowrap' }}
+                    >
+                      <Plus size={14} />
+                      <span>Add Video</span>
+                    </button>
+                  </div>
+
+                  {/* Video Items List */}
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                    {(form.video_items || []).length === 0 && (
+                      <div style={{ padding: '12px', textAlign: 'center', color: '#94A3B8', fontSize: '12px', border: '1px dashed #CBD5E1', borderRadius: '6px' }}>
+                        No videos added yet. Enter a YouTube embed or video link above to add.
+                      </div>
+                    )}
+                    {(form.video_items || []).map((vid, idx) => {
+                      const isEditing = editingVideoIndex === idx
+                      if (isEditing) {
+                        return (
+                          <div
+                            key={idx}
+                            style={{
+                              display: 'grid',
+                              gridTemplateColumns: '2fr 1fr 1fr auto auto',
+                              gap: '8px',
+                              alignItems: 'center',
+                              padding: '8px 10px',
+                              backgroundColor: '#EFF6FF',
+                              border: '1px solid #93C5FD',
+                              borderRadius: '6px',
+                            }}
+                          >
+                            <input
+                              type="url"
+                              placeholder="Video URL"
+                              value={editVideo.url}
+                              onChange={(e) => setEditVideo({ ...editVideo, url: e.target.value })}
+                              className="form-input"
+                              style={{ backgroundColor: '#FFFFFF' }}
+                            />
+                            <input
+                              type="text"
+                              placeholder="Title (EN)"
+                              value={editVideo.titleEn || ''}
+                              onChange={(e) => setEditVideo({ ...editVideo, titleEn: e.target.value })}
+                              className="form-input"
+                              style={{ backgroundColor: '#FFFFFF' }}
+                            />
+                            <input
+                              type="text"
+                              dir="rtl"
+                              placeholder="العنوان (AR)"
+                              value={editVideo.titleAr || ''}
+                              onChange={(e) => setEditVideo({ ...editVideo, titleAr: e.target.value })}
+                              className="form-input"
+                              style={{ backgroundColor: '#FFFFFF' }}
+                            />
+                            <button
+                              type="button"
+                              onClick={saveEditVideo}
+                              className="btn btn-primary btn-sm"
+                              style={{ padding: '6px 10px' }}
+                              title="Save video"
+                            >
+                              <Check size={14} />
+                              <span>Save</span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={cancelEditVideo}
+                              className="btn btn-ghost btn-sm"
+                              style={{ padding: '6px 8px' }}
+                              title="Cancel"
+                            >
+                              <X size={14} />
+                            </button>
+                          </div>
+                        )
+                      }
+
+                      const isFirst = idx === 0
+                      const isLast = idx === (form.video_items || []).length - 1
+
+                      return (
+                        <div
+                          key={`${vid.url}-${idx}`}
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'space-between',
+                            padding: '8px 12px',
+                            backgroundColor: isFirst ? '#F0FDF4' : '#FFFFFF',
+                            border: `1px solid ${isFirst ? '#86EFAC' : '#E2E8F0'}`,
+                            borderRadius: '6px',
+                            fontSize: '12.5px',
+                            transition: 'background-color 0.15s ease, border-color 0.15s ease',
+                          }}
+                        >
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flex: 1, minWidth: 0 }}>
+                            <span style={{ fontSize: '11px', fontWeight: 700, color: isFirst ? '#15803D' : '#2563EB', backgroundColor: isFirst ? '#DCFCE7' : '#EFF6FF', border: `1px solid ${isFirst ? '#BBF7D0' : '#DBEAFE'}`, padding: '2px 7px', borderRadius: '4px', flexShrink: 0 }}>
+                              {isFirst ? '⭐ 1st / Primary' : `#${idx + 1}`}
+                            </span>
+                            <span style={{ fontWeight: 600, color: '#0F172A', whiteSpace: 'nowrap' }}>
+                              {vid.titleEn || `Video ${idx + 1}`}
+                            </span>
+                            {vid.titleAr && (
+                              <span style={{ color: '#64748B', whiteSpace: 'nowrap' }}>({vid.titleAr})</span>
+                            )}
+                            <span style={{ fontSize: '11.5px', color: '#94A3B8', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                              — {vid.url}
+                            </span>
+                          </div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '4px', flexShrink: 0 }}>
+                            {isFirst ? (
+                              <div
+                                style={{
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'center',
+                                  width: '28px',
+                                  height: '28px',
+                                  color: '#F59E0B',
+                                }}
+                                title="Featured Primary Video"
+                              >
+                                <Star size={15} fill="#F59E0B" stroke="#D97706" />
+                              </div>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => makeVideoPrimary(idx)}
+                                className="btn btn-ghost btn-icon btn-sm"
+                                style={{ color: '#94A3B8' }}
+                                title="Click to set as 1st / Featured Video"
+                              >
+                                <Star size={14} fill="none" stroke="#94A3B8" />
+                              </button>
+                            )}
+                            <button
+                              type="button"
+                              onClick={() => moveVideoUp(idx)}
+                              disabled={isFirst}
+                              className="btn btn-ghost btn-icon btn-sm"
+                              style={{ color: isFirst ? '#CBD5E1' : '#475569' }}
+                              title="Move Up"
+                            >
+                              <ArrowUp size={13} />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => moveVideoDown(idx)}
+                              disabled={isLast}
+                              className="btn btn-ghost btn-icon btn-sm"
+                              style={{ color: isLast ? '#CBD5E1' : '#475569' }}
+                              title="Move Down"
+                            >
+                              <ArrowDown size={13} />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => startEditVideo(idx)}
+                              className="btn btn-ghost btn-icon btn-sm"
+                              style={{ color: '#0284C7' }}
+                              title="Edit video"
+                            >
+                              <Pencil size={13} />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => removeVideo(idx)}
+                              className="btn btn-ghost btn-icon btn-sm"
+                              style={{ color: '#EF4444' }}
+                              title="Delete video"
+                            >
+                              <Trash2 size={13} />
+                            </button>
+                          </div>
+                        </div>
+                      )
+                    })}
                   </div>
                 </div>
               </div>
             )}
 
-            {/* TAB 6: PHOTO GALLERY */}
+            {/* TAB 6: FLOOR PLANS */}
+            {activeTab === 'floorplans' && (
+              <ImageGalleryManager
+                images={form.floor_plans || []}
+                onChange={(updatedFloorPlans) => setForm({ ...form, floor_plans: updatedFloorPlans })}
+                folder="asaheeb/floorplans"
+                title={`Floor Plans & Layout Diagrams (${(form.floor_plans || []).length} ${(form.floor_plans || []).length === 1 ? 'diagram' : 'diagrams'})`}
+                description="Upload architectural layouts and floor plan drawings (PNG, JPG, WebP, SVG). If you have PDF blueprints, convert pages to images and upload here."
+              />
+            )}
+
+            {/* TAB 7: PHOTO GALLERY */}
             {activeTab === 'gallery' && (
               <ImageGalleryManager
                 images={form.images || []}
