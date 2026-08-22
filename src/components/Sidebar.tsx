@@ -34,8 +34,8 @@ const adminNav = [
     section: 'Content Management',
     items: [
       { href: '/projects', label: 'Projects CMS', icon: Building2 },
-      // { href: '/blogs', label: 'Blog Articles', icon: BookOpen },
-      // { href: '/newsletter', label: 'Subscribers', icon: Mail },
+      { href: '/blogs', label: 'Blog Articles', icon: BookOpen },
+      { href: '/newsletter', label: 'Subscribers', icon: Mail },
     ],
   },
 ]
@@ -52,8 +52,8 @@ const agentNav = [
     section: 'Content & Resources',
     items: [
       { href: '/projects', label: 'Projects & Brochures', icon: Building2 },
-      // { href: '/blogs', label: 'Market Articles', icon: BookOpen },
-      // { href: '/newsletter', label: 'Subscribers', icon: Mail },
+      { href: '/blogs', label: 'Market Articles', icon: BookOpen },
+      { href: '/newsletter', label: 'Subscribers', icon: Mail },
     ],
   },
 ]
