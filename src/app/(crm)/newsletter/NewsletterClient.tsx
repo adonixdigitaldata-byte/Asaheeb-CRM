@@ -32,7 +32,7 @@ const PAGE_SIZE = 15
 
 export default function NewsletterClient({ profile }: Props) {
   const supabase = createClient()
-  const isAdmin = profile?.role === 'ADMIN'
+  const isAdmin = true // Granted to all roles
 
   const [subscribers, setSubscribers] = useState<NewsletterSubscriber[]>([])
   const [loading, setLoading] = useState(true)

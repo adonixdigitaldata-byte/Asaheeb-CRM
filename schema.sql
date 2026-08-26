@@ -13,12 +13,16 @@ create table if not exists profiles (
   id uuid primary key references auth.users(id) on delete cascade,
   name text not null,
   email text not null,
-  role text not null default 'AGENT' check (role in ('ADMIN', 'AGENT')),
+  role text not null default 'AGENT' check (role in ('ADMIN', 'SALES_MANAGER', 'AGENT', 'EMPLOYEE')),
+  specialization text,
+  work_status text not null default 'AVAILABLE' check (work_status in ('AVAILABLE', 'BUSY', 'ON_LEAVE')),
+  phone text,
   is_active boolean not null default true,
   avatar_url text,
   total_leads_assigned int not null default 0,
   open_leads_count int not null default 0,
   last_seen_at timestamptz not null default now(),
+  payroll_pin text default '1234',
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
@@ -72,15 +76,18 @@ create table if not exists lead_stages (
 -- Insert default stages if table is empty
 insert into lead_stages (key, label, sort_order, color_hex)
 values
-  ('new',         'New',         1, '#0284C7'),
-  ('contacted',   'Contacted',   2, '#D97706'),
-  ('no_reply',    'No Reply',    3, '#64748B'),
-  ('followup',    'Follow-up',   4, '#0F766E'),
-  ('qualified',   'Qualified',   5, '#7C3AED'),
-  ('proposal',    'Proposal',    6, '#DB2777'),
-  ('negotiation', 'Negotiation', 7, '#EA580C'),
-  ('won',         'Won',         8, '#16A34A'),
-  ('lost',        'Lost',        9, '#DC2626')
+  ('new',                 'New',                  1, '#0284C7'),
+  ('contacted',           'Contacted',            2, '#D97706'),
+  ('no_reply',            'No Reply',             3, '#64748B'),
+  ('followup',            'Follow-up',            4, '#0F766E'),
+  ('qualified',           'Qualified',            5, '#7C3AED'),
+  ('proposal',            'Proposal',             6, '#DB2777'),
+  ('negotiation',         'Negotiation',          7, '#EA580C'),
+  ('meeting_scheduled',   'Meeting Scheduled',    8, '#8B5CF6'),
+  ('meeting_done',        'Meeting Done',         9, '#06B6D4'),
+  ('site_visit_scheduled','Site Visit Scheduled', 10, '#F59E0B'),
+  ('won',                 'Won',                 11, '#16A34A'),
+  ('lost',                'Lost',                12, '#DC2626')
 on conflict (key) do update set
   label = excluded.label,
   sort_order = excluded.sort_order,
@@ -286,7 +293,7 @@ begin
     if new.raw_user_meta_data->>'name' is not null then 
       v_name := new.raw_user_meta_data->>'name'; 
     end if;
-    if new.raw_user_meta_data->>'role' in ('ADMIN', 'AGENT') then 
+    if new.raw_user_meta_data->>'role' in ('ADMIN', 'SALES_MANAGER', 'AGENT', 'EMPLOYEE') then 
       v_role := new.raw_user_meta_data->>'role'; 
     end if;
   end if;
@@ -294,7 +301,8 @@ begin
   values (new.id, v_name, coalesce(new.email, ''), v_role)
   on conflict (id) do update set
     name = excluded.name,
-    email = excluded.email;
+    email = excluded.email,
+    role = excluded.role;
   return new;
 end;
 $$ language plpgsql security definer;
@@ -357,7 +365,7 @@ create policy "Agents update assigned leads" on leads for update using (assigned
 
 -- Lead Notes Policies
 drop policy if exists "Admins full access notes" on lead_notes;
-create policy "Admins full access notes" on lead_notes for all using (is_admin());
+create policy "Admins full access notes" on lead_notes for all using (is_admin_or_sales_manager());
 
 drop policy if exists "Agents manage notes on their leads" on lead_notes;
 create policy "Agents manage notes on their leads" on lead_notes for all using (
@@ -366,7 +374,7 @@ create policy "Agents manage notes on their leads" on lead_notes for all using (
 
 -- Lead Followups Policies
 drop policy if exists "Admins full access followups" on lead_followups;
-create policy "Admins full access followups" on lead_followups for all using (is_admin());
+create policy "Admins full access followups" on lead_followups for all using (is_admin_or_sales_manager());
 
 drop policy if exists "Agents manage followups on their leads" on lead_followups;
 create policy "Agents manage followups on their leads" on lead_followups for all using (
@@ -375,7 +383,7 @@ create policy "Agents manage followups on their leads" on lead_followups for all
 
 -- Lead Activities Policies
 drop policy if exists "Admins full access activities" on lead_activities;
-create policy "Admins full access activities" on lead_activities for all using (is_admin());
+create policy "Admins full access activities" on lead_activities for all using (is_admin_or_sales_manager());
 
 drop policy if exists "Agents view activities on their leads" on lead_activities;
 create policy "Agents view activities on their leads" on lead_activities for select using (
@@ -389,7 +397,7 @@ create policy "Agents insert activities on their leads" on lead_activities for i
 
 -- Stage History Policies
 drop policy if exists "Admins full access stage history" on lead_stage_history;
-create policy "Admins full access stage history" on lead_stage_history for all using (is_admin());
+create policy "Admins full access stage history" on lead_stage_history for all using (is_admin_or_sales_manager());
 
 drop policy if exists "Agents view stage history on their leads" on lead_stage_history;
 create policy "Agents view stage history on their leads" on lead_stage_history for select using (
@@ -414,16 +422,199 @@ create policy "Admins manage ads" on ads for all using (is_admin());
 
 -- Projects Policies
 drop policy if exists "Public can read published projects" on projects;
-create policy "Public can read published projects" on projects for select using (is_published = true);
+create policy "Public can read published projects" on projects for select using (is_published = true or auth.uid() is not null);
 
 drop policy if exists "Admins full access projects" on projects;
-create policy "Admins full access projects" on projects for all using (is_admin());
+create policy "All authenticated full access projects" on projects for all using (auth.uid() is not null);
 
 -- Blogs Policies
 alter table blogs enable row level security;
 drop policy if exists "Public can read published blogs" on blogs;
-create policy "Public can read published blogs" on blogs for select using (is_published = true);
+create policy "Public can read published blogs" on blogs for select using (is_published = true or auth.uid() is not null);
 
 drop policy if exists "Admins full access blogs" on blogs;
-create policy "Admins full access blogs" on blogs for all using (is_admin());
+create policy "All authenticated full access blogs" on blogs for all using (auth.uid() is not null);
+
+-- ============================================================
+-- 9. IMPORT BATCHES
+-- ============================================================
+create table if not exists import_batches (
+  id uuid primary key default gen_random_uuid(),
+  file_name text not null,
+  uploaded_by uuid references profiles(id) on delete set null,
+  total_rows int default 0,
+  success_count int default 0,
+  error_count int default 0,
+  duplicate_count int default 0,
+  error_log jsonb default '[]'::jsonb,
+  created_at timestamptz not null default now()
+);
+
+alter table leads add column if not exists import_batch_id uuid references import_batches(id) on delete set null;
+create index if not exists idx_leads_import_batch on leads(import_batch_id);
+
+alter table import_batches enable row level security;
+drop policy if exists "Admins and Managers can view import batches" on import_batches;
+create policy "Admins and Managers can view import batches" on import_batches
+  for select using (is_admin() or exists (select 1 from profiles where id = auth.uid() and role = 'SALES_MANAGER') or uploaded_by = auth.uid());
+
+drop policy if exists "Admins and Managers can insert import batches" on import_batches;
+create policy "Admins and Managers can insert import batches" on import_batches
+  for insert with check (is_admin() or exists (select 1 from profiles where id = auth.uid() and role = 'SALES_MANAGER'));
+
+drop policy if exists "Admins can manage import batches" on import_batches;
+create policy "Admins can manage import batches" on import_batches
+  for all using (is_admin());
+
+-- ============================================================
+-- 10. PAYROLL & PAYSLIP SYSTEM
+-- ============================================================
+create table if not exists employee_salary_profiles (
+  id uuid primary key default gen_random_uuid(),
+  profile_id uuid references profiles(id) on delete cascade unique not null,
+  currency text not null default 'SAR' check (currency in ('SAR', 'INR', 'USD')),
+  base_salary numeric(12, 2) not null default 0,
+  joining_date date not null default current_date,
+  designation text,
+  department text default 'Sales',
+  employee_code text,
+  bank_name text,
+  account_number text,
+  ifsc_or_iban text,
+  pan_or_iqama text,
+  default_allowances jsonb default '[]'::jsonb,
+  default_deductions jsonb default '[]'::jsonb,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create index if not exists idx_salary_profiles_profile on employee_salary_profiles(profile_id);
+
+drop trigger if exists salary_profiles_updated_at on employee_salary_profiles;
+create trigger salary_profiles_updated_at 
+  before update on employee_salary_profiles
+  for each row execute function update_updated_at();
+
+alter table employee_salary_profiles enable row level security;
+drop policy if exists "Admins manage all salary profiles" on employee_salary_profiles;
+create policy "Admins manage all salary profiles" on employee_salary_profiles 
+  for all using (is_admin());
+
+drop policy if exists "Users view own salary profile" on employee_salary_profiles;
+create policy "Users view own salary profile" on employee_salary_profiles 
+  for select using (profile_id = auth.uid());
+
+-- Salary History
+create table if not exists employee_salary_history (
+  id uuid primary key default gen_random_uuid(),
+  profile_id uuid references profiles(id) on delete cascade not null,
+  base_salary numeric(12, 2) not null default 0,
+  currency text not null default 'SAR' check (currency in ('SAR', 'INR', 'USD')),
+  start_date date not null,
+  end_date date,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create index if not exists idx_salary_history_profile on employee_salary_history(profile_id);
+create index if not exists idx_salary_history_dates on employee_salary_history(start_date, end_date);
+
+alter table employee_salary_history enable row level security;
+drop policy if exists "Admins manage all salary histories" on employee_salary_history;
+create policy "Admins manage all salary histories" on employee_salary_history 
+  for all using (is_admin());
+
+drop policy if exists "Users view own salary history" on employee_salary_history;
+create policy "Users view own salary history" on employee_salary_history 
+  for select using (profile_id = auth.uid());
+
+-- Payslips
+create table if not exists payslips (
+  id uuid primary key default gen_random_uuid(),
+  employee_id uuid references profiles(id) on delete cascade not null,
+  month int not null check (month between 1 and 12),
+  year int not null check (year between 2000 and 2100),
+  financial_year text not null,
+  currency text not null default 'SAR' check (currency in ('SAR', 'INR', 'USD')),
+  base_salary numeric(12, 2) not null default 0,
+  earnings_breakdown jsonb not null default '[]'::jsonb,
+  deductions_breakdown jsonb not null default '[]'::jsonb,
+  gross_earnings numeric(12, 2) not null default 0,
+  total_deductions numeric(12, 2) not null default 0,
+  net_pay numeric(12, 2) not null default 0,
+  net_pay_in_words text,
+  working_days int not null default 30,
+  paid_days int not null default 30,
+  lop_days int not null default 0,
+  status text not null default 'PAID' check (status in ('DRAFT', 'PUBLISHED', 'PAID')),
+  payment_date date,
+  period_start_date date,
+  period_end_date date,
+  payment_method text not null default 'BANK_TRANSFER' check (payment_method in ('BANK_TRANSFER', 'CHEQUE', 'CASH', 'UPI', 'WIRE')),
+  designation text,
+  department text,
+  employee_code text,
+  bank_name text,
+  account_number text,
+  ifsc_or_iban text,
+  pan_or_iqama text,
+  joining_date date,
+  notes text,
+  created_by uuid references profiles(id) on delete set null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  unique (employee_id, month, year)
+);
+
+create index if not exists idx_payslips_employee on payslips(employee_id);
+create index if not exists idx_payslips_period on payslips(year, month);
+create index if not exists idx_payslips_fy on payslips(financial_year);
+create index if not exists idx_payslips_status on payslips(status);
+
+drop trigger if exists payslips_updated_at on payslips;
+create trigger payslips_updated_at 
+  before update on payslips
+  for each row execute function update_updated_at();
+
+alter table payslips enable row level security;
+drop policy if exists "Admins manage all payslips" on payslips;
+create policy "Admins manage all payslips" on payslips 
+  for all using (is_admin());
+
+drop policy if exists "Users view own published payslips" on payslips;
+create policy "Users view own published payslips" on payslips 
+  for select using (
+    employee_id = auth.uid() and status in ('PUBLISHED', 'PAID')
+  );
+
+-- ============================================================
+-- 9. PROJECT COMMISSIONS & SALES TRACKING (ADMIN ONLY)
+-- ============================================================
+create table if not exists project_commissions (
+  id uuid primary key default gen_random_uuid(),
+  project_id text references projects(id) on delete cascade not null,
+  unit_name text not null, -- layout name, apartment name, villa name, property name
+  buyer_name text not null,
+  commission_amount numeric(14, 2) not null default 0,
+  sale_date date not null default current_date,
+  notes text,
+  created_by uuid references profiles(id) on delete set null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create index if not exists idx_project_commissions_project on project_commissions(project_id);
+create index if not exists idx_project_commissions_date on project_commissions(sale_date);
+
+drop trigger if exists project_commissions_updated_at on project_commissions;
+create trigger project_commissions_updated_at 
+  before update on project_commissions
+  for each row execute function update_updated_at();
+
+alter table project_commissions enable row level security;
+drop policy if exists "Admins manage all project commissions" on project_commissions;
+create policy "Admins manage all project commissions" on project_commissions 
+  for all using (is_admin());
+
+
 

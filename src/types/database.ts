@@ -1,4 +1,5 @@
-export type UserRole = 'ADMIN' | 'AGENT'
+export type UserRole = 'ADMIN' | 'SALES_MANAGER' | 'AGENT' | 'EMPLOYEE'
+export type WorkStatus = 'AVAILABLE' | 'BUSY' | 'ON_LEAVE'
 
 export type LeadSource =
   | 'META_ADS'
@@ -15,6 +16,9 @@ export interface Profile {
   name: string
   email: string
   role: UserRole
+  specialization?: string | null
+  work_status?: WorkStatus
+  phone?: string | null
   is_active: boolean
   avatar_url?: string | null
   total_leads_assigned: number
@@ -22,6 +26,7 @@ export interface Profile {
   last_seen_at: string
   created_at: string
   updated_at: string
+  payroll_pin?: string | null
 }
 
 export interface LeadStage {
@@ -40,8 +45,11 @@ export const STAGE_ORDER_MAP: Record<string, number> = {
   qualified: 5,
   proposal: 6,
   negotiation: 7,
-  won: 8,
-  lost: 9,
+  meeting_scheduled: 8,
+  meeting_done: 9,
+  site_visit_scheduled: 10,
+  won: 11,
+  lost: 12,
 }
 
 export function sortLeadStages(stages: LeadStage[]): LeadStage[] {
@@ -50,6 +58,18 @@ export function sortLeadStages(stages: LeadStage[]): LeadStage[] {
     const orderB = STAGE_ORDER_MAP[b.key] ?? b.sort_order ?? 99
     return orderA - orderB
   })
+}
+
+export interface ProjectCommission {
+  id: string
+  project_id: string
+  unit_name: string
+  buyer_name: string
+  commission_amount: number
+  sale_date: string
+  notes?: string | null
+  created_at: string
+  updated_at: string
 }
 
 export interface AdCampaign {
@@ -227,6 +247,7 @@ export interface Lead {
   lead_score?: number
   is_duplicate?: boolean
   duplicate_of?: string | null
+  import_batch_id?: string | null
   created_at: string
   updated_at: string
   // Joins
@@ -234,6 +255,19 @@ export interface Lead {
   assigned_agent?: { id: string; name: string; email?: string } | null
   campaign?: { id: string; name: string } | null
   property?: { id: string; name_en: string; name_ar: string } | null
+}
+
+export interface ImportBatch {
+  id: string
+  file_name: string
+  uploaded_by?: string | null
+  total_rows: number
+  success_count: number
+  error_count: number
+  duplicate_count: number
+  error_log?: any[]
+  created_at: string
+  uploader?: Profile | null
 }
 
 export interface LeadStageHistory {
@@ -289,3 +323,89 @@ export interface NewsletterSubscriber {
   created_at: string
   updated_at?: string
 }
+
+// ============================================================
+// PAYROLL & PAYSLIP TYPES
+// ============================================================
+export type PayslipCurrency = 'SAR' | 'INR' | 'USD'
+export type PayslipStatus = 'DRAFT' | 'PUBLISHED' | 'PAID'
+export type PaymentMethod = 'BANK_TRANSFER' | 'CHEQUE' | 'CASH' | 'UPI' | 'WIRE'
+
+export interface PayslipLineItem {
+  id?: string
+  name: string
+  amount: number
+  description?: string
+  type?: 'allowance' | 'deduction'
+}
+
+export interface EmployeeSalaryProfile {
+  id: string
+  profile_id: string
+  currency: PayslipCurrency
+  base_salary: number
+  joining_date: string
+  designation?: string | null
+  department?: string | null
+  employee_code?: string | null
+  bank_name?: string | null
+  account_number?: string | null
+  ifsc_or_iban?: string | null
+  pan_or_iqama?: string | null
+  default_allowances?: PayslipLineItem[]
+  default_deductions?: PayslipLineItem[]
+  created_at: string
+  updated_at: string
+  profile?: Profile | null
+}
+
+export interface EmployeeSalaryHistory {
+  id: string
+  profile_id: string
+  base_salary: number
+  currency: PayslipCurrency
+  start_date: string
+  end_date?: string | null
+  created_at: string
+  updated_at: string
+  profile?: Profile | null
+}
+
+export interface Payslip {
+  id: string
+  employee_id: string
+  month: number
+  year: number
+  financial_year: string
+  currency: PayslipCurrency
+  base_salary: number
+  earnings_breakdown: PayslipLineItem[]
+  deductions_breakdown: PayslipLineItem[]
+  gross_earnings: number
+  total_deductions: number
+  net_pay: number
+  net_pay_in_words?: string | null
+  working_days: number
+  paid_days: number
+  lop_days: number
+  status: PayslipStatus
+  payment_date?: string | null
+  period_start_date?: string | null
+  period_end_date?: string | null
+  payment_method: PaymentMethod
+  designation?: string | null
+  department?: string | null
+  employee_code?: string | null
+  bank_name?: string | null
+  account_number?: string | null
+  ifsc_or_iban?: string | null
+  pan_or_iqama?: string | null
+  joining_date?: string | null
+  notes?: string | null
+  created_by?: string | null
+  created_at: string
+  updated_at: string
+  employee?: Profile | null
+  creator?: Profile | null
+}
+

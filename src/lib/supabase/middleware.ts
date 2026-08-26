@@ -27,14 +27,33 @@ export async function updateSession(request: NextRequest) {
     }
   )
 
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
+  let user = null
+  try {
+    const { data, error } = await supabase.auth.getUser()
+    if (!error) {
+      user = data.user
+    } else if (error.code === 'refresh_token_not_found' || error.message?.includes('Refresh Token')) {
+      // Clear stale auth cookies
+      request.cookies.getAll().forEach((cookie) => {
+        if (cookie.name.includes('sb-') && cookie.name.includes('-auth-token')) {
+          supabaseResponse.cookies.delete(cookie.name)
+        }
+      })
+    }
+  } catch {
+    user = null
+  }
 
   const pathname = request.nextUrl.pathname
 
   // Public paths that don't require authentication
-  const isAuthRoute = pathname.startsWith('/login') || pathname.startsWith('/auth')
+  const isAuthRoute =
+    pathname.startsWith('/login') ||
+    pathname.startsWith('/auth') ||
+    pathname.startsWith('/callback') ||
+    pathname.startsWith('/reset-password') ||
+    pathname.startsWith('/api/agents/invite')
+
   const isApiWebhook = pathname.startsWith('/api/leads/webhook')
 
   if (!user && !isAuthRoute && !isApiWebhook) {
@@ -51,3 +70,4 @@ export async function updateSession(request: NextRequest) {
 
   return supabaseResponse
 }
+

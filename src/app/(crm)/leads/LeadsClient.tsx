@@ -57,6 +57,8 @@ export default function LeadsClient({
   const [sourceFilter, setSourceFilter] = useState<string>('ALL')
 
   const isAdmin = profile?.role === 'ADMIN'
+  const isManager = profile?.role === 'SALES_MANAGER'
+  const isLeadManager = isAdmin || isManager
 
   // Fetch leads from Supabase
   const fetchLeads = useCallback(async () => {
@@ -72,7 +74,7 @@ export default function LeadsClient({
       `)
       .order('created_at', { ascending: false })
 
-    if (!isAdmin) {
+    if (!isLeadManager) {
       query = query.eq('assigned_agent_id', profile.id)
     }
 
@@ -82,7 +84,7 @@ export default function LeadsClient({
       setLeads(data as Lead[])
     }
     setLoading(false)
-  }, [supabase, isAdmin, profile?.id])
+  }, [supabase, isLeadManager, profile?.id])
 
   useEffect(() => {
     fetchLeads()
@@ -119,7 +121,7 @@ export default function LeadsClient({
       {/* Page Header */}
       <div className="page-header">
         <div>
-          <h1 className="text-page-title">Leads</h1>
+          <h1 className="text-page-title">{isLeadManager ? 'Leads Pipeline' : 'My Leads'}</h1>
           <p className="text-meta" style={{ marginTop: 2 }}>
             {filteredLeads.length} lead{filteredLeads.length !== 1 ? 's' : ''} in pipeline
           </p>
@@ -159,6 +161,16 @@ export default function LeadsClient({
           >
             <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
           </button>
+
+          {isLeadManager && (
+            <button
+              onClick={() => router.push('/leads/import')}
+              className="btn btn-outline btn-sm"
+              title="Import Spreadsheet"
+            >
+              <span>Import XLSX</span>
+            </button>
+          )}
 
           <button
             onClick={() => setShowAddModal(true)}

@@ -10,15 +10,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    const { data: profile } = await supabase
-      .from('profiles')
-      .select('role')
-      .eq('id', user.id)
-      .single()
 
-    if (profile?.role !== 'ADMIN') {
-      return NextResponse.json({ error: 'Only administrators can update article status' }, { status: 403 })
-    }
 
     const { id, is_published, featured } = await request.json()
     if (!id) {

@@ -29,10 +29,14 @@ import {
   ArrowUp,
   ArrowDown,
   Globe,
+  TrendingUp,
+  Award,
+  BarChart3,
 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
-import type { Project, Profile } from '@/types/database'
+import type { Project, Profile, ProjectCommission } from '@/types/database'
 import ProjectEditorModal from './ProjectEditorModal'
+import ProjectCommissionsModal from './ProjectCommissionsModal'
 import ConfirmModal from '@/components/ConfirmModal'
 import LogoLoader from '@/components/LogoLoader'
 import OrderSlotManagerModal from '@/components/OrderSlotManagerModal'
@@ -47,7 +51,7 @@ interface Props {
 
 export default function ProjectsClient({ profile }: Props) {
   const supabase = createClient()
-  const isAdmin = profile?.role === 'ADMIN'
+  const isAdmin = true // Granted to all roles
 
   const [projects, setProjects] = useState<Project[]>([])
   const [loading, setLoading] = useState(true)
@@ -63,9 +67,21 @@ export default function ProjectsClient({ profile }: Props) {
   // Modal States
   const [editingProject, setEditingProject] = useState<Project | null>(null)
   const [isCreatingNew, setIsCreatingNew] = useState(false)
+  const [commissioningProject, setCommissioningProject] = useState<Project | null>(null)
   const [projectToDelete, setProjectToDelete] = useState<Project | null>(null)
   const [deleting, setDeleting] = useState(false)
   const [reorderModalOpen, setReorderModalOpen] = useState(false)
+  const [allCommissions, setAllCommissions] = useState<ProjectCommission[]>([])
+
+  const fetchCommissions = useCallback(async () => {
+    if (profile?.role !== 'ADMIN') return
+    const { data, error } = await supabase
+      .from('project_commissions')
+      .select('*')
+    if (!error && data) {
+      setAllCommissions(data as ProjectCommission[])
+    }
+  }, [supabase, profile?.role])
 
   const fetchProjects = useCallback(async () => {
     setLoading(true)
@@ -78,11 +94,52 @@ export default function ProjectsClient({ profile }: Props) {
       setProjects(data as Project[])
     }
     setLoading(false)
-  }, [supabase])
+    fetchCommissions()
+  }, [supabase, fetchCommissions])
 
   useEffect(() => {
     fetchProjects()
   }, [fetchProjects])
+
+  // Aggregate Commission Metrics
+  const commissionMetrics = useMemo(() => {
+    const totalEarned = allCommissions.reduce((sum, c) => sum + Number(c.commission_amount || 0), 0)
+    const totalUnitsSold = allCommissions.length
+
+    // Group by project_id
+    const projectTotals: Record<string, { total: number; count: number }> = {}
+    allCommissions.forEach((c) => {
+      if (!projectTotals[c.project_id]) {
+        projectTotals[c.project_id] = { total: 0, count: 0 }
+      }
+      projectTotals[c.project_id].total += Number(c.commission_amount || 0)
+      projectTotals[c.project_id].count += 1
+    })
+
+    let topProjectName = '—'
+    let topProjectAmount = 0
+    let topProjectUnits = 0
+
+    Object.entries(projectTotals).forEach(([pId, data]) => {
+      if (data.total > topProjectAmount) {
+        topProjectAmount = data.total
+        topProjectUnits = data.count
+        const found = projects.find((p) => p.id === pId)
+        topProjectName = found ? found.name_en : pId
+      }
+    })
+
+    const avgPerDeal = totalUnitsSold > 0 ? totalEarned / totalUnitsSold : 0
+
+    return {
+      totalEarned,
+      totalUnitsSold,
+      topProjectName,
+      topProjectAmount,
+      topProjectUnits,
+      avgPerDeal,
+    }
+  }, [allCommissions, projects])
 
   // Toggle publish status
   async function handleTogglePublish(project: Project) {
@@ -300,6 +357,118 @@ export default function ProjectsClient({ profile }: Props) {
       </div>
 
       <div className="page-body" style={{ paddingBottom: '30px' }}>
+        {/* Admin Commission Performance KPI Cards */}
+        {profile?.role === 'ADMIN' && (
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
+              gap: '14px',
+              marginBottom: '20px',
+            }}
+          >
+            {/* Card 1: Total Commissions Earned */}
+            <div
+              className="card"
+              style={{
+                padding: '16px 18px',
+                background: 'linear-gradient(135deg, #ECFDF5 0%, #D1FAE5 100%)',
+                border: '1px solid #A7F3D0',
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <span style={{ fontSize: '11px', fontWeight: 700, color: '#047857', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                  Total Project Commission
+                </span>
+                <div style={{ width: '28px', height: '28px', borderRadius: '8px', backgroundColor: '#A7F3D0', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#065F46' }}>
+                  <DollarSign size={15} />
+                </div>
+              </div>
+              <div style={{ fontSize: '22px', fontWeight: 800, color: '#065F46', marginTop: '6px' }}>
+                SAR {commissionMetrics.totalEarned.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              </div>
+              <div style={{ fontSize: '11.5px', color: '#059669', marginTop: '2px', fontWeight: 500 }}>
+                Across {commissionMetrics.totalUnitsSold} recorded layout / unit sale{commissionMetrics.totalUnitsSold === 1 ? '' : 's'}
+              </div>
+            </div>
+
+            {/* Card 2: Units Sold */}
+            <div
+              className="card"
+              style={{
+                padding: '16px 18px',
+                background: 'linear-gradient(135deg, #EFF6FF 0%, #DBEAFE 100%)',
+                border: '1px solid #BFDBFE',
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <span style={{ fontSize: '11px', fontWeight: 700, color: '#1D4ED8', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                  Units / Layouts Sold
+                </span>
+                <div style={{ width: '28px', height: '28px', borderRadius: '8px', backgroundColor: '#BFDBFE', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#1E40AF' }}>
+                  <Building2 size={15} />
+                </div>
+              </div>
+              <div style={{ fontSize: '22px', fontWeight: 800, color: '#1E40AF', marginTop: '6px' }}>
+                {commissionMetrics.totalUnitsSold} Sold
+              </div>
+              <div style={{ fontSize: '11.5px', color: '#2563EB', marginTop: '2px', fontWeight: 500 }}>
+                Across {projects.length} managed project developments
+              </div>
+            </div>
+
+            {/* Card 3: Top Revenue Project */}
+            <div
+              className="card"
+              style={{
+                padding: '16px 18px',
+                background: 'linear-gradient(135deg, #FFFBEB 0%, #FEF3C7 100%)',
+                border: '1px solid #FDE68A',
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <span style={{ fontSize: '11px', fontWeight: 700, color: '#B45309', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                  Top Revenue Project
+                </span>
+                <div style={{ width: '28px', height: '28px', borderRadius: '8px', backgroundColor: '#FDE68A', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#92400E' }}>
+                  <Award size={15} />
+                </div>
+              </div>
+              <div style={{ fontSize: '17px', fontWeight: 800, color: '#92400E', marginTop: '6px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={commissionMetrics.topProjectName}>
+                {commissionMetrics.topProjectName}
+              </div>
+              <div style={{ fontSize: '11.5px', color: '#B45309', marginTop: '2px', fontWeight: 500 }}>
+                {commissionMetrics.topProjectAmount > 0 ? `SAR ${commissionMetrics.topProjectAmount.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })} generated` : 'No sales recorded yet'}
+              </div>
+            </div>
+
+            {/* Card 4: Avg Commission per Deal */}
+            <div
+              className="card"
+              style={{
+                padding: '16px 18px',
+                background: 'linear-gradient(135deg, #FAF5FF 0%, #F3E8FF 100%)',
+                border: '1px solid #E9D5FF',
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <span style={{ fontSize: '11px', fontWeight: 700, color: '#7E22CE', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                  Avg Commission / Sale
+                </span>
+                <div style={{ width: '28px', height: '28px', borderRadius: '8px', backgroundColor: '#E9D5FF', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#6B21A8' }}>
+                  <TrendingUp size={15} />
+                </div>
+              </div>
+              <div style={{ fontSize: '22px', fontWeight: 800, color: '#6B21A8', marginTop: '6px' }}>
+                SAR {commissionMetrics.avgPerDeal.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+              </div>
+              <div style={{ fontSize: '11.5px', color: '#7E22CE', marginTop: '2px', fontWeight: 500 }}>
+                Average broker yield per closed deal
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Quick Filter Pills */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap', marginBottom: '12px' }}>
           <button
@@ -521,11 +690,11 @@ export default function ProjectsClient({ profile }: Props) {
                     letterSpacing: '0.03em',
                   }}
                 >
-                  <th style={{ padding: '12px 14px', width: '32%' }}>Project &amp; Code</th>
-                  <th style={{ padding: '12px 14px', width: '22%' }}>Location &amp; Dev</th>
+                  <th style={{ padding: '12px 14px', width: '30%' }}>Project &amp; Code</th>
+                  <th style={{ padding: '12px 14px', width: '20%' }}>Location &amp; Dev</th>
                   <th style={{ padding: '12px 14px', width: '18%' }}>Specs &amp; Price</th>
                   <th style={{ padding: '12px 10px', width: '8%', textAlign: 'center' }}>Media</th>
-                  <th style={{ padding: '12px 16px', width: '20%', textAlign: 'right' }}>Actions</th>
+                  <th style={{ padding: '12px 16px', width: '24%', textAlign: 'right' }}>Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -748,6 +917,29 @@ export default function ProjectsClient({ profile }: Props) {
                             <span>Manage</span>
                           </button>
 
+                          {profile?.role === 'ADMIN' && (
+                            <button
+                              type="button"
+                              onClick={() => setCommissioningProject(project)}
+                              className="btn btn-outline btn-sm"
+                              style={{
+                                fontSize: '11.5px',
+                                padding: '3px 8px',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '4px',
+                                borderColor: '#10B981',
+                                color: '#059669',
+                                backgroundColor: '#ECFDF5',
+                                fontWeight: 600,
+                              }}
+                              title="Configure Sold Layouts & Commission"
+                            >
+                              <DollarSign size={11} />
+                              <span>Commission</span>
+                            </button>
+                          )}
+
                           {project.is_published && (
                             <a
                               href={`${WEBSITE_URL}/projects/${project.id}`}
@@ -877,6 +1069,18 @@ export default function ProjectsClient({ profile }: Props) {
         onConfirm={executeDeleteProject}
         onCancel={() => setProjectToDelete(null)}
       />
+
+      {/* Project Commissions Configurator Modal (Admin Only) */}
+      {commissioningProject && (
+        <ProjectCommissionsModal
+          project={commissioningProject}
+          profile={profile}
+          onClose={() => {
+            setCommissioningProject(null)
+            fetchCommissions()
+          }}
+        />
+      )}
     </div>
   )
 }

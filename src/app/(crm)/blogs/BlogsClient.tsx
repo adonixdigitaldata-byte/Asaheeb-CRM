@@ -40,7 +40,7 @@ interface Props {
 
 export default function BlogsClient({ profile }: Props) {
   const supabase = createClient()
-  const isAdmin = profile?.role === 'ADMIN'
+  const isAdmin = true // Granted to all roles
 
   const [blogs, setBlogs] = useState<Blog[]>([])
   const [loading, setLoading] = useState(true)

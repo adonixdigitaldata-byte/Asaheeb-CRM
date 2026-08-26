@@ -6,14 +6,14 @@ import Image from 'next/image'
 import {
   LayoutDashboard,
   Users,
-  Megaphone,
   Building2,
   BookOpen,
-  Settings,
   LogOut,
-  ChevronRight,
-  TrendingUp,
   Mail,
+  FileSpreadsheet,
+  Banknote,
+  Receipt,
+  UserCheck,
 } from 'lucide-react'
 import { logout } from '@/app/login/actions'
 import type { Profile } from '@/types/database'
@@ -22,46 +22,95 @@ interface SidebarProps {
   profile: Profile | null
 }
 
-const adminNav = [
-  {
-    section: 'Overview',
-    items: [
-      { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
-      { href: '/leads', label: 'Leads Pipeline', icon: Users },
-    ],
-  },
-  {
-    section: 'Content Management',
-    items: [
-      { href: '/projects', label: 'Projects CMS', icon: Building2 },
-      { href: '/blogs', label: 'Blog Articles', icon: BookOpen },
-      { href: '/newsletter', label: 'Subscribers', icon: Mail },
-    ],
-  },
-]
-
-const agentNav = [
-  {
-    section: 'Overview',
-    items: [
-      { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
-      { href: '/leads', label: 'My Leads', icon: Users },
-    ],
-  },
-  {
-    section: 'Content & Resources',
-    items: [
-      { href: '/projects', label: 'Projects & Brochures', icon: Building2 },
-      { href: '/blogs', label: 'Market Articles', icon: BookOpen },
-      { href: '/newsletter', label: 'Subscribers', icon: Mail },
-    ],
-  },
-]
-
 export default function Sidebar({ profile }: SidebarProps) {
   const pathname = usePathname()
-  const isAdmin = profile?.role === 'ADMIN'
-  const navSections = isAdmin ? adminNav : agentNav
+  const role = profile?.role || 'AGENT'
+  const isAdmin = role === 'ADMIN'
+  const isManager = role === 'SALES_MANAGER'
+
+  const adminNav = [
+    {
+      section: 'Pipeline & Leads',
+      items: [
+        { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
+        { href: '/leads', label: 'Leads Pipeline', icon: Users },
+        { href: '/leads/import', label: 'Import Leads', icon: FileSpreadsheet },
+      ],
+    },
+    {
+      section: 'Staff & Compensation',
+      items: [
+        { href: '/team', label: 'Team Directory', icon: UserCheck },
+        { href: '/payroll', label: 'Payroll & Compensation', icon: Banknote },
+        { href: '/payslips', label: 'My Payslips', icon: Receipt },
+      ],
+    },
+    {
+      section: 'Content & Marketing',
+      items: [
+        { href: '/projects', label: 'Projects CMS', icon: Building2 },
+        { href: '/blogs', label: 'Market Insights', icon: BookOpen },
+        { href: '/newsletter', label: 'Subscribers', icon: Mail },
+      ],
+    },
+  ]
+
+  const managerNav = [
+    {
+      section: 'Pipeline & Leads',
+      items: [
+        { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
+        { href: '/leads', label: 'All Team Leads', icon: Users },
+        { href: '/leads/import', label: 'Import Leads', icon: FileSpreadsheet },
+      ],
+    },
+    {
+      section: 'Team & Personal',
+      items: [
+        { href: '/team', label: 'Team Overview', icon: UserCheck },
+        { href: '/payslips', label: 'My Payslips', icon: Receipt },
+      ],
+    },
+    {
+      section: 'Content & Marketing',
+      items: [
+        { href: '/projects', label: 'Projects CMS', icon: Building2 },
+        { href: '/blogs', label: 'Market Insights', icon: BookOpen },
+        { href: '/newsletter', label: 'Subscribers', icon: Mail },
+      ],
+    },
+  ]
+
+  const agentNav = [
+    {
+      section: 'My Pipeline',
+      items: [
+        { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
+        { href: '/leads', label: 'My Leads', icon: Users },
+      ],
+    },
+    {
+      section: 'Staff & Finance',
+      items: [
+        { href: '/payslips', label: 'My Payslips', icon: Receipt },
+      ],
+    },
+    {
+      section: 'Content & Marketing',
+      items: [
+        { href: '/projects', label: 'Projects CMS', icon: Building2 },
+        { href: '/blogs', label: 'Market Insights', icon: BookOpen },
+        { href: '/newsletter', label: 'Subscribers', icon: Mail },
+      ],
+    },
+  ]
+
+  const navSections = isAdmin ? adminNav : isManager ? managerNav : agentNav
+
+  const roleLabel =
+    isAdmin ? 'ADMIN' :
+    isManager ? 'SALES MANAGER' :
+    role === 'EMPLOYEE' ? 'EMPLOYEE' : 'SALES AGENT'
 
   return (
     <aside className="sidebar">
@@ -136,8 +185,8 @@ export default function Sidebar({ profile }: SidebarProps) {
               {profile?.name || 'Staff'}
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '4px', marginTop: '2px' }}>
-              <span className={`badge ${isAdmin ? 'badge-admin' : 'badge-agent'}`}>
-                {isAdmin ? 'ADMIN' : 'SALES AGENT'}
+              <span className={`badge ${isAdmin ? 'badge-admin' : isManager ? 'badge-admin' : 'badge-agent'}`}>
+                {roleLabel}
               </span>
             </div>
           </div>
