@@ -19,11 +19,18 @@ function getMonthsBetween(startDateStr: string, endYear: number, endMonth: numbe
   let startYear = isNaN(start.getFullYear()) ? endYear : start.getFullYear()
   let startMonth = isNaN(start.getMonth()) ? 1 : start.getMonth() + 1
 
+  const currentYear = new Date().getFullYear()
+  const currentMonth = new Date().getMonth() + 1
+
+  // Never allow backfill to exceed the current actual year and month
+  const limitYear = Math.min(endYear, currentYear)
+  const limitMonth = limitYear === currentYear ? Math.min(endMonth, currentMonth) : endMonth
+
   const results: MonthYear[] = []
   let curY = startYear
   let curM = startMonth
 
-  while (curY < endYear || (curY === endYear && curM <= endMonth)) {
+  while (curY < limitYear || (curY === limitYear && curM <= limitMonth)) {
     results.push({ year: curY, month: curM })
     curM++
     if (curM > 12) {
@@ -48,9 +55,12 @@ export async function POST(req: Request) {
 
   try {
     const body = await req.json()
+    const currentYear = new Date().getFullYear()
+    const currentMonth = new Date().getMonth() + 1
+
     const {
-      month = new Date().getMonth() + 1,
-      year = new Date().getFullYear(),
+      month = currentMonth,
+      year = currentYear,
       mode = 'CURRENT_MONTH', // 'CURRENT_MONTH' | 'BACKFILL_FROM_JOINING' | 'SINGLE_EMPLOYEE'
       employeeId = null,
       employeeIds = null,
@@ -59,6 +69,14 @@ export async function POST(req: Request) {
 
     const targetMonth = Number(month)
     const targetYear = Number(year)
+
+    // Block generating future upcoming months
+    if (targetYear > currentYear || (targetYear === currentYear && targetMonth > currentMonth)) {
+      return NextResponse.json(
+        { error: `Cannot generate payslips for upcoming future months (${targetMonth}/${targetYear}). Max allowed is current month (${currentMonth}/${currentYear}).` },
+        { status: 400 }
+      )
+    }
 
     // Use service client to bypass RLS for payroll operations
     const serviceClient = await createServiceClient()

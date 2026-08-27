@@ -4,12 +4,10 @@ import React, { useState } from 'react'
 import {
   X,
   Building,
-  MapPin,
   DollarSign,
   FileText,
   Video,
   FileDown,
-  Layers,
   Sparkles,
   Plus,
   Trash2,
@@ -22,10 +20,11 @@ import {
   ArrowUp,
   ArrowDown,
   Star,
-  GripVertical,
+  ShieldCheck,
 } from 'lucide-react'
-import type { Project, ProjectImage, ProjectVideo, Landmark, Amenity } from '@/types/database'
+import type { Project, ProjectVideo, Landmark, Amenity } from '@/types/database'
 import ImageGalleryManager from '@/components/ImageGalleryManager'
+import CmsActivityTimeline from '@/components/CmsActivityTimeline'
 
 interface Props {
   project?: Project | null
@@ -34,7 +33,7 @@ interface Props {
   onSuccess: () => void
 }
 
-type TabType = 'basic' | 'specs' | 'content' | 'amenities' | 'brochure' | 'floorplans' | 'gallery'
+type TabType = 'basic' | 'specs' | 'content' | 'amenities' | 'brochure' | 'floorplans' | 'gallery' | 'activity'
 
 function slugify(text: string): string {
   return text
@@ -44,6 +43,17 @@ function slugify(text: string): string {
     .replace(/[^a-z0-9-]/g, '')
     .replace(/--+/g, '-')
     .replace(/^-+|-+$/g, '')
+}
+
+function normalizePropertyType(typeStr?: string | null): string {
+  if (!typeStr) return 'Apartments'
+  const t = typeStr.trim().toLowerCase()
+  if (t === 'apartments' || t === 'apartment' || t.includes('apartment')) return 'Apartments'
+  if (t === 'villas' || t === 'villa' || t.includes('villa')) return 'Villas'
+  if (t === 'commercial buildings' || t === 'commercial building' || t.includes('commercial')) return 'Commercial Buildings'
+  if (t === 'residential buildings' || t === 'residential building' || t.includes('residential')) return 'Residential Buildings'
+  if (t === 'land' || t === 'lands' || t.includes('land') || t.includes('أراض')) return 'Land'
+  return typeStr
 }
 
 export default function ProjectEditorModal({
@@ -83,10 +93,10 @@ export default function ProjectEditorModal({
     payment_terms_ar: project?.payment_terms_ar || 'كاش + أقساط متاحة',
     size_en: project?.size_en || '',
     size_ar: project?.size_ar || '',
-    type_en: project?.type_en || '',
-    type_ar: project?.type_ar || '',
-    status_en: project?.status_en || 'Off-Plan',
-    status_ar: project?.status_ar || 'على المخطط',
+    type_en: project?.type_en || 'Apartments',
+    type_ar: project?.type_ar || 'شقق سكنية',
+    status_en: project?.status_en || (project?.type_en === 'Land' ? 'Ready for Development' : 'Off-Plan'),
+    status_ar: project?.status_ar || (project?.type_en === 'Land' ? 'جاهز للتطوير' : 'على المخطط'),
     expected_delivery_en: project?.expected_delivery_en || '',
     expected_delivery_ar: project?.expected_delivery_ar || '',
     units_count_en: project?.units_count_en || '',
@@ -99,6 +109,10 @@ export default function ProjectEditorModal({
     highlights_ar: project?.highlights_ar || [],
     images: project?.images || [],
     floor_plans: project?.floor_plans || [],
+    expected_commission_en: project?.expected_commission_en || '',
+    expected_commission_ar: project?.expected_commission_ar || '',
+    commission_notes_en: project?.commission_notes_en || '',
+    commission_notes_ar: project?.commission_notes_ar || '',
     video_url: project?.video_url || '',
     video_items: initialVideos,
     map_embed_url: project?.map_embed_url || '',
@@ -530,6 +544,23 @@ export default function ProjectEditorModal({
             <ImageIcon size={14} />
             <span>7. Photos ({(form.images || []).length})</span>
           </button>
+
+          {isEdit && (
+            <button
+              type="button"
+              onClick={() => setActiveTab('activity')}
+              className={`btn btn-sm ${activeTab === 'activity' ? 'btn-primary' : 'btn-ghost'}`}
+              style={{
+                fontSize: '12.5px',
+                padding: '5px 12px',
+                color: activeTab === 'activity' ? '#FFFFFF' : '#2563EB',
+                backgroundColor: activeTab === 'activity' ? undefined : '#EFF6FF',
+              }}
+            >
+              <ShieldCheck size={14} />
+              <span>8. Activity Log</span>
+            </button>
+          )}
         </div>
 
         {/* Form Body */}
@@ -749,6 +780,91 @@ export default function ProjectEditorModal({
                   </div>
                 </div>
 
+                {/* Brokerage Commission & Agency Terms */}
+                <div
+                  style={{
+                    backgroundColor: '#F0FDF4',
+                    border: '1px solid #BBF7D0',
+                    borderRadius: '8px',
+                    padding: '14px 16px',
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
+                    <DollarSign size={16} style={{ color: '#15803D' }} />
+                    <span style={{ fontWeight: 700, fontSize: '13px', color: '#14532D' }}>
+                      Agency &amp; Sales Commission Structure
+                    </span>
+                    <span style={{ fontSize: '11px', color: '#166534', backgroundColor: '#DCFCE7', padding: '1px 6px', borderRadius: '4px', fontWeight: 600 }}>
+                      Sales Agent Guidance
+                    </span>
+                  </div>
+                  <p style={{ fontSize: '11.5px', color: '#166534', marginBottom: '12px', lineHeight: '1.4' }}>
+                    Configure the project brokerage payout and specific deal limits. This is displayed to sales agents to help them prioritize focus based on project commission rates.
+                  </p>
+
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '12px' }}>
+                    <div className="form-group" style={{ marginBottom: 0 }}>
+                      <label className="form-label" style={{ fontSize: '12px', fontWeight: 700, color: '#14532D' }}>
+                        Expected Commission / Payout (EN)
+                      </label>
+                      <input
+                        type="text"
+                        value={form.expected_commission_en || ''}
+                        onChange={(e) => setForm({ ...form, expected_commission_en: e.target.value })}
+                        placeholder="e.g. SAR 10,000 / Deal or 2.5%"
+                        className="form-input"
+                        style={{ backgroundColor: '#FFFFFF' }}
+                      />
+                    </div>
+
+                    <div className="form-group" style={{ marginBottom: 0 }}>
+                      <label className="form-label" style={{ textAlign: 'right', fontSize: '12px', fontWeight: 700, color: '#14532D' }}>
+                        نسبة / مبلغ عمولة الوساطة (AR)
+                      </label>
+                      <input
+                        type="text"
+                        dir="rtl"
+                        value={form.expected_commission_ar || ''}
+                        onChange={(e) => setForm({ ...form, expected_commission_ar: e.target.value })}
+                        placeholder="مثال: ١٠,٠٠٠ ر.س لكل صفقة أو ٢.٥٪"
+                        className="form-input"
+                        style={{ backgroundColor: '#FFFFFF' }}
+                      />
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                    <div className="form-group" style={{ marginBottom: 0 }}>
+                      <label className="form-label" style={{ fontSize: '12px', fontWeight: 600, color: '#14532D' }}>
+                        Commission Notes &amp; Limits (EN)
+                      </label>
+                      <textarea
+                        rows={2}
+                        value={form.commission_notes_en || ''}
+                        onChange={(e) => setForm({ ...form, commission_notes_en: e.target.value })}
+                        placeholder="e.g. 10% for penthouses, 5% for 1BR/2BR; SAR 50,000 max cap; individual unit payout differs based on layout."
+                        className="form-input"
+                        style={{ backgroundColor: '#FFFFFF', fontSize: '12px' }}
+                      />
+                    </div>
+
+                    <div className="form-group" style={{ marginBottom: 0 }}>
+                      <label className="form-label" style={{ textAlign: 'right', fontSize: '12px', fontWeight: 600, color: '#14532D' }}>
+                        ملاحظات وشروط العمولة والحدود (AR)
+                      </label>
+                      <textarea
+                        rows={2}
+                        dir="rtl"
+                        value={form.commission_notes_ar || ''}
+                        onChange={(e) => setForm({ ...form, commission_notes_ar: e.target.value })}
+                        placeholder="مثال: ١٠٪ للشقق العلوية، ٥٪ للغرفة الواحدة، الحد الأقصى ٥٠ ألف ريال."
+                        className="form-input"
+                        style={{ backgroundColor: '#FFFFFF', fontSize: '12px' }}
+                      />
+                    </div>
+                  </div>
+                </div>
+
                 {/* Payment Terms / Options */}
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px' }}>
                   <div className="form-group">
@@ -842,77 +958,211 @@ export default function ProjectEditorModal({
                   </div>
                 </div>
 
+                {/* Predefined Standard Property Types */}
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px' }}>
                   <div className="form-group">
-                    <label className="form-label">Property Type (EN)</label>
-                    <input
-                      type="text"
-                      value={form.type_en || ''}
-                      onChange={(e) => setForm({ ...form, type_en: e.target.value })}
-                      placeholder="e.g. Luxury Residential Compound"
+                    <label className="form-label" style={{ fontWeight: 700 }}>
+                      Property Type (Standard Category) *
+                    </label>
+                    <select
                       className="form-input"
-                    />
+                      value={
+                        ['Apartments', 'Villas', 'Commercial Buildings', 'Residential Buildings', 'Land'].includes(normalizePropertyType(form.type_en))
+                          ? normalizePropertyType(form.type_en)
+                          : form.type_en
+                          ? 'CUSTOM'
+                          : 'Apartments'
+                      }
+                      onChange={(e) => {
+                        const val = e.target.value
+                        if (val === 'Apartments') {
+                          setForm({
+                            ...form,
+                            type_en: 'Apartments',
+                            type_ar: 'شقق سكنية',
+                            status_en: form.status_en === 'Ready for Development' ? 'Off-Plan' : form.status_en,
+                            status_ar: form.status_ar === 'جاهز للتطوير' ? 'على المخطط' : form.status_ar,
+                          })
+                        } else if (val === 'Villas') {
+                          setForm({
+                            ...form,
+                            type_en: 'Villas',
+                            type_ar: 'فلل سكنية',
+                            status_en: form.status_en === 'Ready for Development' ? 'Off-Plan' : form.status_en,
+                            status_ar: form.status_ar === 'جاهز للتطوير' ? 'على المخطط' : form.status_ar,
+                          })
+                        } else if (val === 'Commercial Buildings') {
+                          setForm({
+                            ...form,
+                            type_en: 'Commercial Buildings',
+                            type_ar: 'مباني تجارية',
+                            status_en: form.status_en === 'Ready for Development' ? 'Off-Plan' : form.status_en,
+                            status_ar: form.status_ar === 'جاهز للتطوير' ? 'على المخطط' : form.status_ar,
+                          })
+                        } else if (val === 'Residential Buildings') {
+                          setForm({
+                            ...form,
+                            type_en: 'Residential Buildings',
+                            type_ar: 'عمائر سكنية',
+                            status_en: form.status_en === 'Ready for Development' ? 'Off-Plan' : form.status_en,
+                            status_ar: form.status_ar === 'جاهز للتطوير' ? 'على المخطط' : form.status_ar,
+                          })
+                        } else if (val === 'Land') {
+                          setForm({
+                            ...form,
+                            type_en: 'Land',
+                            type_ar: 'أراضي',
+                            status_en: 'Ready for Development',
+                            status_ar: 'جاهز للتطوير',
+                          })
+                        } else if (val === 'CUSTOM') {
+                          setForm({ ...form, type_en: '', type_ar: '' })
+                        }
+                      }}
+                    >
+                      <option value="Apartments">Apartments (شقق سكنية)</option>
+                      <option value="Villas">Villas (فلل سكنية)</option>
+                      <option value="Commercial Buildings">Commercial Buildings (مباني تجارية)</option>
+                      <option value="Residential Buildings">Residential Buildings (عمائر سكنية)</option>
+                      <option value="Land">Land (أراضي)</option>
+                      <option value="CUSTOM">Custom / Other Category...</option>
+                    </select>
+                    <span style={{ fontSize: '11px', color: '#64748B', marginTop: '2px' }}>
+                      Standardized category used for website filters and marketing tags.
+                    </span>
                   </div>
 
                   <div className="form-group">
-                    <label className="form-label" style={{ textAlign: 'right' }}>نوع العقار (AR)</label>
+                    <label className="form-label" style={{ textAlign: 'right', fontWeight: 700 }}>نوع العقار (بالعربية) *</label>
                     <input
                       type="text"
                       dir="rtl"
-                      value={form.type_ar || ''}
+                      required
+                      value={form.type_ar || 'شقق سكنية'}
                       onChange={(e) => setForm({ ...form, type_ar: e.target.value })}
-                      placeholder="مثال: مجمع سكني فاخر"
+                      placeholder="مثال: شقق سكنية / فلل / أراضي"
                       className="form-input"
                     />
                   </div>
                 </div>
 
-                {/* Project Status & Expected Delivery */}
+                {/* If custom selected */}
+                {!['Apartments', 'Villas', 'Commercial Buildings', 'Residential Buildings', 'Land'].includes(form.type_en || '') && (
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px', backgroundColor: '#F8FAFC', padding: '10px 12px', borderRadius: '8px', border: '1px solid #E2E8F0' }}>
+                    <div className="form-group" style={{ marginBottom: 0 }}>
+                      <label className="form-label">Custom Property Type (EN)</label>
+                      <input
+                        type="text"
+                        value={form.type_en || ''}
+                        onChange={(e) => setForm({ ...form, type_en: e.target.value })}
+                        placeholder="e.g. Mixed-Use Waterfront"
+                        className="form-input"
+                      />
+                    </div>
+                    <div className="form-group" style={{ marginBottom: 0 }}>
+                      <label className="form-label" style={{ textAlign: 'right' }}>نوع العقار المخصص (AR)</label>
+                      <input
+                        type="text"
+                        dir="rtl"
+                        value={form.type_ar || ''}
+                        onChange={(e) => setForm({ ...form, type_ar: e.target.value })}
+                        placeholder="مثال: مشروع متعدد الاستخدامات"
+                        className="form-input"
+                      />
+                    </div>
+                  </div>
+                )}
+
+                {/* Project Status & Expected Delivery (Adapts automatically if Property Type is Land) */}
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '14px' }}>
                   <div className="form-group">
-                    <label className="form-label">Project Status (EN) *</label>
-                    <select
-                      className="form-input"
-                      value={
-                        form.status_en === 'Under Construction'
-                          ? 'Under Construction'
-                          : form.status_en === 'Ready to Move' || form.status_en === 'Ready'
-                          ? 'Ready to Move'
-                          : 'Off-Plan'
-                      }
-                      onChange={(e) => {
-                        const val = e.target.value
-                        let arVal = 'على المخطط'
-                        if (val === 'Under Construction') arVal = 'تحت الإنشاء'
-                        else if (val === 'Ready to Move') arVal = 'جاهز للسكن'
-                        setForm({ ...form, status_en: val, status_ar: arVal })
-                      }}
-                    >
-                      <option value="Off-Plan">Off-Plan (على المخطط)</option>
-                      <option value="Under Construction">Under Construction (تحت الإنشاء)</option>
-                      <option value="Ready to Move">Ready to Move (جاهز للسكن)</option>
-                    </select>
+                    <label className="form-label">
+                      {form.type_en === 'Land' ? 'Land Development Status (EN) *' : 'Project Status (EN) *'}
+                    </label>
+                    {form.type_en === 'Land' ? (
+                      <select
+                        className="form-input"
+                        value={
+                          form.status_en === 'Off-Plan / Subdivided' || form.status_en === 'Off-Plan'
+                            ? 'Off-Plan / Subdivided'
+                            : form.status_en === 'Raw Land / Zoned'
+                            ? 'Raw Land / Zoned'
+                            : form.status_en === 'Under Development'
+                            ? 'Under Development'
+                            : form.status_en === 'Sold Out'
+                            ? 'Sold Out'
+                            : 'Ready for Development'
+                        }
+                        onChange={(e) => {
+                          const val = e.target.value
+                          let arVal = 'جاهز للتطوير'
+                          if (val === 'Off-Plan / Subdivided') arVal = 'مخطط معتمد / على المخطط'
+                          else if (val === 'Raw Land / Zoned') arVal = 'أرض خام معتمدة'
+                          else if (val === 'Under Development') arVal = 'قيد التطوير والتجهيز'
+                          else if (val === 'Sold Out') arVal = 'تم البيع بالكامل'
+                          setForm({ ...form, status_en: val, status_ar: arVal })
+                        }}
+                      >
+                        <option value="Ready for Development">Ready for Development (جاهز للتطوير)</option>
+                        <option value="Off-Plan / Subdivided">Off-Plan / Subdivided (مخطط معتمد / على المخطط)</option>
+                        <option value="Raw Land / Zoned">Raw Land / Zoned (أرض خام معتمدة)</option>
+                        <option value="Under Development">Under Development (قيد التطوير والتجهيز)</option>
+                        <option value="Sold Out">Sold Out (تم البيع بالكامل)</option>
+                      </select>
+                    ) : (
+                      <select
+                        className="form-input"
+                        value={
+                          form.status_en === 'Under Construction'
+                            ? 'Under Construction'
+                            : form.status_en === 'Ready to Move' || form.status_en === 'Ready'
+                            ? 'Ready to Move'
+                            : form.status_en === 'Completed'
+                            ? 'Completed'
+                            : form.status_en === 'Sold Out'
+                            ? 'Sold Out'
+                            : 'Off-Plan'
+                        }
+                        onChange={(e) => {
+                          const val = e.target.value
+                          let arVal = 'على المخطط'
+                          if (val === 'Under Construction') arVal = 'تحت الإنشاء'
+                          else if (val === 'Ready to Move') arVal = 'جاهز للسكن'
+                          else if (val === 'Completed') arVal = 'مكتمل'
+                          else if (val === 'Sold Out') arVal = 'تم البيع بالكامل'
+                          setForm({ ...form, status_en: val, status_ar: arVal })
+                        }}
+                      >
+                        <option value="Off-Plan">Off-Plan (على المخطط)</option>
+                        <option value="Under Construction">Under Construction (تحت الإنشاء)</option>
+                        <option value="Ready to Move">Ready to Move (جاهز للسكن)</option>
+                        <option value="Completed">Completed (مكتمل)</option>
+                        <option value="Sold Out">Sold Out (تم البيع بالكامل)</option>
+                      </select>
+                    )}
                   </div>
 
                   <div className="form-group">
-                    <label className="form-label" style={{ textAlign: 'right' }}>حالة المشروع (بالعربية) *</label>
+                    <label className="form-label" style={{ textAlign: 'right' }}>
+                      {form.type_en === 'Land' ? 'حالة الأرض / المخطط (AR) *' : 'حالة المشروع (بالعربية) *'}
+                    </label>
                     <input
                       type="text"
                       dir="rtl"
-                      value={form.status_ar || 'على المخطط'}
+                      value={form.status_ar || (form.type_en === 'Land' ? 'جاهز للتطوير' : 'على المخطط')}
                       onChange={(e) => setForm({ ...form, status_ar: e.target.value })}
-                      placeholder="مثال: على المخطط / تحت الإنشاء / جاهز للسكن"
+                      placeholder="مثال: جاهز للتطوير / على المخطط / جاهز للسكن"
                       className="form-input"
                     />
                   </div>
 
                   <div className="form-group">
-                    <label className="form-label">Delivery Date (EN / AR)</label>
+                    <label className="form-label">Delivery / Handover Date</label>
                     <input
                       type="text"
                       value={form.expected_delivery_en || ''}
                       onChange={(e) => setForm({ ...form, expected_delivery_en: e.target.value })}
-                      placeholder="e.g. Q4 2026 / جاهز للتسليم"
+                      placeholder={form.type_en === 'Land' ? 'e.g. Ready / تسليم فوري' : 'e.g. Q4 2026 / جاهز للتسليم'}
                       className="form-input"
                     />
                   </div>
@@ -1624,26 +1874,42 @@ export default function ProjectEditorModal({
                             display: 'flex',
                             alignItems: 'center',
                             justifyContent: 'space-between',
+                            gap: '10px',
                             padding: '8px 12px',
                             backgroundColor: isFirst ? '#F0FDF4' : '#FFFFFF',
                             border: `1px solid ${isFirst ? '#86EFAC' : '#E2E8F0'}`,
                             borderRadius: '6px',
                             fontSize: '12.5px',
                             transition: 'background-color 0.15s ease, border-color 0.15s ease',
+                            overflow: 'hidden',
                           }}
                         >
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flex: 1, minWidth: 0 }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flex: 1, minWidth: 0, overflow: 'hidden' }}>
                             <span style={{ fontSize: '11px', fontWeight: 700, color: isFirst ? '#15803D' : '#2563EB', backgroundColor: isFirst ? '#DCFCE7' : '#EFF6FF', border: `1px solid ${isFirst ? '#BBF7D0' : '#DBEAFE'}`, padding: '2px 7px', borderRadius: '4px', flexShrink: 0 }}>
                               {isFirst ? '⭐ 1st / Primary' : `#${idx + 1}`}
                             </span>
-                            <span style={{ fontWeight: 600, color: '#0F172A', whiteSpace: 'nowrap' }}>
-                              {vid.titleEn || `Video ${idx + 1}`}
-                            </span>
-                            {vid.titleAr && (
-                              <span style={{ color: '#64748B', whiteSpace: 'nowrap' }}>({vid.titleAr})</span>
+                            {vid.titleEn && (
+                              <span style={{ fontWeight: 600, color: '#0F172A', whiteSpace: 'nowrap', flexShrink: 0 }}>
+                                {vid.titleEn}
+                              </span>
                             )}
-                            <span style={{ fontSize: '11.5px', color: '#94A3B8', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                              — {vid.url}
+                            {vid.titleAr && (
+                              <span style={{ color: '#64748B', whiteSpace: 'nowrap', flexShrink: 0 }}>({vid.titleAr})</span>
+                            )}
+                            <span
+                              style={{
+                                fontSize: '11.5px',
+                                color: '#64748B',
+                                overflow: 'hidden',
+                                textOverflow: 'ellipsis',
+                                whiteSpace: 'nowrap',
+                                flex: 1,
+                                minWidth: 0,
+                                display: 'block',
+                              }}
+                              title={vid.url}
+                            >
+                              {vid.url}
                             </span>
                           </div>
                           <div style={{ display: 'flex', alignItems: 'center', gap: '4px', flexShrink: 0 }}>
@@ -1736,6 +2002,15 @@ export default function ProjectEditorModal({
                 images={form.images || []}
                 onChange={(updatedImages) => setForm({ ...form, images: updatedImages })}
                 folder="asaheeb/projects"
+              />
+            )}
+
+            {/* TAB 8: ACTIVITY LOG */}
+            {activeTab === 'activity' && project && (
+              <CmsActivityTimeline
+                entityType="PROJECT"
+                entityId={project.id}
+                entityTitle={project.name_en}
               />
             )}
           </div>

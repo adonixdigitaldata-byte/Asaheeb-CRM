@@ -24,6 +24,8 @@ import {
   Loader2,
   ExternalLink,
   Globe,
+  UserCheck,
+  User,
 } from 'lucide-react'
 import type {
   Lead,
@@ -44,7 +46,7 @@ interface Props {
   lead: Lead
   profile: Profile
   stages: LeadStage[]
-  agents: { id: string; name: string }[]
+  agents: { id: string; name: string; email?: string }[]
   notes: LeadNote[]
   followups: LeadFollowup[]
   activities: LeadActivity[]
@@ -65,6 +67,10 @@ export default function LeadDetailClient({
 }: Props) {
   const router = useRouter()
   const supabase = createClient()
+
+  const isAdmin = profile?.role === 'ADMIN'
+  const isManager = profile?.role === 'SALES_MANAGER'
+  const isLeadManager = isAdmin || isManager
 
   // Local state for instantaneous optimistic UI updates
   const [lead, setLead] = useState<Lead>(initialLead)
@@ -160,8 +166,6 @@ export default function LeadDetailClient({
   const [isDeleting, setIsDeleting] = useState(false)
   const [noteIdToDelete, setNoteIdToDelete] = useState<string | null>(null)
   const [followupIdToDelete, setFollowupIdToDelete] = useState<string | null>(null)
-
-  const isAdmin = profile?.role === 'ADMIN'
 
   // Format exact timestamp
   function formatExactTime(dateStr: string) {
@@ -499,25 +503,29 @@ export default function LeadDetailClient({
             </select>
           </div>
 
-          {/* Agent Selector (Admin only) */}
-          {isAdmin && (
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-              <span style={{ fontSize: 12, color: '#64748B', fontWeight: 600 }}>Agent:</span>
+          {/* Agent Selector / Display */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <span style={{ fontSize: 12, color: '#64748B', fontWeight: 600 }}>Assigned Agent:</span>
+            {isLeadManager ? (
               <select
                 value={lead.assigned_agent_id || ''}
                 onChange={(e) => handleAgentChange(e.target.value)}
                 className="form-select"
-                style={{ width: 'auto', fontSize: 12.5, padding: '5px 10px' }}
+                style={{ width: 'auto', fontSize: 12.5, padding: '5px 10px', height: 32 }}
               >
-                <option value="">Unassigned</option>
+                <option value="">⚡ Unassigned / Pool</option>
                 {agents.map((a) => (
                   <option key={a.id} value={a.id}>
                     {a.name}
                   </option>
                 ))}
               </select>
-            </div>
-          )}
+            ) : (
+              <span className="badge badge-secondary" style={{ fontSize: 12, fontWeight: 700, backgroundColor: '#EFF6FF', color: '#1E40AF', border: '1px solid #BFDBFE' }}>
+                {lead.assigned_agent?.name || agents.find((a) => a.id === lead.assigned_agent_id)?.name || 'Unassigned'}
+              </span>
+            )}
+          </div>
 
           {/* Delete Lead Button */}
           {isAdmin && (
@@ -539,6 +547,109 @@ export default function LeadDetailClient({
         <div className="rg-3" style={{ gridTemplateColumns: '340px 1fr' }}>
           {/* Left Column: Lead Info */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+            
+            {/* Assigned Sales Agent Card */}
+            <div className="card" style={{ padding: '16px 20px', borderLeft: '4px solid #0284C7' }}>
+              <div className="flex items-center justify-between" style={{ marginBottom: 12, borderBottom: '1px solid #F1F5F9', paddingBottom: 8 }}>
+                <h3 className="text-section-header" style={{ display: 'flex', alignItems: 'center', gap: 6, margin: 0 }}>
+                  <UserCheck size={16} style={{ color: '#0284C7' }} />
+                  <span>Assigned Sales Agent</span>
+                </h3>
+                {isLeadManager && (
+                  <span style={{ fontSize: 11, color: '#64748B', fontWeight: 500 }}>
+                    {lead.assigned_agent_id ? 'Re-assignable' : 'Unassigned'}
+                  </span>
+                )}
+              </div>
+
+              {(() => {
+                const assignedAgentObj = lead.assigned_agent || agents.find((a) => a.id === lead.assigned_agent_id)
+                if (assignedAgentObj) {
+                  return (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                        <div style={{
+                          width: 40,
+                          height: 40,
+                          borderRadius: '50%',
+                          backgroundColor: '#1E3A8A',
+                          color: '#FFFFFF',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          fontWeight: 800,
+                          fontSize: 14,
+                          flexShrink: 0,
+                          boxShadow: '0 2px 6px rgba(30, 58, 138, 0.2)',
+                        }}>
+                          {assignedAgentObj.name ? assignedAgentObj.name.substring(0, 2).toUpperCase() : 'AG'}
+                        </div>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ fontWeight: 700, color: '#0F172A', fontSize: 14, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                            {assignedAgentObj.name}
+                          </div>
+                          {assignedAgentObj.email && (
+                            <div style={{ fontSize: 12, color: '#64748B', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                              {assignedAgentObj.email}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+
+                      {isLeadManager && (
+                        <div style={{ marginTop: 4 }}>
+                          <label style={{ fontSize: 11, fontWeight: 600, color: '#64748B', marginBottom: 4, display: 'block' }}>Change Assigned Agent:</label>
+                          <select
+                            value={lead.assigned_agent_id || ''}
+                            onChange={(e) => handleAgentChange(e.target.value)}
+                            className="form-select"
+                            style={{ width: '100%', fontSize: 12, height: 32 }}
+                          >
+                            <option value="">Remove Assignment (Unassign)</option>
+                            {agents.map((a) => (
+                              <option key={a.id} value={a.id}>
+                                {a.name}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      )}
+                    </div>
+                  )
+                }
+
+                return (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                    <div style={{ color: '#D97706', fontSize: 13, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6, backgroundColor: '#FFFBEB', padding: '8px 12px', borderRadius: 6, border: '1px solid #FDE68A' }}>
+                      <span>⚠️ Unassigned Lead</span>
+                    </div>
+                    {isLeadManager ? (
+                      <div>
+                        <label style={{ fontSize: 11, fontWeight: 600, color: '#64748B', marginBottom: 4, display: 'block' }}>Assign Sales Agent:</label>
+                        <select
+                          value=""
+                          onChange={(e) => handleAgentChange(e.target.value)}
+                          className="form-select"
+                          style={{ width: '100%', fontSize: 12, height: 32 }}
+                        >
+                          <option value="">Select Agent to Assign...</option>
+                          {agents.map((a) => (
+                            <option key={a.id} value={a.id}>
+                              {a.name}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    ) : (
+                      <div style={{ fontSize: 12, color: '#94A3B8' }}>
+                        No sales agent has been assigned to this lead yet.
+                      </div>
+                    )}
+                  </div>
+                )
+              })()}
+            </div>
+
             {/* Contact Details Card */}
             <div className="card">
               <div className="flex items-center justify-between" style={{ marginBottom: 12, borderBottom: '1px solid #F1F5F9', paddingBottom: 8 }}>

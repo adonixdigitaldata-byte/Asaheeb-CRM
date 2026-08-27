@@ -22,6 +22,7 @@ import {
   FileText,
   ExternalLink,
   Globe,
+  ShieldCheck,
 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import type { Blog, Profile } from '@/types/database'
@@ -30,9 +31,9 @@ import ConfirmModal from '@/components/ConfirmModal'
 import LogoLoader from '@/components/LogoLoader'
 import OrderSlotManagerModal from '@/components/OrderSlotManagerModal'
 import Pagination from '@/components/Pagination'
+import CmsActivityTimeline from '@/components/CmsActivityTimeline'
 
 const WEBSITE_URL = process.env.NEXT_PUBLIC_WEBSITE_URL || 'https://asaheebrealestate.com'
-const PAGE_SIZE = 15
 
 interface Props {
   profile: Profile
@@ -45,6 +46,7 @@ export default function BlogsClient({ profile }: Props) {
   const [blogs, setBlogs] = useState<Blog[]>([])
   const [loading, setLoading] = useState(true)
   const [currentPage, setCurrentPage] = useState(1)
+  const [pageSize, setPageSize] = useState(20)
   const [search, setSearch] = useState('')
   const [categoryFilter, setCategoryFilter] = useState('ALL')
   const [statusFilter, setStatusFilter] = useState('ALL')
@@ -52,6 +54,7 @@ export default function BlogsClient({ profile }: Props) {
   // Modal States
   const [editingBlog, setEditingBlog] = useState<Blog | null>(null)
   const [isCreatingNew, setIsCreatingNew] = useState(false)
+  const [activityBlog, setActivityBlog] = useState<Blog | null>(null)
   const [blogToDelete, setBlogToDelete] = useState<Blog | null>(null)
   const [deleting, setDeleting] = useState(false)
   const [reorderModalOpen, setReorderModalOpen] = useState(false)
@@ -203,9 +206,9 @@ export default function BlogsClient({ profile }: Props) {
     })
   }, [blogs, search, categoryFilter, statusFilter])
 
-  const totalPages = Math.ceil(filteredBlogs.length / PAGE_SIZE) || 1
+  const totalPages = Math.ceil(filteredBlogs.length / pageSize) || 1
   const effectivePage = Math.min(currentPage, totalPages)
-  const displayedBlogs = filteredBlogs.slice((effectivePage - 1) * PAGE_SIZE, effectivePage * PAGE_SIZE)
+  const displayedBlogs = filteredBlogs.slice((effectivePage - 1) * pageSize, effectivePage * pageSize)
 
   const publishedCount = blogs.filter((b) => b.is_published).length
   const featuredCount = blogs.filter((b) => b.featured).length
@@ -793,6 +796,16 @@ export default function BlogsClient({ profile }: Props) {
                             <span>Edit</span>
                           </button>
 
+                          <button
+                            type="button"
+                            onClick={() => setActivityBlog(blog)}
+                            className="btn btn-ghost btn-icon btn-sm"
+                            style={{ color: '#475569', padding: '2px' }}
+                            title="View Article Activity History & Audit Log"
+                          >
+                            <ShieldCheck size={13} />
+                          </button>
+
                           {blog.is_published && (
                             <a
                               href={`${WEBSITE_URL}/blog/${blog.id}`}
@@ -825,12 +838,14 @@ export default function BlogsClient({ profile }: Props) {
               </tbody>
             </table>
 
-            {/* 15-Item Pagination with Smooth Auto-Scroll to Top */}
+            {/* Configurable Pagination with Smooth Auto-Scroll to Top */}
             <Pagination
               currentPage={effectivePage}
               totalItems={filteredBlogs.length}
-              pageSize={PAGE_SIZE}
+              pageSize={pageSize}
               onPageChange={(p) => setCurrentPage(p)}
+              onPageSizeChange={(s) => setPageSize(s)}
+              pageSizeOptions={[20, 50, 100, 500]}
               itemLabel="articles"
             />
           </div>
@@ -921,6 +936,56 @@ export default function BlogsClient({ profile }: Props) {
         onConfirm={executeDeleteBlog}
         onCancel={() => setBlogToDelete(null)}
       />
+
+      {/* Blog Activity History Modal */}
+      {activityBlog && (
+        <div className="modal-overlay" style={{ zIndex: 95 }}>
+          <div
+            className="modal-content"
+            style={{
+              maxWidth: '680px',
+              width: '95vw',
+              maxHeight: '85vh',
+              borderRadius: '12px',
+              display: 'flex',
+              flexDirection: 'column',
+            }}
+          >
+            <div className="modal-header" style={{ padding: '16px 20px', borderBottom: '1px solid var(--border)' }}>
+              <div>
+                <h3 style={{ fontSize: '16px', fontWeight: 800, color: '#0F172A', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <ShieldCheck size={18} style={{ color: '#2563EB' }} />
+                  <span>Activity History: {activityBlog.title_en}</span>
+                </h3>
+                <p style={{ fontSize: '12px', color: '#64748B', marginTop: '2px' }}>
+                  Audit log of all edits, cover photo updates, and publish changes made to this article
+                </p>
+              </div>
+              <button onClick={() => setActivityBlog(null)} className="btn btn-ghost btn-icon">
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="modal-body" style={{ padding: '18px 20px', overflowY: 'auto', flex: 1 }}>
+              <CmsActivityTimeline
+                entityType="BLOG"
+                entityId={activityBlog.id}
+                entityTitle={activityBlog.title_en}
+              />
+            </div>
+
+            <div className="modal-footer" style={{ padding: '12px 20px', borderTop: '1px solid var(--border)' }}>
+              <button
+                type="button"
+                onClick={() => setActivityBlog(null)}
+                className="btn btn-outline btn-sm"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

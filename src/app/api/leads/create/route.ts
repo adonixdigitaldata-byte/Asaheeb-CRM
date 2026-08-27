@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient, createServiceClient } from '@/lib/supabase/server'
+import { getNextRoundRobinAgent } from '@/lib/round-robin'
 
 export async function POST(request: NextRequest) {
   const supabaseUser = await createClient()
@@ -22,13 +23,27 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Name is required' }, { status: 400 })
   }
 
-  // Auto-assign to self if current user is AGENT and no agent was explicitly selected
-  let targetAgentId = assigned_agent_id || null
-  if (profile?.role === 'AGENT' && !targetAgentId) {
-    targetAgentId = user.id
-  }
-
   const supabaseService = await createServiceClient()
+
+  let targetAgentId = assigned_agent_id || null
+  let autoAssignedAgent: any = null
+
+  // 1. Auto-assign to self if current user is an AGENT and no agent was explicitly selected
+  if (profile?.role === 'AGENT' && (!targetAgentId || targetAgentId === 'AUTO')) {
+    targetAgentId = user.id
+  } 
+  // 2. If left unassigned, empty, or 'AUTO', run Round-Robin among available sales agents
+  else if (!targetAgentId || targetAgentId === 'AUTO') {
+    const nextAgent = await getNextRoundRobinAgent(supabaseService)
+    if (nextAgent) {
+      targetAgentId = nextAgent.id
+      autoAssignedAgent = nextAgent
+    } else {
+      targetAgentId = null
+    }
+  } else if (targetAgentId === 'UNASSIGNED') {
+    targetAgentId = null
+  }
 
   const payload: any = {
     name: name.trim(),
@@ -55,12 +70,31 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: insertError.message }, { status: 400 })
   }
 
+  // Update open_leads_count on assigned agent profile
+  if (targetAgentId) {
+    const { data: agentProfile } = await supabaseService
+      .from('profiles')
+      .select('open_leads_count')
+      .eq('id', targetAgentId)
+      .single()
+
+    const currentCount = Number(agentProfile?.open_leads_count) || 0
+    await supabaseService
+      .from('profiles')
+      .update({ open_leads_count: currentCount + 1 })
+      .eq('id', targetAgentId)
+  }
+
   // Log activity
   await supabaseService.from('lead_activities').insert({
     lead_id: lead.id,
     activity_type: 'LEAD_CREATED',
     performed_by: user.id,
-    metadata: { source: source || 'MANUAL' },
+    metadata: {
+      source: source || 'MANUAL',
+      round_robin_assigned: !!autoAssignedAgent,
+      assigned_agent_name: autoAssignedAgent ? autoAssignedAgent.name : null,
+    },
   })
 
   // Add note if provided

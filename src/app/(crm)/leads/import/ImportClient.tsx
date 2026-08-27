@@ -162,8 +162,15 @@ export default function ImportClient({ stages, agents, batches: initialBatches, 
     let successCount = 0
     let errorCount = 0
 
-    // Insert leads in batches
+    // Insert leads with round-robin fallback for unassigned entries
+    let rrIndex = 0
     for (const row of validRows) {
+      let targetAgentId = row.assigned_agent_id !== undefined ? (row.assigned_agent_id || null) : (agentId || null)
+      if (!targetAgentId && agents.length > 0) {
+        targetAgentId = agents[rrIndex % agents.length].id
+        rrIndex++
+      }
+
       const { error } = await supabase.from('leads').insert({
         source: 'XLSX_IMPORT',
         name: row.name || 'Lead',
@@ -174,7 +181,7 @@ export default function ImportClient({ stages, agents, batches: initialBatches, 
         potential_value: row.potential_value || null,
         form_data: {},
         stage_id: row.stage_id || stageId,
-        assigned_agent_id: row.assigned_agent_id !== undefined ? (row.assigned_agent_id || null) : (agentId || null),
+        assigned_agent_id: targetAgentId,
         import_batch_id: batch?.id,
       })
       if (error) errorCount++

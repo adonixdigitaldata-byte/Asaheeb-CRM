@@ -327,6 +327,39 @@ export default function TeamMemberDetailClient({
                   <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                     <Calendar size={14} /> Joined {new Date(member.created_at).toLocaleDateString()}
                   </div>
+                  {(salaryProfile?.pan_or_iqama || member.iqama_no || salaryProfile?.iqama_expiry_date || member.iqama_expiry_date) && (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                      <Shield size={14} style={{ color: '#0284C7' }} />
+                      <span>Iqama / ID: <strong>{salaryProfile?.pan_or_iqama || member.iqama_no || 'Recorded'}</strong></span>
+                      {(() => {
+                        const exp = salaryProfile?.iqama_expiry_date || member.iqama_expiry_date
+                        if (!exp) return null
+                        const today = new Date()
+                        today.setHours(0, 0, 0, 0)
+                        const expDate = new Date(exp)
+                        const diffDays = Math.ceil((expDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24))
+                        if (diffDays < 0) {
+                          return (
+                            <span style={{ fontSize: 11, fontWeight: 700, color: '#DC2626', backgroundColor: '#FEF2F2', padding: '1px 6px', borderRadius: 4, border: '1px solid #FECACA' }}>
+                              🔴 Expired ({exp})
+                            </span>
+                          )
+                        }
+                        if (diffDays <= 30) {
+                          return (
+                            <span style={{ fontSize: 11, fontWeight: 700, color: '#D97706', backgroundColor: '#FFFBEB', padding: '1px 6px', borderRadius: 4, border: '1px solid #FDE68A' }}>
+                              ⚠️ Expires in {diffDays}d ({exp})
+                            </span>
+                          )
+                        }
+                        return (
+                          <span style={{ fontSize: 11, fontWeight: 600, color: '#166534', backgroundColor: '#F0FDF4', padding: '1px 6px', borderRadius: 4, border: '1px solid #BBF7D0' }}>
+                            ✓ Valid until {exp}
+                          </span>
+                        )
+                      })()}
+                    </div>
+                  )}
                 </div>
               </div>
             </div>

@@ -8,6 +8,8 @@ interface PaginationProps {
   totalItems: number
   pageSize?: number
   onPageChange: (page: number) => void
+  onPageSizeChange?: (pageSize: number) => void
+  pageSizeOptions?: number[]
   itemLabel?: string
 }
 
@@ -16,11 +18,13 @@ export default function Pagination({
   totalItems,
   pageSize = 15,
   onPageChange,
+  onPageSizeChange,
+  pageSizeOptions = [15, 20, 50, 100, 500],
   itemLabel = 'items',
 }: PaginationProps) {
   const totalPages = Math.ceil(totalItems / pageSize)
 
-  if (totalPages <= 1) return null
+  if (totalItems === 0) return null
 
   function handlePageChange(newPage: number) {
     if (newPage < 1 || newPage > totalPages || newPage === currentPage) return
@@ -30,7 +34,7 @@ export default function Pagination({
     }
   }
 
-  const startIdx = (currentPage - 1) * pageSize + 1
+  const startIdx = totalItems === 0 ? 0 : (currentPage - 1) * pageSize + 1
   const endIdx = Math.min(currentPage * pageSize, totalItems)
 
   // Generate page numbers
@@ -53,15 +57,49 @@ export default function Pagination({
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'space-between',
-        padding: '14px 16px',
+        padding: '12px 16px',
         backgroundColor: '#FFFFFF',
         borderTop: '1px solid var(--border)',
         flexWrap: 'wrap',
         gap: '12px',
       }}
     >
-      <div style={{ fontSize: '12.5px', color: '#64748B' }}>
-        Showing <strong>{startIdx}</strong>–<strong>{endIdx}</strong> of <strong>{totalItems}</strong> {itemLabel}
+      <div style={{ display: 'flex', alignItems: 'center', gap: '14px', flexWrap: 'wrap' }}>
+        <div style={{ fontSize: '12.5px', color: '#64748B' }}>
+          Showing <strong>{startIdx}</strong>–<strong>{endIdx}</strong> of <strong>{totalItems}</strong> {itemLabel}
+        </div>
+
+        {onPageSizeChange && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', color: '#64748B' }}>
+            <span>Per page:</span>
+            <select
+              value={pageSize}
+              onChange={(e) => {
+                const newSize = Number(e.target.value)
+                onPageSizeChange(newSize)
+                onPageChange(1)
+              }}
+              style={{
+                height: '28px',
+                padding: '2px 8px',
+                fontSize: '12px',
+                fontWeight: 600,
+                color: '#1E293B',
+                borderRadius: '6px',
+                border: '1px solid #CBD5E1',
+                backgroundColor: '#F8FAFC',
+                cursor: 'pointer',
+                outline: 'none',
+              }}
+            >
+              {pageSizeOptions.map((opt) => (
+                <option key={opt} value={opt}>
+                  {opt}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
       </div>
 
       <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>

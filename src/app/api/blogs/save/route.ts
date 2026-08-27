@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient, createServiceClient } from '@/lib/supabase/server'
+import { logCmsActivity } from '@/lib/cms-activity'
 
 export async function POST(request: NextRequest) {
   try {
@@ -10,7 +11,16 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
+    const serviceClient = await createServiceClient()
 
+    const { data: userProfile } = await serviceClient
+      .from('profiles')
+      .select('name, email')
+      .eq('id', user.id)
+      .single()
+
+    const actorName = userProfile?.name || user.email?.split('@')[0] || 'Team Member'
+    const actorEmail = userProfile?.email || user.email || null
 
     const body = await request.json()
     const {
@@ -57,6 +67,15 @@ export async function POST(request: NextRequest) {
 
     const slug = id.trim().toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-_]/g, '')
 
+    const targetLookupId = original_id || slug
+    const { data: existingBlog } = await serviceClient
+      .from('blogs')
+      .select('*')
+      .eq('id', targetLookupId)
+      .maybeSingle()
+
+    const isNew = !existingBlog
+
     const payload = {
       id: slug,
       category: category?.trim() || 'guide',
@@ -87,7 +106,6 @@ export async function POST(request: NextRequest) {
       updated_at: new Date().toISOString(),
     }
 
-    const serviceClient = await createServiceClient()
     const { data: blog, error } = await serviceClient
       .from('blogs')
       .upsert(payload, { onConflict: 'id' })
@@ -102,8 +120,80 @@ export async function POST(request: NextRequest) {
       await serviceClient.from('blogs').delete().eq('id', original_id)
     }
 
+    if (isNew) {
+      await logCmsActivity({
+        entityType: 'BLOG',
+        entityId: slug,
+        actionType: 'CREATED',
+        actorId: user.id,
+        actorName,
+        actorEmail,
+        description: `Created new blog article "${title_en}" (${category_en || 'Article'})`,
+        metadata: {
+          changed_fields: ['Created Article'],
+        },
+      })
+    } else {
+      const changes: string[] = []
+
+      if (title_en.trim() !== (existingBlog.title_en || '').trim()) {
+        changes.push(`Title ("${title_en}")`)
+      }
+      if ((category_en?.trim() || '') !== (existingBlog.category_en || '').trim()) {
+        changes.push(`Category ("${category_en}")`)
+      }
+      if ((author_en?.trim() || '') !== (existingBlog.author_en || '').trim()) {
+        changes.push(`Author ("${author_en}")`)
+      }
+      if ((read_time_en?.trim() || '') !== (existingBlog.read_time_en || '').trim()) {
+        changes.push(`Read Time ("${read_time_en}")`)
+      }
+      if ((excerpt_en?.trim() || '') !== (existingBlog.excerpt_en || '').trim()) {
+        changes.push(`Excerpt / Teaser`)
+      }
+      if ((cover_image_url?.trim() || '') !== (existingBlog.cover_image_url || '').trim()) {
+        changes.push(`Cover Image`)
+      }
+      const prevSections = Array.isArray(existingBlog.sections_en) ? existingBlog.sections_en : []
+      const currSections = Array.isArray(sections_en) ? sections_en : []
+      if (currSections.length !== prevSections.length || JSON.stringify(currSections) !== JSON.stringify(prevSections)) {
+        changes.push(`Article Sections (${prevSections.length} -> ${currSections.length} sections)`)
+      }
+      const prevStats = Array.isArray(existingBlog.stat_box) ? existingBlog.stat_box : []
+      const currStats = Array.isArray(stat_box) ? stat_box : []
+      if (currStats.length !== prevStats.length || JSON.stringify(currStats) !== JSON.stringify(prevStats)) {
+        changes.push(`Stat Boxes (${prevStats.length} -> ${currStats.length})`)
+      }
+      if ((quote_en?.trim() || '') !== (existingBlog.quote_en || '').trim()) {
+        changes.push(`Pull Quote`)
+      }
+
+      let actionType: string = 'UPDATED_DETAILS'
+      if (changes.some((c) => c.startsWith('Cover Image'))) {
+        actionType = 'UPDATED_PHOTOS'
+      }
+
+      const summaryStr = changes.length > 0
+        ? `Updated ${changes.join(', ')} for article "${title_en}"`
+        : `Updated article contents for "${title_en}"`
+
+      await logCmsActivity({
+        entityType: 'BLOG',
+        entityId: slug,
+        actionType: actionType as any,
+        actorId: user.id,
+        actorName,
+        actorEmail,
+        description: summaryStr,
+        metadata: {
+          changed_fields: changes,
+        },
+      })
+    }
+
     return NextResponse.json({ success: true, blog })
   } catch (err: any) {
     return NextResponse.json({ error: err.message || 'Error saving blog article' }, { status: 500 })
   }
 }
+

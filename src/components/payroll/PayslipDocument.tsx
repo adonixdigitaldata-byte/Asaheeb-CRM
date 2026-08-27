@@ -78,9 +78,15 @@ export default function PayslipDocument({ payslip, onClose, isPrintOnly = false 
     : `${totalMonthDays} ${monthName.slice(0, 3)} ${payslip.year}`
 
   return (
-    <div className="payslip-modal-backdrop" onClick={onClose}>
+    <div
+      className="payslip-modal-backdrop"
+      onMouseDown={(e) => {
+        if (e.target === e.currentTarget && onClose) onClose()
+      }}
+    >
       <div
         className="payslip-modal-wrapper"
+        onMouseDown={(e) => e.stopPropagation()}
         onClick={(e) => e.stopPropagation()}
         style={{
           maxWidth: 840,

@@ -28,8 +28,6 @@ interface Props {
   profile: Profile
 }
 
-const PAGE_SIZE = 15
-
 export default function NewsletterClient({ profile }: Props) {
   const supabase = createClient()
   const isAdmin = true // Granted to all roles
@@ -39,6 +37,7 @@ export default function NewsletterClient({ profile }: Props) {
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState<'ALL' | 'SUBSCRIBED' | 'UNSUBSCRIBED'>('ALL')
   const [currentPage, setCurrentPage] = useState(1)
+  const [pageSize, setPageSize] = useState(20)
 
   // Add Subscriber Modal state
   const [showAddModal, setShowAddModal] = useState(false)
@@ -144,11 +143,11 @@ export default function NewsletterClient({ profile }: Props) {
   }, [subscribers, search, statusFilter])
 
   // Pagination calculations
-  const totalPages = Math.ceil(filteredSubscribers.length / PAGE_SIZE) || 1
+  const totalPages = Math.ceil(filteredSubscribers.length / pageSize) || 1
   const effectivePage = Math.min(currentPage, totalPages)
   const displayedSubscribers = filteredSubscribers.slice(
-    (effectivePage - 1) * PAGE_SIZE,
-    effectivePage * PAGE_SIZE
+    (effectivePage - 1) * pageSize,
+    effectivePage * pageSize
   )
 
   const activeCount = subscribers.filter((s) => (s.status || 'SUBSCRIBED').toUpperCase() === 'SUBSCRIBED').length
@@ -555,12 +554,14 @@ export default function NewsletterClient({ profile }: Props) {
               </table>
             </div>
 
-            {/* 15-Item Pagination with Smooth Auto-Scroll to Top */}
+            {/* Configurable Pagination with Smooth Auto-Scroll to Top */}
             <Pagination
               currentPage={effectivePage}
               totalItems={filteredSubscribers.length}
-              pageSize={PAGE_SIZE}
+              pageSize={pageSize}
               onPageChange={(p) => setCurrentPage(p)}
+              onPageSizeChange={(s) => setPageSize(s)}
+              pageSizeOptions={[20, 50, 100, 500]}
               itemLabel="subscribers"
             />
           </div>

@@ -158,7 +158,12 @@ export default function Sidebar({ profile }: SidebarProps) {
             <div className="sidebar-section-label">{sec.section}</div>
             {sec.items.map((item) => {
               const Icon = item.icon
-              const isActive = pathname === item.href || (item.href !== '/dashboard' && pathname.startsWith(item.href))
+              const isActive =
+                pathname === item.href ||
+                (item.href === '/leads'
+                  ? pathname.startsWith('/leads/') && !pathname.startsWith('/leads/import')
+                  : item.href !== '/dashboard' && pathname.startsWith(item.href + '/'))
+
               return (
                 <Link
                   key={item.href}

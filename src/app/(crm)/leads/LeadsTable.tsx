@@ -23,8 +23,6 @@ interface Props {
   onRefresh: () => void
 }
 
-const PAGE_SIZE = 15
-
 export default function LeadsTable({
   leads,
   stages,
@@ -33,6 +31,7 @@ export default function LeadsTable({
   onRefresh,
 }: Props) {
   const [currentPage, setCurrentPage] = useState(1)
+  const [pageSize, setPageSize] = useState(20)
   const [selectedIds, setSelectedIds] = useState<string[]>([])
   const [bulkAgentId, setBulkAgentId] = useState<string>('')
   const [loadingAction, setLoadingAction] = useState(false)
@@ -40,9 +39,9 @@ export default function LeadsTable({
   const [leadToDelete, setLeadToDelete] = useState<{ id: string; name: string } | null>(null)
 
   // Sliced leads for pagination
-  const totalPages = Math.ceil(leads.length / PAGE_SIZE) || 1
+  const totalPages = Math.ceil(leads.length / pageSize) || 1
   const effectivePage = Math.min(currentPage, totalPages)
-  const displayedLeads = leads.slice((effectivePage - 1) * PAGE_SIZE, effectivePage * PAGE_SIZE)
+  const displayedLeads = leads.slice((effectivePage - 1) * pageSize, effectivePage * pageSize)
 
   const allSelected = displayedLeads.length > 0 && displayedLeads.every((l) => selectedIds.includes(l.id))
 
@@ -354,12 +353,14 @@ export default function LeadsTable({
           </tbody>
         </table>
 
-        {/* 15-Item Pagination with Smooth Auto-Scroll to Top */}
+        {/* Configurable Pagination with Smooth Auto-Scroll to Top */}
         <Pagination
           currentPage={effectivePage}
           totalItems={leads.length}
-          pageSize={PAGE_SIZE}
+          pageSize={pageSize}
           onPageChange={(p) => setCurrentPage(p)}
+          onPageSizeChange={(s) => setPageSize(s)}
+          pageSizeOptions={[20, 50, 100, 500]}
           itemLabel="leads"
         />
       </div>

@@ -226,7 +226,7 @@ export async function PUT(req: Request) {
   }
 }
 
-// DELETE: Delete a payslip
+// DELETE: Delete single or bulk payslips
 export async function DELETE(req: Request) {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
@@ -238,18 +238,32 @@ export async function DELETE(req: Request) {
   }
 
   const { searchParams } = new URL(req.url)
-  const id = searchParams.get('id')
+  const queryId = searchParams.get('id')
 
-  if (!id) {
+  let bodyIds: string[] = []
+  let bodyId: string | null = null
+
+  try {
+    const body = await req.json().catch(() => ({}))
+    if (Array.isArray(body.ids)) bodyIds = body.ids
+    else if (Array.isArray(body.payslipIds)) bodyIds = body.payslipIds
+    else if (body.id) bodyId = body.id
+  } catch (_) {
+    // Ignore JSON parsing if body is empty
+  }
+
+  const targetIds = bodyIds.length > 0 ? bodyIds : (queryId || bodyId ? [queryId || bodyId!] : [])
+
+  if (targetIds.length === 0) {
     return NextResponse.json({ error: 'Payslip ID is required' }, { status: 400 })
   }
 
   const serviceClient = await createServiceClient()
-  const { error } = await serviceClient.from('payslips').delete().eq('id', id)
+  const { error } = await serviceClient.from('payslips').delete().in('id', targetIds)
 
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 400 })
   }
 
-  return NextResponse.json({ success: true })
+  return NextResponse.json({ success: true, count: targetIds.length })
 }

@@ -119,6 +119,7 @@ export default function PayrollClient({
   const [profAccNo, setProfAccNo] = useState<string>('')
   const [profIfscIban, setProfIfscIban] = useState<string>('')
   const [profPanIqama, setProfPanIqama] = useState<string>('')
+  const [profIqamaExpiry, setProfIqamaExpiry] = useState<string>('')
   const [savingProfile, setSavingProfile] = useState(false)
 
   // Salary History & Tabs states
@@ -416,7 +417,8 @@ export default function PayrollClient({
     setProfBankName(sp?.bank_name || '')
     setProfAccNo(sp?.account_number || '')
     setProfIfscIban(sp?.ifsc_or_iban || '')
-    setProfPanIqama(sp?.pan_or_iqama || '')
+    setProfPanIqama(sp?.pan_or_iqama || member.iqama_no || '')
+    setProfIqamaExpiry(sp?.iqama_expiry_date || member.iqama_expiry_date || '')
 
     // History inputs reset
     setModalActiveTab('profile')
@@ -513,6 +515,7 @@ export default function PayrollClient({
           account_number: profAccNo,
           ifsc_or_iban: profIfscIban,
           pan_or_iqama: profPanIqama,
+          iqama_expiry_date: profIqamaExpiry || null,
           default_allowances: [
             { id: 'hra', name: 'House Rent Allowance (HRA)', amount: split.hra },
             { id: 'special', name: 'Special Allowance', amount: split.specialAllowance },
@@ -539,6 +542,14 @@ export default function PayrollClient({
   // Trigger Batch / Monthly Generation
   async function handleGenerateMonthly(e: React.FormEvent) {
     e.preventDefault()
+
+    const currentYear = new Date().getFullYear()
+    const currentMonth = new Date().getMonth() + 1
+
+    if (genYear > currentYear || (genYear === currentYear && genMonth > currentMonth)) {
+      showToast(`Cannot generate payslips for upcoming future months. Max allowed is ${getMonthName(currentMonth)} ${currentYear}.`, 'warning')
+      return
+    }
 
     if (genTargetMode === 'CUSTOM' && selectedMemberIds.size === 0) {
       showToast('Please select at least one team member.', 'warning')
@@ -1114,6 +1125,16 @@ export default function PayrollClient({
                             placeholder="1012345678"
                             value={profPanIqama}
                             onChange={(e) => setProfPanIqama(e.target.value)}
+                            style={{ height: 38 }}
+                          />
+                        </div>
+                        <div className="form-group" style={{ flex: '1 1 180px' }}>
+                          <label className="form-label">Iqama / ID Expiry Date</label>
+                          <input
+                            type="date"
+                            className="form-input"
+                            value={profIqamaExpiry}
+                            onChange={(e) => setProfIqamaExpiry(e.target.value)}
                             style={{ height: 38 }}
                           />
                         </div>
@@ -1877,17 +1898,18 @@ export default function PayrollClient({
               )}
             </div>
 
-            <div className="table-responsive" style={{ overflowX: 'hidden', width: '100%' }}>
-              <table className="table" style={{ tableLayout: 'fixed', width: '100%' }}>
+            <div className="table-responsive" style={{ overflowX: 'auto', width: '100%' }}>
+              <table className="table" style={{ width: '100%', minWidth: '940px', tableLayout: 'fixed' }}>
                 <thead>
                   <tr>
-                    <th style={{ width: '25%' }}>Team Member</th>
-                    <th style={{ width: '15%', textAlign: 'center' }}>Role</th>
-                    <th style={{ width: '10%', textAlign: 'center' }}>Status</th>
-                    <th style={{ width: '12%', textAlign: 'center' }}>Joining Date</th>
-                    <th style={{ width: '8%', textAlign: 'center' }}>Currency</th>
-                    <th style={{ width: '12%', textAlign: 'right' }}>Base Salary</th>
-                    <th style={{ width: '18%', textAlign: 'center' }}>Action</th>
+                    <th style={{ width: '22%' }}>Team Member</th>
+                    <th style={{ width: '11%', textAlign: 'center' }}>Role</th>
+                    <th style={{ width: '9%', textAlign: 'center' }}>Status</th>
+                    <th style={{ width: '15%', textAlign: 'center' }}>Iqama / ID Status</th>
+                    <th style={{ width: '10%', textAlign: 'center' }}>Joining Date</th>
+                    <th style={{ width: '7%', textAlign: 'center' }}>Currency</th>
+                    <th style={{ width: '10%', textAlign: 'right' }}>Base Salary</th>
+                    <th style={{ width: '16%', textAlign: 'right', paddingRight: 18 }}>Action</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -1963,6 +1985,58 @@ export default function PayrollClient({
                           )}
                         </td>
 
+                        {/* Iqama / National ID & Expiry */}
+                        <td style={{ textAlign: 'center' }}>
+                          {(() => {
+                            const iqamaNo = sp?.pan_or_iqama || member.iqama_no
+                            const expiry = sp?.iqama_expiry_date || member.iqama_expiry_date
+
+                            if (!iqamaNo && !expiry) {
+                              return <span style={{ color: '#94A3B8', fontSize: 11 }}>Not recorded</span>
+                            }
+
+                            if (!expiry) {
+                              return (
+                                <div style={{ fontSize: 11, fontWeight: 600, color: '#334155' }}>
+                                  {iqamaNo}
+                                </div>
+                              )
+                            }
+
+                            const today = new Date()
+                            today.setHours(0, 0, 0, 0)
+                            const expDate = new Date(expiry)
+                            const diffDays = Math.ceil((expDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24))
+
+                            if (diffDays < 0) {
+                              return (
+                                <div style={{ display: 'inline-flex', flexDirection: 'column', alignItems: 'center' }}>
+                                  <span style={{ fontSize: 11, fontWeight: 700, color: '#DC2626', backgroundColor: '#FEF2F2', padding: '1px 6px', borderRadius: 4, border: '1px solid #FECACA' }}>
+                                    🔴 Expired ({expiry})
+                                  </span>
+                                </div>
+                              )
+                            }
+                            if (diffDays <= 30) {
+                              return (
+                                <div style={{ display: 'inline-flex', flexDirection: 'column', alignItems: 'center' }}>
+                                  <span style={{ fontSize: 11, fontWeight: 700, color: '#D97706', backgroundColor: '#FFFBEB', padding: '1px 6px', borderRadius: 4, border: '1px solid #FDE68A' }}>
+                                    ⚠️ Expires in {diffDays}d
+                                  </span>
+                                  <span style={{ fontSize: 10, color: '#64748B', marginTop: 1 }}>{expiry}</span>
+                                </div>
+                              )
+                            }
+                            return (
+                              <div style={{ display: 'inline-flex', flexDirection: 'column', alignItems: 'center' }}>
+                                <span style={{ fontSize: 11, fontWeight: 600, color: '#166534', backgroundColor: '#F0FDF4', padding: '1px 6px', borderRadius: 4, border: '1px solid #BBF7D0' }}>
+                                  ✓ Valid ({expiry})
+                                </span>
+                              </div>
+                            )
+                          })()}
+                        </td>
+
                         {/* Joining Date */}
                         <td style={{ textAlign: 'center', fontSize: 13 }}>
                           {joiningDate}
@@ -1983,12 +2057,12 @@ export default function PayrollClient({
                         </td>
 
                         {/* Action */}
-                        <td style={{ textAlign: 'center' }} onClick={(e) => e.stopPropagation()}>
+                        <td style={{ textAlign: 'right', paddingRight: 18 }} onClick={(e) => e.stopPropagation()}>
                           <button
                             type="button"
                             className="btn btn-outline btn-xs"
                             onClick={() => openEditProfile(member)}
-                            style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}
+                            style={{ display: 'inline-flex', alignItems: 'center', gap: 5, whiteSpace: 'nowrap', padding: '4px 10px', fontSize: 11.5 }}
                           >
                             <Edit3 size={12} /> Configure Salary
                           </button>
@@ -2007,8 +2081,18 @@ export default function PayrollClient({
       {/* MODAL 1: RUN / BACKFILL PAYROLL */}
       {/* ----------------------------------------------------------- */}
       {showGenerateModal && (
-        <div className="modal-backdrop" onClick={() => setShowGenerateModal(false)}>
-          <div className="modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 520, width: '100%' }}>
+        <div
+          className="modal-backdrop"
+          onMouseDown={(e) => {
+            if (e.target === e.currentTarget) setShowGenerateModal(false)
+          }}
+        >
+          <div
+            className="modal"
+            onMouseDown={(e) => e.stopPropagation()}
+            onClick={(e) => e.stopPropagation()}
+            style={{ maxWidth: 520, width: '100%' }}
+          >
             <div className="modal-header">
               <span className="modal-title">Run / Backfill Payroll</span>
               <button className="btn btn-ghost btn-sm" onClick={() => setShowGenerateModal(false)}>✕</button>
@@ -2046,42 +2130,60 @@ export default function PayrollClient({
                   </div>
                 </div>
 
-                {/* Target Month & Year */}
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-                  <div className="form-group">
-                    <label className="form-label">Month</label>
-                    <select
-                      className="select"
-                      value={genMonth}
-                      onChange={(e) => setGenMonth(Number(e.target.value))}
-                      style={{ width: '100%', height: 38 }}
-                    >
-                      {MONTH_NAMES.map((name, idx) => (
-                        <option key={name} value={idx + 1}>{name}</option>
-                      ))}
-                    </select>
-                  </div>
+                {/* Target Month & Year with Future Month Restriction */}
+                {(() => {
+                  const currentYear = new Date().getFullYear()
+                  const currentMonth = new Date().getMonth() + 1
 
-                  <div className="form-group">
-                    <label className="form-label">Year</label>
-                    <input
-                      type="number"
-                      className="form-input"
-                      value={genYear}
-                      onChange={(e) => setGenYear(Number(e.target.value))}
-                      min={2020}
-                      max={2035}
-                      style={{ width: '100%', height: 38 }}
-                    />
-                  </div>
-                </div>
+                  return (
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                      <div className="form-group">
+                        <label className="form-label">Month</label>
+                        <select
+                          className="select"
+                          value={genMonth}
+                          onChange={(e) => setGenMonth(Number(e.target.value))}
+                          style={{ width: '100%', height: 38 }}
+                        >
+                          {MONTH_NAMES.map((name, idx) => {
+                            const isFuture = genYear === currentYear && idx + 1 > currentMonth
+                            return (
+                              <option key={name} value={idx + 1} disabled={isFuture}>
+                                {name} {isFuture ? '(Upcoming - Locked)' : ''}
+                              </option>
+                            )
+                          })}
+                        </select>
+                      </div>
 
-                {/* Team Member Selection */}
+                      <div className="form-group">
+                        <label className="form-label">Year</label>
+                        <input
+                          type="number"
+                          className="form-input"
+                          value={genYear}
+                          onChange={(e) => {
+                            const y = Number(e.target.value)
+                            setGenYear(y)
+                            if (y >= currentYear && genMonth > currentMonth) {
+                              setGenMonth(currentMonth)
+                            }
+                          }}
+                          min={2020}
+                          max={currentYear}
+                          style={{ width: '100%', height: 38 }}
+                        />
+                      </div>
+                    </div>
+                  )
+                })()}
+
+                {/* Team Member Selection with Always-Visible Checklist & Role Badges */}
                 <div className="form-group">
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
-                    <label className="form-label" style={{ margin: 0 }}>Target Team Members</label>
-                    <div style={{ display: 'flex', gap: 10, fontSize: 12 }}>
-                      <label style={{ display: 'inline-flex', alignItems: 'center', gap: 4, cursor: 'pointer' }}>
+                    <label className="form-label" style={{ margin: 0, fontWeight: 700 }}>Target Team Members</label>
+                    <div style={{ display: 'flex', gap: 12, fontSize: 12 }}>
+                      <label style={{ display: 'inline-flex', alignItems: 'center', gap: 4, cursor: 'pointer', fontWeight: genTargetMode === 'ALL' ? 700 : 400 }}>
                         <input
                           type="radio"
                           name="genTargetMode"
@@ -2093,7 +2195,7 @@ export default function PayrollClient({
                         />
                         All Active ({activeTeamMembers.length})
                       </label>
-                      <label style={{ display: 'inline-flex', alignItems: 'center', gap: 4, cursor: 'pointer' }}>
+                      <label style={{ display: 'inline-flex', alignItems: 'center', gap: 4, cursor: 'pointer', fontWeight: genTargetMode === 'CUSTOM' ? 700 : 400 }}>
                         <input
                           type="radio"
                           name="genTargetMode"
@@ -2105,101 +2207,195 @@ export default function PayrollClient({
                     </div>
                   </div>
 
-                  {genTargetMode === 'CUSTOM' ? (
+                  <div style={{
+                    border: '1px solid var(--border)',
+                    borderRadius: 'var(--radius)',
+                    padding: 10,
+                    background: '#F8FAFC',
+                  }}>
                     <div style={{
-                      border: '1px solid var(--border)',
-                      borderRadius: 'var(--radius)',
-                      padding: 10,
-                      background: '#F8FAFC',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      paddingBottom: 8,
+                      marginBottom: 8,
+                      borderBottom: '1px solid var(--border)',
+                      fontSize: 12,
                     }}>
-                      <div style={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'space-between',
-                        paddingBottom: 8,
-                        marginBottom: 8,
-                        borderBottom: '1px solid var(--border)',
-                        fontSize: 12,
-                      }}>
-                        <span style={{ color: 'var(--text-secondary)' }}>
-                          <strong>{selectedMemberIds.size}</strong> of {activeTeamMembers.length} selected
-                        </span>
-                        <div style={{ display: 'flex', gap: 12 }}>
-                          <button
-                            type="button"
-                            onClick={selectAllMembers}
-                            className="btn btn-ghost btn-xs"
-                            style={{ padding: 0, color: 'var(--accent)', fontWeight: 600 }}
-                          >
-                            Select All
-                          </button>
-                          <span style={{ color: 'var(--border)' }}>|</span>
-                          <button
-                            type="button"
-                            onClick={clearAllMembers}
-                            className="btn btn-ghost btn-xs"
-                            style={{ padding: 0, color: 'var(--danger)', fontWeight: 600 }}
-                          >
-                            Deselect All
-                          </button>
-                        </div>
+                      <span style={{ color: 'var(--text-secondary)' }}>
+                        <strong>{selectedMemberIds.size}</strong> of {activeTeamMembers.length} active members selected
+                      </span>
+                      <div style={{ display: 'flex', gap: 10 }}>
+                        <button
+                          type="button"
+                          onClick={selectAllMembers}
+                          className="btn btn-ghost btn-xs"
+                          style={{ padding: 0, color: 'var(--accent)', fontWeight: 600 }}
+                        >
+                          Select All
+                        </button>
+                        <span style={{ color: 'var(--border)' }}>|</span>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            clearAllMembers()
+                            setGenTargetMode('CUSTOM')
+                          }}
+                          className="btn btn-ghost btn-xs"
+                          style={{ padding: 0, color: 'var(--danger)', fontWeight: 600 }}
+                        >
+                          Deselect All
+                        </button>
                       </div>
+                    </div>
 
-                      <div style={{ maxHeight: 180, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 4 }}>
-                        {activeTeamMembers.map((m) => {
-                          const isSelected = selectedMemberIds.has(m.id)
-                          return (
-                            <label
-                              key={m.id}
-                              style={{
-                                display: 'flex',
-                                alignItems: 'center',
-                                justifyContent: 'space-between',
-                                padding: '6px 8px',
-                                borderRadius: 6,
-                                background: isSelected ? '#FFFFFF' : 'transparent',
-                                border: isSelected ? '1px solid var(--border)' : '1px solid transparent',
-                                cursor: 'pointer',
-                              }}
-                            >
-                              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                                <input
-                                  type="checkbox"
-                                  checked={isSelected}
-                                  onChange={() => toggleMemberSelection(m.id)}
-                                  style={{ cursor: 'pointer', width: 15, height: 15 }}
-                                />
-                                <div>
-                                  <div style={{ fontSize: 13, fontWeight: isSelected ? 600 : 400, color: 'var(--text-primary)' }}>
-                                    {m.name}
-                                  </div>
-                                  <div style={{ fontSize: 11, color: 'var(--text-secondary)' }}>
-                                    {m.email}
-                                  </div>
+                    <div style={{ maxHeight: 200, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 4 }}>
+                      {activeTeamMembers.map((m) => {
+                        const isSelected = selectedMemberIds.has(m.id)
+                        const roleLabel =
+                          m.role === 'ADMIN' ? 'ADMIN' :
+                          m.role === 'SALES_MANAGER' ? 'SALES MANAGER' :
+                          m.role === 'EMPLOYEE' ? 'EMPLOYEE' : 'SALES AGENT'
+
+                        return (
+                          <label
+                            key={m.id}
+                            style={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'space-between',
+                              padding: '6px 10px',
+                              borderRadius: 6,
+                              background: isSelected ? '#FFFFFF' : 'transparent',
+                              border: isSelected ? '1px solid #CBD5E1' : '1px solid transparent',
+                              cursor: 'pointer',
+                            }}
+                          >
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                              <input
+                                type="checkbox"
+                                checked={isSelected}
+                                onChange={() => {
+                                  toggleMemberSelection(m.id)
+                                  setGenTargetMode('CUSTOM')
+                                }}
+                                style={{ cursor: 'pointer', width: 16, height: 16 }}
+                              />
+                              <div>
+                                <div style={{ fontSize: 13, fontWeight: isSelected ? 700 : 500, color: 'var(--text-primary)' }}>
+                                  {m.name}
+                                </div>
+                                <div style={{ fontSize: 11, color: 'var(--text-secondary)' }}>
+                                  {m.email}
                                 </div>
                               </div>
-                              <span className="badge badge-secondary" style={{ fontSize: 10 }}>
-                                {m.specialization || m.role}
-                              </span>
-                            </label>
-                          )
-                        })}
-                      </div>
+                            </div>
+
+                            <span
+                              className={`badge ${m.role === 'ADMIN' ? 'badge-admin' : 'badge-agent'}`}
+                              style={{ fontSize: 10, fontWeight: 700, padding: '2px 8px' }}
+                            >
+                              {roleLabel}
+                            </span>
+                          </label>
+                        )
+                      })}
                     </div>
-                  ) : (
-                    <div style={{ fontSize: 12, color: 'var(--text-secondary)', padding: '8px 12px', background: '#F8FAFC', borderRadius: 'var(--radius)', border: '1px solid var(--border)' }}>
-                      Generating for all <strong>{activeTeamMembers.length} active team members</strong>.
-                    </div>
-                  )}
+                  </div>
                 </div>
+
+                {/* Selected Staff Summary Down the Line */}
+                {selectedMemberIds.size > 0 ? (
+                  <div style={{
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: 6,
+                    padding: '10px 12px',
+                    backgroundColor: '#EFF6FF',
+                    borderRadius: 'var(--radius)',
+                    border: '1px solid #BFDBFE',
+                  }}>
+                    <div style={{ fontSize: 11.5, fontWeight: 700, color: '#1E40AF', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <span>Selected Staff for Payroll ({selectedMemberIds.size}):</span>
+                      <span style={{ fontSize: 11, fontWeight: 500, color: '#2563EB' }}>
+                        {genMode === 'BACKFILL_FROM_JOINING' ? 'Backfilling from joining dates' : `${getMonthName(genMonth)} ${genYear}`}
+                      </span>
+                    </div>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                      {activeTeamMembers.filter((m) => selectedMemberIds.has(m.id)).map((m) => {
+                        const roleLabel =
+                          m.role === 'ADMIN' ? 'ADMIN' :
+                          m.role === 'SALES_MANAGER' ? 'SALES MANAGER' :
+                          m.role === 'EMPLOYEE' ? 'EMPLOYEE' : 'SALES AGENT'
+                        return (
+                          <span
+                            key={m.id}
+                            style={{
+                              backgroundColor: '#FFFFFF',
+                              color: '#1E3A8A',
+                              border: '1px solid #93C5FD',
+                              padding: '2px 8px',
+                              borderRadius: 14,
+                              fontSize: 11.5,
+                              fontWeight: 600,
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: 6,
+                              boxShadow: '0 1px 2px rgba(0,0,0,0.04)',
+                            }}
+                          >
+                            <span>✓ {m.name}</span>
+                            <span style={{ fontSize: 9.5, backgroundColor: '#DBEAFE', color: '#1E40AF', padding: '1px 5px', borderRadius: 8, fontWeight: 600 }}>
+                              {roleLabel}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                toggleMemberSelection(m.id)
+                                setGenTargetMode('CUSTOM')
+                              }}
+                              title={`Deselect ${m.name}`}
+                              style={{
+                                background: 'none',
+                                border: 'none',
+                                cursor: 'pointer',
+                                padding: '0 2px',
+                                color: '#64748B',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                fontSize: 11,
+                                fontWeight: 700,
+                                lineHeight: 1,
+                              }}
+                              onMouseEnter={(e) => (e.currentTarget.style.color = '#DC2626')}
+                              onMouseLeave={(e) => (e.currentTarget.style.color = '#64748B')}
+                            >
+                              ✕
+                            </button>
+                          </span>
+                        )
+                      })}
+                    </div>
+                  </div>
+                ) : (
+                  <div style={{ padding: '10px 12px', backgroundColor: '#FEF2F2', border: '1px solid #FECACA', borderRadius: 'var(--radius)', color: '#DC2626', fontSize: 12, fontWeight: 600, textAlign: 'center' }}>
+                    ⚠️ No team members selected. Please select at least one staff member above.
+                  </div>
+                )}
               </div>
 
               <div className="modal-footer">
                 <button type="button" className="btn btn-outline" onClick={() => setShowGenerateModal(false)}>
                   Cancel
                 </button>
-                <button type="submit" className="btn btn-primary" disabled={generating} style={{ fontWeight: 600 }}>
-                  {generating ? 'Generating...' : genMode === 'BACKFILL_FROM_JOINING' ? 'Backfill All Historical Payslips' : 'Generate Monthly Payslips'}
+                <button type="submit" className="btn btn-primary" disabled={generating || selectedMemberIds.size === 0} style={{ fontWeight: 600 }}>
+                  {generating
+                    ? 'Generating...'
+                    : genMode === 'BACKFILL_FROM_JOINING'
+                    ? `Backfill Historical Payslips (${selectedMemberIds.size})`
+                    : `Generate Monthly Payslips (${selectedMemberIds.size})`}
                 </button>
               </div>
             </form>
@@ -2211,8 +2407,18 @@ export default function PayrollClient({
       {/* MODAL 3: EDIT PAYSLIP LINE ITEMS & DYNAMIC SALARY */}
       {/* ----------------------------------------------------------- */}
       {editingPayslip && (
-        <div className="modal-backdrop" onClick={() => setEditingPayslip(null)}>
-          <div className="modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 640, width: '100%', maxHeight: '92vh', overflowY: 'auto' }}>
+        <div
+          className="modal-backdrop"
+          onMouseDown={(e) => {
+            if (e.target === e.currentTarget) setEditingPayslip(null)
+          }}
+        >
+          <div
+            className="modal"
+            onMouseDown={(e) => e.stopPropagation()}
+            onClick={(e) => e.stopPropagation()}
+            style={{ maxWidth: 640, width: '100%', maxHeight: '92vh', overflowY: 'auto' }}
+          >
             <div className="modal-header">
               <div>
                 <span className="modal-title">
@@ -2480,8 +2686,18 @@ export default function PayrollClient({
       {/* MODAL 4: CHANGE SECURITY PIN */}
       {/* ----------------------------------------------------------- */}
       {showChangePin && (
-        <div className="modal-backdrop" onClick={() => setShowChangePin(false)}>
-          <div className="modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 400 }}>
+        <div
+          className="modal-backdrop"
+          onMouseDown={(e) => {
+            if (e.target === e.currentTarget) setShowChangePin(false)
+          }}
+        >
+          <div
+            className="modal"
+            onMouseDown={(e) => e.stopPropagation()}
+            onClick={(e) => e.stopPropagation()}
+            style={{ maxWidth: 400 }}
+          >
             <div className="modal-header">
               <span className="modal-title">Update Vault PIN</span>
               <button className="btn btn-ghost btn-sm" onClick={() => setShowChangePin(false)}>✕</button>
@@ -2549,8 +2765,18 @@ export default function PayrollClient({
 
       {/* Custom Confirmation Modal */}
       {confirmModal && (
-        <div className="modal-backdrop" onClick={() => setConfirmModal(null)}>
-          <div className="modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 440, width: '100%' }}>
+        <div
+          className="modal-backdrop"
+          onMouseDown={(e) => {
+            if (e.target === e.currentTarget) setConfirmModal(null)
+          }}
+        >
+          <div
+            className="modal"
+            onMouseDown={(e) => e.stopPropagation()}
+            onClick={(e) => e.stopPropagation()}
+            style={{ maxWidth: 440, width: '100%' }}
+          >
             <div className="modal-header">
               <span className="modal-title" style={{ color: 'var(--danger)', display: 'flex', alignItems: 'center', gap: 6 }}>
                 <AlertCircle size={18} /> {confirmModal.title}

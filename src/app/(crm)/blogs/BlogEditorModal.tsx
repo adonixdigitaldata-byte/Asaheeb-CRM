@@ -13,8 +13,10 @@ import {
   Loader2,
   UploadCloud,
   Check,
+  ShieldCheck,
 } from 'lucide-react'
 import type { Blog, BlogSection, BlogStatBox } from '@/types/database'
+import CmsActivityTimeline from '@/components/CmsActivityTimeline'
 
 interface Props {
   blog?: Blog | null
@@ -23,7 +25,7 @@ interface Props {
   onSuccess: () => void
 }
 
-type TabType = 'meta' | 'summary' | 'sections' | 'stats'
+type TabType = 'meta' | 'summary' | 'sections' | 'stats' | 'activity'
 
 function slugify(text: string): string {
   return text
@@ -364,6 +366,23 @@ export default function BlogEditorModal({
             <TrendingUp size={14} />
             <span>4. Stat Boxes &amp; Quotes</span>
           </button>
+
+          {isEdit && (
+            <button
+              type="button"
+              onClick={() => setActiveTab('activity')}
+              className={`btn btn-sm ${activeTab === 'activity' ? 'btn-primary' : 'btn-ghost'}`}
+              style={{
+                fontSize: '12.5px',
+                padding: '5px 12px',
+                color: activeTab === 'activity' ? '#FFFFFF' : '#2563EB',
+                backgroundColor: activeTab === 'activity' ? undefined : '#EFF6FF',
+              }}
+            >
+              <ShieldCheck size={14} />
+              <span>5. Activity Log</span>
+            </button>
+          )}
         </div>
 
         {/* Form Body */}
@@ -1079,6 +1098,15 @@ export default function BlogEditorModal({
                   </div>
                 </div>
               </div>
+            )}
+
+            {/* TAB 5: ACTIVITY LOG */}
+            {activeTab === 'activity' && blog && (
+              <CmsActivityTimeline
+                entityType="BLOG"
+                entityId={blog.id}
+                entityTitle={blog.title_en}
+              />
             )}
           </div>
 

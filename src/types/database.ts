@@ -27,6 +27,8 @@ export interface Profile {
   created_at: string
   updated_at: string
   payroll_pin?: string | null
+  iqama_no?: string | null
+  iqama_expiry_date?: string | null
 }
 
 export interface LeadStage {
@@ -68,6 +70,9 @@ export interface ProjectCommission {
   commission_amount: number
   sale_date: string
   notes?: string | null
+  agent_id?: string | null
+  agent_name?: string | null
+  created_by?: string | null
   created_at: string
   updated_at: string
 }
@@ -176,6 +181,10 @@ export interface Project {
   payment_terms_en?: string | null
   payment_terms_ar?: string | null
   floor_plans?: ProjectImage[] | null
+  expected_commission_en?: string | null
+  expected_commission_ar?: string | null
+  commission_notes_en?: string | null
+  commission_notes_ar?: string | null
   is_published: boolean
   sort_order: number
   created_by?: string | null
@@ -352,6 +361,7 @@ export interface EmployeeSalaryProfile {
   account_number?: string | null
   ifsc_or_iban?: string | null
   pan_or_iqama?: string | null
+  iqama_expiry_date?: string | null
   default_allowances?: PayslipLineItem[]
   default_deductions?: PayslipLineItem[]
   created_at: string
@@ -400,6 +410,7 @@ export interface Payslip {
   account_number?: string | null
   ifsc_or_iban?: string | null
   pan_or_iqama?: string | null
+  iqama_expiry_date?: string | null
   joining_date?: string | null
   notes?: string | null
   created_by?: string | null
@@ -408,4 +419,18 @@ export interface Payslip {
   employee?: Profile | null
   creator?: Profile | null
 }
+
+export interface CmsActivity {
+  id: string
+  entity_type: 'PROJECT' | 'BLOG'
+  entity_id: string
+  action_type: string
+  actor_id?: string | null
+  actor_name: string
+  actor_email?: string | null
+  description: string
+  metadata?: Record<string, any> | null
+  created_at: string
+}
+
 

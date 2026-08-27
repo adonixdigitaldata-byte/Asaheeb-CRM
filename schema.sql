@@ -23,9 +23,15 @@ create table if not exists profiles (
   open_leads_count int not null default 0,
   last_seen_at timestamptz not null default now(),
   payroll_pin text default '1234',
+  iqama_no text,
+  iqama_expiry_date date,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
+
+-- Backward-compatible columns for profiles:
+alter table profiles add column if not exists iqama_no text;
+alter table profiles add column if not exists iqama_expiry_date date;
 
 -- ============================================================
 -- 2. AD ATTRIBUTION (Meta, Google, Social Ads)
@@ -135,12 +141,25 @@ create table if not exists projects (
   brochure_url text,
   brochure_size_en text,
   brochure_size_ar text,
+  expected_commission_en text, -- e.g. 'SAR 10,000 / Deal' or '2.5%'
+  expected_commission_ar text,
+  commission_notes_en text, -- e.g. '10% for penthouses, 5% for 1BR/2BR; SAR 50,000 cap; Layout 3 has custom bonus'
+  commission_notes_ar text,
   is_published boolean not null default true,
   sort_order int default 0,
   created_by uuid references profiles(id) on delete set null,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
+
+-- Backward-compatible column additions and data defaults for existing deployments:
+alter table projects add column if not exists expected_commission_en text;
+alter table projects add column if not exists expected_commission_ar text;
+alter table projects add column if not exists commission_notes_en text;
+alter table projects add column if not exists commission_notes_ar text;
+
+-- Default existing projects to Apartments category
+update projects set type_en = 'Apartments', type_ar = 'شقق سكنية' where type_en is null or type_en = '' or type_en = 'Apartment';
 
 -- ============================================================
 -- 4.1 BLOG ARTICLES / MARKET INSIGHTS
@@ -212,6 +231,78 @@ create index if not exists idx_leads_property on leads(property_id);
 create index if not exists idx_leads_phone on leads(phone);
 create index if not exists idx_leads_email on leads(email);
 create index if not exists idx_leads_created on leads(created_at desc);
+
+-- ============================================================
+-- 5.1 AUTOMATED ROUND-ROBIN LEAD ASSIGNMENT TRIGGER
+-- Automatically assigns unassigned incoming leads to the next available sales agent
+-- ============================================================
+create or replace function fn_auto_assign_lead_round_robin()
+returns trigger as $$
+declare
+  v_agent_id uuid;
+begin
+  -- If assigned_agent_id is already explicitly provided, keep it
+  if NEW.assigned_agent_id is not null then
+    return NEW;
+  end if;
+
+  -- 1. Find the best available active sales agent:
+  -- Prioritize agents with work_status = 'AVAILABLE', then least recently assigned lead timestamp, then lowest active leads
+  select p.id into v_agent_id
+  from profiles p
+  where p.is_active = true
+    and p.role in ('AGENT', 'SALES_MANAGER')
+  order by
+    case when upper(coalesce(p.work_status, 'AVAILABLE')) = 'AVAILABLE' then 0 else 1 end asc,
+    (
+      select coalesce(max(l.created_at), '1970-01-01'::timestamptz)
+      from leads l
+      where l.assigned_agent_id = p.id
+    ) asc,
+    (
+      select count(*)
+      from leads l
+      left join lead_stages s on l.stage_id = s.id
+      where l.assigned_agent_id = p.id
+        and (s.key is null or s.key not in ('won', 'lost'))
+    ) asc
+  limit 1;
+
+  -- Fallback: If no dedicated sales agents exist, pick from any active staff (e.g. ADMIN)
+  if v_agent_id is null then
+    select p.id into v_agent_id
+    from profiles p
+    where p.is_active = true
+    order by (
+      select coalesce(max(l.created_at), '1970-01-01'::timestamptz)
+      from leads l
+      where l.assigned_agent_id = p.id
+    ) asc
+    limit 1;
+  end if;
+
+  if v_agent_id is not null then
+    NEW.assigned_agent_id := v_agent_id;
+  end if;
+
+  -- Ensure stage_id is defaulted to 'new' stage if omitted
+  if NEW.stage_id is null then
+    select id into NEW.stage_id from lead_stages where key = 'new' limit 1;
+    if NEW.stage_id is null then
+      select id into NEW.stage_id from lead_stages order by sort_order asc limit 1;
+    end if;
+  end if;
+
+  return NEW;
+end;
+$$ language plpgsql security definer;
+
+drop trigger if exists trg_auto_assign_lead_round_robin on leads;
+create trigger trg_auto_assign_lead_round_robin
+  before insert on leads
+  for each row
+  when (NEW.assigned_agent_id is null)
+  execute function fn_auto_assign_lead_round_robin();
 
 -- ============================================================
 -- 6. STAGE HISTORY, NOTES, FOLLOW-UPS, ACTIVITIES
@@ -587,6 +678,10 @@ create policy "Users view own published payslips" on payslips
     employee_id = auth.uid() and status in ('PUBLISHED', 'PAID')
   );
 
+-- Backward-compatible column additions for payroll:
+alter table employee_salary_profiles add column if not exists iqama_expiry_date date;
+alter table payslips add column if not exists iqama_expiry_date date;
+
 -- ============================================================
 -- 9. PROJECT COMMISSIONS & SALES TRACKING (ADMIN ONLY)
 -- ============================================================
@@ -598,13 +693,20 @@ create table if not exists project_commissions (
   commission_amount numeric(14, 2) not null default 0,
   sale_date date not null default current_date,
   notes text,
+  agent_id uuid references profiles(id) on delete set null, -- agent / team member who closed the deal
+  agent_name text, -- agent name string for easy display & historical integrity
   created_by uuid references profiles(id) on delete set null,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
 
+-- Backward-compatible column additions for project_commissions:
+alter table project_commissions add column if not exists agent_id uuid references profiles(id) on delete set null;
+alter table project_commissions add column if not exists agent_name text;
+
 create index if not exists idx_project_commissions_project on project_commissions(project_id);
 create index if not exists idx_project_commissions_date on project_commissions(sale_date);
+create index if not exists idx_project_commissions_agent on project_commissions(agent_id);
 
 drop trigger if exists project_commissions_updated_at on project_commissions;
 create trigger project_commissions_updated_at 
@@ -615,6 +717,34 @@ alter table project_commissions enable row level security;
 drop policy if exists "Admins manage all project commissions" on project_commissions;
 create policy "Admins manage all project commissions" on project_commissions 
   for all using (is_admin());
+
+-- ============================================================
+-- 10. CMS AUDIT LOG / ACTIVITY TRACKING (PROJECTS & BLOGS)
+-- ============================================================
+create table if not exists cms_activities (
+  id uuid primary key default gen_random_uuid(),
+  entity_type text not null check (entity_type in ('PROJECT', 'BLOG')),
+  entity_id text not null, -- project slug or blog slug
+  action_type text not null, -- 'CREATED', 'UPDATED_DETAILS', 'UPDATED_PHOTOS', 'PUBLISHED', 'UNPUBLISHED', 'DELETED', 'COMMISSION_RECORDED'
+  actor_id uuid references profiles(id) on delete set null,
+  actor_name text not null,
+  actor_email text,
+  description text not null,
+  metadata jsonb default '{}'::jsonb,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists idx_cms_activities_entity on cms_activities(entity_type, entity_id);
+create index if not exists idx_cms_activities_created_at on cms_activities(created_at desc);
+
+alter table cms_activities enable row level security;
+drop policy if exists "Authenticated users can read cms activities" on cms_activities;
+create policy "Authenticated users can read cms activities" on cms_activities
+  for select using (auth.role() = 'authenticated');
+
+drop policy if exists "Authenticated users can insert cms activities" on cms_activities;
+create policy "Authenticated users can insert cms activities" on cms_activities
+  for insert with check (auth.role() = 'authenticated');
 
 
 

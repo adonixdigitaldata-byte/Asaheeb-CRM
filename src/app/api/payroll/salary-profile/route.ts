@@ -27,6 +27,7 @@ export async function POST(req: Request) {
       account_number = '',
       ifsc_or_iban = '',
       pan_or_iqama = '',
+      iqama_expiry_date = null,
       default_allowances = [],
       default_deductions = [],
     } = body
@@ -49,6 +50,7 @@ export async function POST(req: Request) {
       account_number: account_number?.trim() || null,
       ifsc_or_iban: ifsc_or_iban?.trim() || null,
       pan_or_iqama: pan_or_iqama?.trim() || null,
+      iqama_expiry_date: iqama_expiry_date || null,
       default_allowances: default_allowances || [],
       default_deductions: default_deductions || [],
       updated_at: new Date().toISOString(),
@@ -64,6 +66,16 @@ export async function POST(req: Request) {
       console.error('Error saving salary profile:', error)
       return NextResponse.json({ error: error.message }, { status: 400 })
     }
+
+    // Sync to profiles table for global lookup & n8n automations
+    await serviceClient
+      .from('profiles')
+      .update({
+        iqama_no: pan_or_iqama?.trim() || null,
+        iqama_expiry_date: iqama_expiry_date || null,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', profile_id)
 
     return NextResponse.json({ success: true, data })
   } catch (err: any) {

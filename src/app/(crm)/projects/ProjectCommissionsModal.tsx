@@ -39,6 +39,10 @@ export default function ProjectCommissionsModal({ project, profile, onClose }: P
   const [editingId, setEditingId] = useState<string | null>(null)
   const [unitName, setUnitName] = useState('')
   const [buyerName, setBuyerName] = useState('')
+  const [agentId, setAgentId] = useState('')
+  const [agentName, setAgentName] = useState('')
+  const [isCustomAgent, setIsCustomAgent] = useState(false)
+  const [teamProfiles, setTeamProfiles] = useState<Profile[]>([])
   const [commissionAmount, setCommissionAmount] = useState('')
   const [saleDate, setSaleDate] = useState(new Date().toISOString().split('T')[0])
   const [notes, setNotes] = useState('')
@@ -66,9 +70,25 @@ export default function ProjectCommissionsModal({ project, profile, onClose }: P
     }
   }, [supabase, project.id])
 
+  const fetchTeam = useCallback(async () => {
+    try {
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('id, name, email, role, avatar_url')
+        .order('name', { ascending: true })
+
+      if (!error && data) {
+        setTeamProfiles(data as Profile[])
+      }
+    } catch (err) {
+      console.error('Error loading team profiles for commissions:', err)
+    }
+  }, [supabase])
+
   useEffect(() => {
     fetchCommissions()
-  }, [fetchCommissions])
+    fetchTeam()
+  }, [fetchCommissions, fetchTeam])
 
   // Total summary calculations
   const totalCommission = useMemo(() => {
@@ -79,6 +99,9 @@ export default function ProjectCommissionsModal({ project, profile, onClose }: P
     setEditingId(null)
     setUnitName('')
     setBuyerName('')
+    setAgentId('')
+    setAgentName('')
+    setIsCustomAgent(false)
     setCommissionAmount('')
     setSaleDate(new Date().toISOString().split('T')[0])
     setNotes('')
@@ -90,6 +113,9 @@ export default function ProjectCommissionsModal({ project, profile, onClose }: P
     setEditingId(item.id)
     setUnitName(item.unit_name)
     setBuyerName(item.buyer_name)
+    setAgentId(item.agent_id || '')
+    setAgentName(item.agent_name || '')
+    setIsCustomAgent(!!item.agent_name && !item.agent_id)
     setCommissionAmount(String(item.commission_amount))
     setSaleDate(item.sale_date || new Date().toISOString().split('T')[0])
     setNotes(item.notes || '')
@@ -111,6 +137,17 @@ export default function ProjectCommissionsModal({ project, profile, onClose }: P
 
     setSaving(true)
     setErrorMsg('')
+
+    // Resolve final agent attribution
+    let finalAgentName = agentName.trim()
+    let finalAgentId = agentId || null
+    if (agentId && !isCustomAgent) {
+      const selected = teamProfiles.find((p) => p.id === agentId)
+      if (selected) finalAgentName = selected.name
+    } else if (isCustomAgent) {
+      finalAgentId = null
+    }
+
     try {
       if (editingId) {
         // Update existing record
@@ -119,6 +156,8 @@ export default function ProjectCommissionsModal({ project, profile, onClose }: P
           .update({
             unit_name: unitName.trim(),
             buyer_name: buyerName.trim(),
+            agent_id: finalAgentId,
+            agent_name: finalAgentName || null,
             commission_amount: numAmount,
             sale_date: saleDate,
             notes: notes.trim() || null,
@@ -136,6 +175,8 @@ export default function ProjectCommissionsModal({ project, profile, onClose }: P
             project_id: project.id,
             unit_name: unitName.trim(),
             buyer_name: buyerName.trim(),
+            agent_id: finalAgentId,
+            agent_name: finalAgentName || null,
             commission_amount: numAmount,
             sale_date: saleDate,
             notes: notes.trim() || null,
@@ -454,7 +495,60 @@ export default function ProjectCommissionsModal({ project, profile, onClose }: P
                     style={{ height: '38px', fontSize: '13px' }}
                   />
                   <div style={{ fontSize: '10.5px', color: '#94A3B8', marginTop: '2px' }}>
-                    Specify the sold layout, apartment, villa, or whole property.
+                    Specify sold layout, apartment, villa, or whole property.
+                  </div>
+                </div>
+
+                {/* Sold By (Sales Agent) */}
+                <div>
+                  <label className="form-label" style={{ fontSize: '12px', fontWeight: 700, color: '#334155', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <span>Sold By (Sales Agent)</span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsCustomAgent(!isCustomAgent)
+                        setAgentId('')
+                        setAgentName('')
+                      }}
+                      className="btn btn-ghost btn-xs"
+                      style={{ fontSize: '10.5px', color: '#2563EB', padding: '0 4px', height: 'auto' }}
+                    >
+                      {isCustomAgent ? 'Choose Team Member' : 'Custom / External'}
+                    </button>
+                  </label>
+
+                  {isCustomAgent ? (
+                    <input
+                      type="text"
+                      placeholder="e.g. External Partner / Direct Broker"
+                      className="form-input"
+                      value={agentName}
+                      onChange={(e) => setAgentName(e.target.value)}
+                      style={{ height: '38px', fontSize: '13px' }}
+                    />
+                  ) : (
+                    <select
+                      className="form-select"
+                      value={agentId}
+                      onChange={(e) => {
+                        const val = e.target.value
+                        setAgentId(val)
+                        const found = teamProfiles.find((p) => p.id === val)
+                        if (found) setAgentName(found.name)
+                        else setAgentName('')
+                      }}
+                      style={{ height: '38px', fontSize: '13px', width: '100%' }}
+                    >
+                      <option value="">Select Agent (or Company Direct)</option>
+                      {teamProfiles.map((tp) => (
+                        <option key={tp.id} value={tp.id}>
+                          {tp.name} ({tp.role})
+                        </option>
+                      ))}
+                    </select>
+                  )}
+                  <div style={{ fontSize: '10.5px', color: '#94A3B8', marginTop: '2px' }}>
+                    Assign credit to the sales agent who closed this deal.
                   </div>
                 </div>
 
@@ -628,86 +722,129 @@ export default function ProjectCommissionsModal({ project, profile, onClose }: P
               <table style={{ width: '100%', tableLayout: 'fixed', borderCollapse: 'collapse', fontSize: '12.5px' }}>
                 <thead>
                   <tr style={{ backgroundColor: '#F8FAFC', borderBottom: '1px solid var(--border)', color: '#475569', fontSize: '11px', fontWeight: 700, textTransform: 'uppercase' }}>
-                    <th style={{ width: '28%', padding: '10px 14px', textAlign: 'left' }}>Unit / Layout Name</th>
-                    <th style={{ width: '24%', padding: '10px 14px', textAlign: 'left' }}>Buyer Name</th>
-                    <th style={{ width: '20%', padding: '10px 14px', textAlign: 'right' }}>Commission Earned</th>
-                    <th style={{ width: '16%', padding: '10px 14px', textAlign: 'center' }}>Sale Date</th>
-                    <th style={{ width: '12%', padding: '10px 14px', textAlign: 'center' }}>Actions</th>
+                    <th style={{ width: '22%', padding: '10px 12px', textAlign: 'left' }}>Unit / Layout</th>
+                    <th style={{ width: '18%', padding: '10px 12px', textAlign: 'left' }}>Sold By (Agent)</th>
+                    <th style={{ width: '20%', padding: '10px 12px', textAlign: 'left' }}>Buyer Name</th>
+                    <th style={{ width: '18%', padding: '10px 12px', textAlign: 'right' }}>Commission</th>
+                    <th style={{ width: '12%', padding: '10px 12px', textAlign: 'center' }}>Sale Date</th>
+                    <th style={{ width: '10%', padding: '10px 12px', textAlign: 'center' }}>Actions</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {commissions.map((c, idx) => (
-                    <tr
-                      key={c.id}
-                      style={{
-                        borderBottom: idx === commissions.length - 1 ? 'none' : '1px solid #F1F5F9',
-                        transition: 'background-color 0.15s ease',
-                      }}
-                      onMouseEnter={(e) => ((e.currentTarget as HTMLElement).style.backgroundColor = '#F8FAFC')}
-                      onMouseLeave={(e) => ((e.currentTarget as HTMLElement).style.backgroundColor = 'transparent')}
-                    >
-                      {/* Unit / Property Name */}
-                      <td style={{ padding: '10px 14px' }}>
-                        <div style={{ fontWeight: 700, color: '#0F172A', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={c.unit_name}>
-                          {c.unit_name}
-                        </div>
-                        {c.notes && (
-                          <div style={{ fontSize: '11px', color: '#64748B', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={c.notes}>
-                            {c.notes}
+                  {commissions.map((c, idx) => {
+                    const agentDisplay = c.agent_name || 'Asaheeb Direct'
+                    const initial = agentDisplay.charAt(0).toUpperCase()
+
+                    return (
+                      <tr
+                        key={c.id}
+                        style={{
+                          borderBottom: idx === commissions.length - 1 ? 'none' : '1px solid #F1F5F9',
+                          transition: 'background-color 0.15s ease',
+                        }}
+                        onMouseEnter={(e) => ((e.currentTarget as HTMLElement).style.backgroundColor = '#F8FAFC')}
+                        onMouseLeave={(e) => ((e.currentTarget as HTMLElement).style.backgroundColor = 'transparent')}
+                      >
+                        {/* Unit / Property Name */}
+                        <td style={{ padding: '10px 12px' }}>
+                          <div style={{ fontWeight: 700, color: '#0F172A', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={c.unit_name}>
+                            {c.unit_name}
                           </div>
-                        )}
-                      </td>
+                          {c.notes && (
+                            <div style={{ fontSize: '11px', color: '#64748B', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={c.notes}>
+                              {c.notes}
+                            </div>
+                          )}
+                        </td>
 
-                      {/* Buyer Name */}
-                      <td style={{ padding: '10px 14px' }}>
-                        <div style={{ fontWeight: 600, color: '#334155', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={c.buyer_name}>
-                          {c.buyer_name}
-                        </div>
-                      </td>
+                        {/* Sold By Agent */}
+                        <td style={{ padding: '10px 12px' }}>
+                          <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', maxWidth: '100%' }}>
+                            <span
+                              style={{
+                                width: '20px',
+                                height: '20px',
+                                borderRadius: '50%',
+                                backgroundColor: c.agent_id ? '#EFF6FF' : '#F1F5F9',
+                                color: c.agent_id ? '#2563EB' : '#64748B',
+                                border: `1px solid ${c.agent_id ? '#BFDBFE' : '#CBD5E1'}`,
+                                fontSize: '10px',
+                                fontWeight: 700,
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                flexShrink: 0,
+                              }}
+                            >
+                              {initial}
+                            </span>
+                            <span
+                              style={{
+                                fontWeight: 600,
+                                color: c.agent_id ? '#1E293B' : '#64748B',
+                                fontSize: '12px',
+                                overflow: 'hidden',
+                                textOverflow: 'ellipsis',
+                                whiteSpace: 'nowrap',
+                              }}
+                              title={agentDisplay}
+                            >
+                              {agentDisplay}
+                            </span>
+                          </div>
+                        </td>
 
-                      {/* Commission Earned */}
-                      <td style={{ padding: '10px 14px', textAlign: 'right', fontWeight: 800, color: '#047857', fontSize: '13px' }}>
-                        SAR {Number(c.commission_amount || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                      </td>
+                        {/* Buyer Name */}
+                        <td style={{ padding: '10px 12px' }}>
+                          <div style={{ fontWeight: 600, color: '#334155', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={c.buyer_name}>
+                            {c.buyer_name}
+                          </div>
+                        </td>
 
-                      {/* Sale Date */}
-                      <td style={{ padding: '10px 14px', textAlign: 'center', color: '#64748B', fontSize: '12px' }}>
-                        {c.sale_date}
-                      </td>
+                        {/* Commission Earned */}
+                        <td style={{ padding: '10px 12px', textAlign: 'right', fontWeight: 800, color: '#047857', fontSize: '13px' }}>
+                          SAR {Number(c.commission_amount || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </td>
 
-                      {/* Actions */}
-                      <td style={{ padding: '10px 14px', textAlign: 'center' }}>
-                        <div style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
-                          <button
-                            type="button"
-                            onClick={() => startEdit(c)}
-                            className="btn btn-outline btn-xs"
-                            title="Edit Commission"
-                            style={{ padding: '3px 6px' }}
-                          >
-                            <Edit2 size={12} />
-                          </button>
-                          <button
-                            type="button"
-                            disabled={deletingId === c.id}
-                            onClick={() => handleDelete(c.id)}
-                            className="btn btn-outline btn-xs"
-                            title="Delete"
-                            style={{ padding: '3px 6px', color: '#EF4444' }}
-                          >
-                            <Trash2 size={12} />
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
+                        {/* Sale Date */}
+                        <td style={{ padding: '10px 12px', textAlign: 'center', color: '#64748B', fontSize: '12px' }}>
+                          {c.sale_date}
+                        </td>
+
+                        {/* Actions */}
+                        <td style={{ padding: '10px 12px', textAlign: 'center' }}>
+                          <div style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                            <button
+                              type="button"
+                              onClick={() => startEdit(c)}
+                              className="btn btn-outline btn-xs"
+                              title="Edit Commission"
+                              style={{ padding: '3px 6px' }}
+                            >
+                              <Edit2 size={12} />
+                            </button>
+                            <button
+                              type="button"
+                              disabled={deletingId === c.id}
+                              onClick={() => handleDelete(c.id)}
+                              className="btn btn-outline btn-xs"
+                              title="Delete"
+                              style={{ padding: '3px 6px', color: '#EF4444' }}
+                            >
+                              <Trash2 size={12} />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    )
+                  })}
                 </tbody>
                 <tfoot>
                   <tr style={{ backgroundColor: '#F0FDF4', borderTop: '2px solid #A7F3D0', fontWeight: 800 }}>
-                    <td colSpan={2} style={{ padding: '12px 14px', color: '#065F46', fontSize: '13px' }}>
+                    <td colSpan={3} style={{ padding: '12px 12px', color: '#065F46', fontSize: '13px' }}>
                       TOTAL COMMISSION ({commissions.length} Units Sold)
                     </td>
-                    <td style={{ padding: '12px 14px', textAlign: 'right', color: '#047857', fontSize: '14px' }}>
+                    <td style={{ padding: '12px 12px', textAlign: 'right', color: '#047857', fontSize: '14px' }}>
                       SAR {totalCommission.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                     </td>
                     <td colSpan={2}></td>

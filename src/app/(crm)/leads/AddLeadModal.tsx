@@ -51,7 +51,7 @@ export default function AddLeadModal({
     potential_value: '',
     source: 'MANUAL',
     stage_id: stages[0]?.id ?? '',
-    assigned_agent_id: userRole === 'AGENT' ? currentUserId : '',
+    assigned_agent_id: userRole === 'AGENT' ? currentUserId : 'AUTO',
     notes: '',
   })
 
@@ -295,13 +295,21 @@ export default function AddLeadModal({
                   className="form-select"
                   disabled={userRole === 'AGENT'}
                 >
-                  <option value="">Leave Unassigned</option>
-                  {agents.map((a) => (
-                    <option key={a.id} value={a.id}>
-                      {a.name}
-                    </option>
-                  ))}
+                  <option value="AUTO">⚡ Auto-Assign (Round-Robin to Available Agent)</option>
+                  <option value="UNASSIGNED">Leave Unassigned</option>
+                  <optgroup label="Specific Sales Agents">
+                    {agents.map((a) => (
+                      <option key={a.id} value={a.id}>
+                        {a.name}
+                      </option>
+                    ))}
+                  </optgroup>
                 </select>
+                {form.assigned_agent_id === 'AUTO' && userRole !== 'AGENT' && (
+                  <span style={{ fontSize: 11, color: '#2563EB', marginTop: 4, display: 'block' }}>
+                    💡 Lead will be automatically assigned to the next active, available sales agent via round-robin.
+                  </span>
+                )}
               </div>
 
               {/* Potential Value */}

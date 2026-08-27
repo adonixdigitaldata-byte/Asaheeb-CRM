@@ -32,6 +32,8 @@ import {
   TrendingUp,
   Award,
   BarChart3,
+  Info,
+  ShieldCheck,
 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import type { Project, Profile, ProjectCommission } from '@/types/database'
@@ -41,6 +43,7 @@ import ConfirmModal from '@/components/ConfirmModal'
 import LogoLoader from '@/components/LogoLoader'
 import OrderSlotManagerModal from '@/components/OrderSlotManagerModal'
 import Pagination from '@/components/Pagination'
+import CmsActivityTimeline from '@/components/CmsActivityTimeline'
 
 const WEBSITE_URL = process.env.NEXT_PUBLIC_WEBSITE_URL || 'https://asaheebrealestate.com'
 const PAGE_SIZE = 15
@@ -56,10 +59,12 @@ export default function ProjectsClient({ profile }: Props) {
   const [projects, setProjects] = useState<Project[]>([])
   const [loading, setLoading] = useState(true)
   const [currentPage, setCurrentPage] = useState(1)
+  const [pageSize, setPageSize] = useState<number>(10)
 
   // Filters & Sorting States
   const [search, setSearch] = useState('')
   const [cityFilter, setCityFilter] = useState('ALL')
+  const [typeFilter, setTypeFilter] = useState('ALL')
   const [statusFilter, setStatusFilter] = useState('ALL')
   const [stageFilter, setStageFilter] = useState('ALL')
   const [sortBy, setSortBy] = useState<'default' | 'name' | 'price_asc' | 'price_desc' | 'photos'>('default')
@@ -68,6 +73,7 @@ export default function ProjectsClient({ profile }: Props) {
   const [editingProject, setEditingProject] = useState<Project | null>(null)
   const [isCreatingNew, setIsCreatingNew] = useState(false)
   const [commissioningProject, setCommissioningProject] = useState<Project | null>(null)
+  const [activityProject, setActivityProject] = useState<Project | null>(null)
   const [projectToDelete, setProjectToDelete] = useState<Project | null>(null)
   const [deleting, setDeleting] = useState(false)
   const [reorderModalOpen, setReorderModalOpen] = useState(false)
@@ -219,17 +225,28 @@ export default function ProjectsClient({ profile }: Props) {
   // Filter and sort logic
   const filteredProjects = useMemo(() => {
     let result = projects.filter((p) => {
+      const projType = p.type_en || 'Apartments'
+
       if (search.trim()) {
         const q = search.toLowerCase()
         const matchName = p.name_en?.toLowerCase().includes(q) || p.name_ar?.toLowerCase().includes(q)
         const matchCity = p.city_en?.toLowerCase().includes(q) || p.city_ar?.toLowerCase().includes(q)
         const matchDistrict = p.district_en?.toLowerCase().includes(q) || p.district_ar?.toLowerCase().includes(q)
         const matchDev = p.developer_en?.toLowerCase().includes(q) || p.developer_ar?.toLowerCase().includes(q)
+        const matchType = projType.toLowerCase().includes(q) || p.type_ar?.toLowerCase().includes(q)
         const matchId = p.id?.toLowerCase().includes(q)
-        if (!matchName && !matchCity && !matchDistrict && !matchDev && !matchId) return false
+        if (!matchName && !matchCity && !matchDistrict && !matchDev && !matchType && !matchId) return false
       }
 
       if (cityFilter !== 'ALL' && p.city_en !== cityFilter) return false
+
+      if (typeFilter !== 'ALL') {
+        if (typeFilter === 'Apartments' && projType !== 'Apartments' && projType !== 'Apartment') return false
+        if (typeFilter === 'Villas' && projType !== 'Villas' && projType !== 'Villa') return false
+        if (typeFilter === 'Commercial Buildings' && !projType.includes('Commercial')) return false
+        if (typeFilter === 'Residential Buildings' && !projType.includes('Residential') && projType !== 'Apartments') return false
+        if (typeFilter === 'Land' && projType !== 'Land') return false
+      }
 
       if (statusFilter === 'PUBLISHED' && !p.is_published) return false
       if (statusFilter === 'DRAFT' && p.is_published) return false
@@ -247,19 +264,20 @@ export default function ProjectsClient({ profile }: Props) {
     }
 
     return result
-  }, [projects, search, cityFilter, statusFilter, stageFilter, sortBy])
+  }, [projects, search, cityFilter, typeFilter, statusFilter, stageFilter, sortBy])
 
-  const totalPages = Math.ceil(filteredProjects.length / PAGE_SIZE) || 1
+  const totalPages = Math.ceil(filteredProjects.length / pageSize) || 1
   const effectivePage = Math.min(currentPage, totalPages)
-  const displayedProjects = filteredProjects.slice((effectivePage - 1) * PAGE_SIZE, effectivePage * PAGE_SIZE)
+  const displayedProjects = filteredProjects.slice((effectivePage - 1) * pageSize, effectivePage * pageSize)
 
   const publishedCount = projects.filter((p) => p.is_published).length
   const draftCount = projects.length - publishedCount
-  const hasActiveFilters = search.trim() !== '' || cityFilter !== 'ALL' || statusFilter !== 'ALL' || stageFilter !== 'ALL' || sortBy !== 'default'
+  const hasActiveFilters = search.trim() !== '' || cityFilter !== 'ALL' || typeFilter !== 'ALL' || statusFilter !== 'ALL' || stageFilter !== 'ALL' || sortBy !== 'default'
 
   function resetFilters() {
     setSearch('')
     setCityFilter('ALL')
+    setTypeFilter('ALL')
     setStatusFilter('ALL')
     setStageFilter('ALL')
     setSortBy('default')
@@ -602,6 +620,23 @@ export default function ProjectsClient({ profile }: Props) {
             </select>
           </div>
 
+          {/* Property Type Filter */}
+          <div>
+            <select
+              value={typeFilter}
+              onChange={(e) => setTypeFilter(e.target.value)}
+              className="form-select"
+              style={{ fontSize: '12px', height: '36px', width: '100%' }}
+            >
+              <option value="ALL">All Property Types</option>
+              <option value="Apartments">Apartments (شقق سكنية)</option>
+              <option value="Villas">Villas (فلل سكنية)</option>
+              <option value="Commercial Buildings">Commercial Buildings (مباني تجارية)</option>
+              <option value="Residential Buildings">Residential Buildings (عمائر سكنية)</option>
+              <option value="Land">Land (أراضي)</option>
+            </select>
+          </div>
+
           {/* Status Filter */}
           <div>
             <select
@@ -672,32 +707,34 @@ export default function ProjectsClient({ profile }: Props) {
           )}
         </div>
 
-        {/* Clean, Non-Overflowing Fixed Table */}
+        {/* Clean, Non-Overflowing Fixed Table with Scroll Safety */}
         {loading && projects.length === 0 ? (
           <LogoLoader size={44} text="Loading property projects..." />
         ) : filteredProjects.length > 0 ? (
           <div className="card" style={{ padding: 0, overflow: 'hidden', border: '1px solid var(--border)', width: '100%' }}>
-            <table style={{ width: '100%', tableLayout: 'fixed', borderCollapse: 'collapse', textAlign: 'left', fontSize: '13px' }}>
-              <thead>
-                <tr
-                  style={{
-                    backgroundColor: '#F8FAFC',
-                    borderBottom: '1px solid #E2E8F0',
-                    color: '#475569',
-                    fontSize: '11.5px',
-                    fontWeight: 700,
-                    textTransform: 'uppercase',
-                    letterSpacing: '0.03em',
-                  }}
-                >
-                  <th style={{ padding: '12px 14px', width: '30%' }}>Project &amp; Code</th>
-                  <th style={{ padding: '12px 14px', width: '20%' }}>Location &amp; Dev</th>
-                  <th style={{ padding: '12px 14px', width: '18%' }}>Specs &amp; Price</th>
-                  <th style={{ padding: '12px 10px', width: '8%', textAlign: 'center' }}>Media</th>
-                  <th style={{ padding: '12px 16px', width: '24%', textAlign: 'right' }}>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
+            <div style={{ overflowX: 'auto', width: '100%' }}>
+              <table style={{ width: '100%', minWidth: '1060px', tableLayout: 'fixed', borderCollapse: 'collapse', textAlign: 'left', fontSize: '13px' }}>
+                <thead>
+                  <tr
+                    style={{
+                      backgroundColor: '#F8FAFC',
+                      borderBottom: '1px solid #E2E8F0',
+                      color: '#475569',
+                      fontSize: '11.5px',
+                      fontWeight: 700,
+                      textTransform: 'uppercase',
+                      letterSpacing: '0.03em',
+                    }}
+                  >
+                    <th style={{ padding: '12px 14px', width: '22%' }}>Project &amp; Code</th>
+                    <th style={{ padding: '12px 12px', width: '16%' }}>Location &amp; Dev</th>
+                    <th style={{ padding: '12px 12px', width: '15%' }}>Specs &amp; Price</th>
+                    <th style={{ padding: '12px 12px', width: '16%' }}>Brokerage Commission</th>
+                    <th style={{ padding: '12px 6px', width: '6%', textAlign: 'center' }}>Media</th>
+                    <th style={{ padding: '12px 14px', width: '25%', textAlign: 'right' }}>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
                 {displayedProjects.map((project, idx) => {
                   const imageCount = (project.images || []).length
                   const hasBrochure = !!project.brochure_url
@@ -798,7 +835,7 @@ export default function ProjectsClient({ profile }: Props) {
                       </td>
 
                       {/* Specs & Starting Price */}
-                      <td style={{ padding: '12px 14px', verticalAlign: 'middle' }}>
+                      <td style={{ padding: '12px 12px', verticalAlign: 'middle' }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                           {project.status_en && (
                             <span
@@ -831,6 +868,64 @@ export default function ProjectsClient({ profile }: Props) {
                         <div style={{ fontWeight: 700, color: '#16A34A', fontSize: '12px', marginTop: '2px' }}>
                           {project.starting_price_en || 'On inquiry'}
                         </div>
+                      </td>
+
+                      {/* Brokerage Commission & Notes */}
+                      <td style={{ padding: '12px 12px', verticalAlign: 'middle' }}>
+                        {project.expected_commission_en ? (
+                          <div>
+                            <div
+                              style={{
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '4px',
+                                backgroundColor: '#ECFDF5',
+                                color: '#047857',
+                                border: '1px solid #A7F3D0',
+                                padding: '2px 7px',
+                                borderRadius: '6px',
+                                fontSize: '11.5px',
+                                fontWeight: 700,
+                              }}
+                              title="Brokerage commission / payout rate"
+                            >
+                              <DollarSign size={12} style={{ color: '#059669', flexShrink: 0 }} />
+                              <span>{project.expected_commission_en}</span>
+                            </div>
+
+                            {(project.commission_notes_en || project.commission_notes_ar) && (
+                              <div
+                                style={{
+                                  fontSize: '11px',
+                                  color: '#64748B',
+                                  marginTop: '3px',
+                                  lineHeight: '1.3',
+                                  display: 'flex',
+                                  alignItems: 'flex-start',
+                                  gap: '3px',
+                                }}
+                                title={project.commission_notes_en || project.commission_notes_ar || ''}
+                              >
+                                <Info size={11} style={{ color: '#059669', flexShrink: 0, marginTop: '2px' }} />
+                                <span
+                                  style={{
+                                    overflow: 'hidden',
+                                    textOverflow: 'ellipsis',
+                                    display: '-webkit-box',
+                                    WebkitLineClamp: 2,
+                                    WebkitBoxOrient: 'vertical',
+                                  }}
+                                >
+                                  {project.commission_notes_en || project.commission_notes_ar}
+                                </span>
+                              </div>
+                            )}
+                          </div>
+                        ) : (
+                          <div style={{ fontSize: '11px', color: '#94A3B8', fontStyle: 'italic' }}>
+                            Rate on request
+                          </div>
+                        )}
                       </td>
 
                       {/* Media (Photos counter & Brochure) */}
@@ -917,6 +1012,16 @@ export default function ProjectsClient({ profile }: Props) {
                             <span>Manage</span>
                           </button>
 
+                          <button
+                            type="button"
+                            onClick={() => setActivityProject(project)}
+                            className="btn btn-ghost btn-icon btn-sm"
+                            style={{ color: '#475569', padding: '3px' }}
+                            title="View Project Activity History & Audit Log"
+                          >
+                            <ShieldCheck size={14} />
+                          </button>
+
                           {profile?.role === 'ADMIN' && (
                             <button
                               type="button"
@@ -936,7 +1041,7 @@ export default function ProjectsClient({ profile }: Props) {
                               title="Configure Sold Layouts & Commission"
                             >
                               <DollarSign size={11} />
-                              <span>Commission</span>
+                              <span>Sales</span>
                             </button>
                           )}
 
@@ -971,16 +1076,19 @@ export default function ProjectsClient({ profile }: Props) {
                 })}
               </tbody>
             </table>
-
-            {/* 15-Item Pagination with Smooth Auto-Scroll to Top */}
-            <Pagination
-              currentPage={effectivePage}
-              totalItems={filteredProjects.length}
-              pageSize={PAGE_SIZE}
-              onPageChange={(p) => setCurrentPage(p)}
-              itemLabel="projects"
-            />
           </div>
+
+          {/* Configurable Pagination Bar */}
+          <Pagination
+            currentPage={effectivePage}
+            totalItems={filteredProjects.length}
+            pageSize={pageSize}
+            onPageChange={(p) => setCurrentPage(p)}
+            onPageSizeChange={(s) => setPageSize(s)}
+            pageSizeOptions={[10, 20, 50, 100]}
+            itemLabel="projects"
+          />
+        </div>
         ) : (
           /* Empty State */
           <div
@@ -1080,6 +1188,56 @@ export default function ProjectsClient({ profile }: Props) {
             fetchCommissions()
           }}
         />
+      )}
+
+      {/* Project Activity History Modal */}
+      {activityProject && (
+        <div className="modal-overlay" style={{ zIndex: 95 }}>
+          <div
+            className="modal-content"
+            style={{
+              maxWidth: '680px',
+              width: '95vw',
+              maxHeight: '85vh',
+              borderRadius: '12px',
+              display: 'flex',
+              flexDirection: 'column',
+            }}
+          >
+            <div className="modal-header" style={{ padding: '16px 20px', borderBottom: '1px solid var(--border)' }}>
+              <div>
+                <h3 style={{ fontSize: '16px', fontWeight: 800, color: '#0F172A', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <ShieldCheck size={18} style={{ color: '#2563EB' }} />
+                  <span>Activity History: {activityProject.name_en}</span>
+                </h3>
+                <p style={{ fontSize: '12px', color: '#64748B', marginTop: '2px' }}>
+                  Audit log of all edits, photo modifications, and commission updates made to this project
+                </p>
+              </div>
+              <button onClick={() => setActivityProject(null)} className="btn btn-ghost btn-icon">
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="modal-body" style={{ padding: '18px 20px', overflowY: 'auto', flex: 1 }}>
+              <CmsActivityTimeline
+                entityType="PROJECT"
+                entityId={activityProject.id}
+                entityTitle={activityProject.name_en}
+              />
+            </div>
+
+            <div className="modal-footer" style={{ padding: '12px 20px', borderTop: '1px solid var(--border)' }}>
+              <button
+                type="button"
+                onClick={() => setActivityProject(null)}
+                className="btn btn-outline btn-sm"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   )

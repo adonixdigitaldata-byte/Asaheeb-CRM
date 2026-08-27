@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient, createServiceClient } from '@/lib/supabase/server'
+import { logCmsActivity } from '@/lib/cms-activity'
 
 export async function POST(request: NextRequest) {
   try {
@@ -10,14 +11,27 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-
-
     const { id, is_published, featured } = await request.json()
     if (!id) {
       return NextResponse.json({ error: 'id is required' }, { status: 400 })
     }
 
     const serviceClient = await createServiceClient()
+
+    const { data: blog } = await serviceClient
+      .from('blogs')
+      .select('title_en')
+      .eq('id', id)
+      .single()
+
+    const { data: userProfile } = await serviceClient
+      .from('profiles')
+      .select('name, email')
+      .eq('id', user.id)
+      .single()
+
+    const actorName = userProfile?.name || user.email?.split('@')[0] || 'Team Member'
+    const actorEmail = userProfile?.email || user.email || null
 
     if (typeof featured === 'boolean') {
       if (featured) {
@@ -49,6 +63,16 @@ export async function POST(request: NextRequest) {
           }
         }
 
+        await logCmsActivity({
+          entityType: 'BLOG',
+          entityId: id,
+          actionType: 'UPDATED_DETAILS',
+          actorId: user.id,
+          actorName,
+          actorEmail,
+          description: `Set article "${blog?.title_en || id}" as primary featured insight`,
+        })
+
         return NextResponse.json({ success: true, featured: true, sort_order: 1 })
       } else {
         // Unfeaturing
@@ -73,8 +97,23 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: error.message }, { status: 400 })
     }
 
+    if (typeof is_published === 'boolean') {
+      await logCmsActivity({
+        entityType: 'BLOG',
+        entityId: id,
+        actionType: is_published ? 'PUBLISHED' : 'UNPUBLISHED',
+        actorId: user.id,
+        actorName,
+        actorEmail,
+        description: is_published
+          ? `Published article "${blog?.title_en || id}" to live website`
+          : `Unpublished article "${blog?.title_en || id}" (moved to draft)`,
+      })
+    }
+
     return NextResponse.json({ success: true, ...updatePayload })
   } catch (err: any) {
     return NextResponse.json({ error: err.message || 'Error updating article status' }, { status: 500 })
   }
 }
+

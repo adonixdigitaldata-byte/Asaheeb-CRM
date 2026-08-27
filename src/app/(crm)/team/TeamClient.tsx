@@ -666,8 +666,18 @@ export default function TeamClient({ members: initialMembers, currentProfile }: 
 
       {/* MODAL: INVITE TEAM MEMBER */}
       {showInviteModal && (
-        <div className="modal-backdrop" onClick={() => setShowInviteModal(false)}>
-          <div className="modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 500 }}>
+        <div
+          className="modal-backdrop"
+          onMouseDown={(e) => {
+            if (e.target === e.currentTarget) setShowInviteModal(false)
+          }}
+        >
+          <div
+            className="modal"
+            onMouseDown={(e) => e.stopPropagation()}
+            onClick={(e) => e.stopPropagation()}
+            style={{ maxWidth: 500 }}
+          >
             <div className="modal-header">
               <h3 className="modal-title">Invite New Team Member</h3>
               <button
@@ -791,8 +801,18 @@ export default function TeamClient({ members: initialMembers, currentProfile }: 
 
       {/* MODAL: EDIT TEAM MEMBER */}
       {editingMember && (
-        <div className="modal-backdrop" onClick={() => setEditingMember(null)}>
-          <div className="modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 500 }}>
+        <div
+          className="modal-backdrop"
+          onMouseDown={(e) => {
+            if (e.target === e.currentTarget) setEditingMember(null)
+          }}
+        >
+          <div
+            className="modal"
+            onMouseDown={(e) => e.stopPropagation()}
+            onClick={(e) => e.stopPropagation()}
+            style={{ maxWidth: 500 }}
+          >
             <div className="modal-header">
               <h3 className="modal-title">Edit Staff Profile</h3>
               <button
@@ -903,8 +923,18 @@ export default function TeamClient({ members: initialMembers, currentProfile }: 
 
       {/* MODAL: DELETE CONFIRMATION */}
       {deletingMember && (
-        <div className="modal-backdrop" onClick={() => setDeletingMember(null)}>
-          <div className="modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 440 }}>
+        <div
+          className="modal-backdrop"
+          onMouseDown={(e) => {
+            if (e.target === e.currentTarget) setDeletingMember(null)
+          }}
+        >
+          <div
+            className="modal"
+            onMouseDown={(e) => e.stopPropagation()}
+            onClick={(e) => e.stopPropagation()}
+            style={{ maxWidth: 440 }}
+          >
             <div className="modal-header">
               <h3 className="modal-title" style={{ color: 'var(--danger)', display: 'flex', alignItems: 'center', gap: 8 }}>
                 <AlertCircle size={18} /> Delete Staff Member
