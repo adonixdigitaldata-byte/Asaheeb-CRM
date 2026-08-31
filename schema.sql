@@ -88,10 +88,10 @@ values
   ('followup',            'Follow-up',            4, '#0F766E'),
   ('qualified',           'Qualified',            5, '#7C3AED'),
   ('proposal',            'Proposal',             6, '#DB2777'),
-  ('negotiation',         'Negotiation',          7, '#EA580C'),
-  ('meeting_scheduled',   'Meeting Scheduled',    8, '#8B5CF6'),
-  ('meeting_done',        'Meeting Done',         9, '#06B6D4'),
-  ('site_visit_scheduled','Site Visit Scheduled', 10, '#F59E0B'),
+  ('meeting_scheduled',   'Meeting Scheduled',    7, '#8B5CF6'),
+  ('meeting_done',        'Meeting Done',         8, '#06B6D4'),
+  ('site_visit_scheduled','Site Visit Scheduled', 9, '#F59E0B'),
+  ('negotiation',         'Negotiation',          10, '#EA580C'),
   ('won',                 'Won',                 11, '#16A34A'),
   ('lost',                'Lost',                12, '#DC2626')
 on conflict (key) do update set

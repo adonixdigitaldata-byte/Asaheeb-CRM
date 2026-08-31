@@ -2,6 +2,7 @@ import { createClient, createServiceClient } from '@/lib/supabase/server'
 import { redirect, notFound } from 'next/navigation'
 import type { Metadata } from 'next'
 import TeamMemberDetailClient from './TeamMemberDetailClient'
+import { sortLeadStages, type LeadStage } from '@/types/database'
 
 export const metadata: Metadata = { title: 'Staff Member Profile' }
 export const dynamic = 'force-dynamic'
@@ -82,7 +83,7 @@ export default async function TeamMemberDetailPage({ params }: { params: Promise
       member={member}
       currentProfile={currentProfile}
       leads={leads ?? []}
-      stages={stages ?? []}
+      stages={sortLeadStages((stages as LeadStage[]) ?? [])}
       followups={followups ?? []}
       activities={activities ?? []}
       salaryProfile={salaryProfile}
