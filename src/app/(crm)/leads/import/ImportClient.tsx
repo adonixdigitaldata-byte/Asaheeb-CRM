@@ -21,6 +21,10 @@ interface ParsedRow {
   email?: string
   city?: string
   interest?: string
+  client_category?: string | null
+  budget_tier?: string | null
+  meeting_date?: string | null
+  meeting_time?: string | null
   potential_value?: number | null
   stage_id?: string
   assigned_agent_id?: string
@@ -90,6 +94,11 @@ export default function ImportClient({ stages, agents, batches: initialBatches, 
       const potentialRaw = row.potential_value || row['Potential Value'] || row.potentialValue || row.value || row.budget || ''
       const potential_value = potentialRaw ? parseFloat(String(potentialRaw)) : null
 
+      const client_category = String(row.client_category || row.category || row.Category || row['Client Category'] || '').trim() || null
+      const budget_tier = String(row.budget_tier || row.budget_range || row['Budget Tier'] || '').trim() || null
+      const meeting_date = String(row.meeting_date || row['Meeting Date'] || row.meetingDate || '').trim() || null
+      const meeting_time = String(row.meeting_time || row['Meeting Time'] || row.meetingTime || '').trim() || null
+
       // Match Stage column from XLSX if available
       const stageRaw = String(row.stage || row.Stage || row.STAGE || row.stage_id || row['Lead Stage'] || '').trim().toLowerCase()
       const matchedStage = stageRaw
@@ -112,7 +121,7 @@ export default function ImportClient({ stages, agents, batches: initialBatches, 
 
       if (!name && !phone && !email) {
         return { 
-          rowIndex: i + 2, name, phone, email, city, interest, potential_value, 
+          rowIndex: i + 2, name, phone, email, city, interest, client_category, budget_tier, meeting_date, meeting_time, potential_value, 
           stage_id: matchedStageId, assigned_agent_id: matchedAgentId,
           status: 'error' as const, error: 'No contact info' 
         }
@@ -124,7 +133,7 @@ export default function ImportClient({ stages, agents, batches: initialBatches, 
       if (isDbDuplicate || isFileDuplicate) {
         return {
           rowIndex: i + 2,
-          name, phone, email, city, interest, potential_value,
+          name, phone, email, city, interest, client_category, budget_tier, meeting_date, meeting_time, potential_value,
           stage_id: matchedStageId, assigned_agent_id: matchedAgentId,
           status: 'duplicate' as const,
           error: isDbDuplicate ? 'Already in CRM' : 'Duplicate row in file',
@@ -135,7 +144,7 @@ export default function ImportClient({ stages, agents, batches: initialBatches, 
       if (email) seenEmailsInFile.add(email)
 
       return { 
-        rowIndex: i + 2, name, phone, email, city, interest, potential_value,
+        rowIndex: i + 2, name, phone, email, city, interest, client_category, budget_tier, meeting_date, meeting_time, potential_value,
         stage_id: matchedStageId, assigned_agent_id: matchedAgentId,
         status: 'valid' as const 
       }
@@ -178,6 +187,10 @@ export default function ImportClient({ stages, agents, batches: initialBatches, 
         email: row.email || null,
         city: row.city || null,
         interest: row.interest || null,
+        client_category: row.client_category || null,
+        budget_tier: row.budget_tier || null,
+        meeting_date: row.meeting_date || null,
+        meeting_time: row.meeting_time || null,
         potential_value: row.potential_value || null,
         form_data: {},
         stage_id: row.stage_id || stageId,

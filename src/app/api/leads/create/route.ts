@@ -17,7 +17,24 @@ export async function POST(request: NextRequest) {
     .single()
 
   const body = await request.json()
-  const { name, phone, email, city, interest, potential_value, source, stage_id, assigned_agent_id, property_id, campaign_id, notes } = body
+  const {
+    name,
+    phone,
+    email,
+    city,
+    interest,
+    client_category,
+    budget_tier,
+    meeting_date,
+    meeting_time,
+    potential_value,
+    source,
+    stage_id,
+    assigned_agent_id,
+    property_id,
+    campaign_id,
+    notes,
+  } = body
 
   if (!name || !name.trim()) {
     return NextResponse.json({ error: 'Name is required' }, { status: 400 })
@@ -51,6 +68,10 @@ export async function POST(request: NextRequest) {
     email: email?.trim() || null,
     city: city?.trim() || null,
     interest: interest?.trim() || null,
+    client_category: client_category?.trim() || null,
+    budget_tier: budget_tier?.trim() || null,
+    meeting_date: meeting_date || null,
+    meeting_time: meeting_time?.trim() || null,
     potential_value: potential_value ? parseFloat(potential_value) : null,
     source: source || 'MANUAL',
     stage_id: stage_id,

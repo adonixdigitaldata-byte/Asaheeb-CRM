@@ -5,13 +5,18 @@ export interface CityOption {
 }
 
 export const PREDEFINED_CITIES: CityOption[] = [
-  // Saudi Arabia
-  { value: 'Riyadh', label: 'Riyadh (الرياض)', group: 'Saudi Arabia' },
+  // Saudi Arabia - Priority & Specific Regions
+  { value: 'Jeddah (Azizia / Rehab)', label: 'Jeddah (Azizia / Rehab) - جدة (العزيزية / الرحاب)', group: 'Saudi Arabia' },
+  { value: 'Jeddah (Darb Al Harmain)', label: 'Jeddah (Darb Al Harmain) - جدة (درب الحرمين)', group: 'Saudi Arabia' },
+  { value: 'Jeddah (Near Jeddah Tower)', label: 'Jeddah (Near Jeddah Tower) - جدة (بالقرب من برج جدة)', group: 'Saudi Arabia' },
   { value: 'Jeddah', label: 'Jeddah (جدة)', group: 'Saudi Arabia' },
+  { value: 'Makkah', label: 'Makkah (مكة المكرمة)', group: 'Saudi Arabia' },
+  { value: 'Madina', label: 'Madina (المدينة المنورة)', group: 'Saudi Arabia' },
+  { value: 'Riyadh', label: 'Riyadh (الرياض)', group: 'Saudi Arabia' },
   { value: 'Dammam', label: 'Dammam (الدمام)', group: 'Saudi Arabia' },
   { value: 'Khobar', label: 'Al Khobar (الخبر)', group: 'Saudi Arabia' },
-  { value: 'Mecca', label: 'Mecca (مكة المكرمة)', group: 'Saudi Arabia' },
-  { value: 'Medina', label: 'Medina (المدينة المنورة)', group: 'Saudi Arabia' },
+  { value: 'Mecca', label: 'Mecca (مكة)', group: 'Saudi Arabia' },
+  { value: 'Medina', label: 'Medina (المدينة)', group: 'Saudi Arabia' },
   { value: 'Tabuk', label: 'Tabuk (تبوك)', group: 'Saudi Arabia' },
   { value: 'Abha', label: 'Abha (أبها)', group: 'Saudi Arabia' },
   { value: 'Taif', label: 'Taif (الطائف)', group: 'Saudi Arabia' },

@@ -24,9 +24,11 @@ import {
   Phone,
   Building,
   GripVertical,
+  Calendar,
+  Clock,
 } from 'lucide-react'
 import type { Lead, LeadStage, Profile } from '@/types/database'
-import { formatTimeAgo } from '@/lib/utils'
+import { formatTimeAgo, formatDate } from '@/lib/utils'
 
 interface Props {
   leads: Lead[]
@@ -106,6 +108,32 @@ function KanbanCardItem({
           <GripVertical size={14} />
         </div>
       </div>
+
+      {/* Scheduled Meeting Date & Time */}
+      {(lead.meeting_date || lead.meeting_time) && (
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 4,
+            fontSize: 11,
+            fontWeight: 600,
+            color: '#1D4ED8',
+            backgroundColor: '#EFF6FF',
+            border: '1px solid #BFDBFE',
+            padding: '2px 6px',
+            borderRadius: 4,
+            marginBottom: 5,
+            width: 'fit-content',
+          }}
+        >
+          <Calendar size={11} style={{ flexShrink: 0 }} />
+          <span>
+            {lead.meeting_date ? formatDate(lead.meeting_date) : ''}
+            {lead.meeting_time ? ` · ${lead.meeting_time}` : ''}
+          </span>
+        </div>
+      )}
 
       {/* Phone number */}
       {lead.phone ? (

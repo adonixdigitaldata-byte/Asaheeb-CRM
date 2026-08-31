@@ -11,11 +11,11 @@ import {
   RefreshCw,
   X,
 } from 'lucide-react'
-import LeadsTable from './LeadsTable'
+import { Lead, LeadStage, Profile, AdCampaign, Project, CLIENT_CATEGORIES, BUDGET_TIERS } from '@/types/database'
 import KanbanBoard from './KanbanBoard'
+import LeadsTable from './LeadsTable'
 import AddLeadModal from './AddLeadModal'
 import LogoLoader from '@/components/LogoLoader'
-import type { Lead, LeadStage, Profile, AdCampaign, Project } from '@/types/database'
 
 interface Props {
   profile: Profile
@@ -23,7 +23,7 @@ interface Props {
   campaigns: AdCampaign[]
   agents: { id: string; name: string }[]
   projects: Project[]
-  initialSearchParams: { [key: string]: string | undefined }
+  initialSearchParams?: { action?: string; new?: string }
 }
 
 export default function LeadsClient({
@@ -55,6 +55,8 @@ export default function LeadsClient({
   const [stageFilter, setStageFilter] = useState<string>('ALL')
   const [agentFilter, setAgentFilter] = useState<string>('ALL')
   const [sourceFilter, setSourceFilter] = useState<string>('ALL')
+  const [categoryFilter, setCategoryFilter] = useState<string>('ALL')
+  const [budgetTierFilter, setBudgetTierFilter] = useState<string>('ALL')
 
   const isAdmin = profile?.role === 'ADMIN'
   const isManager = profile?.role === 'SALES_MANAGER'
@@ -112,6 +114,10 @@ export default function LeadsClient({
     }
 
     if (sourceFilter !== 'ALL' && lead.source !== sourceFilter) return false
+
+    if (categoryFilter !== 'ALL' && lead.client_category !== categoryFilter) return false
+
+    if (budgetTierFilter !== 'ALL' && lead.budget_tier !== budgetTierFilter) return false
 
     return true
   })
@@ -239,6 +245,36 @@ export default function LeadsClient({
             </select>
           )}
 
+          {/* Client Category Filter */}
+          <select
+            value={categoryFilter}
+            onChange={(e) => setCategoryFilter(e.target.value)}
+            className="form-select"
+            style={{ width: 'auto', fontSize: 12.5 }}
+          >
+            <option value="ALL">All categories</option>
+            {CLIENT_CATEGORIES.map((cat) => (
+              <option key={cat.value} value={cat.value}>
+                {cat.label}
+              </option>
+            ))}
+          </select>
+
+          {/* Budget Tier Filter */}
+          <select
+            value={budgetTierFilter}
+            onChange={(e) => setBudgetTierFilter(e.target.value)}
+            className="form-select"
+            style={{ width: 'auto', fontSize: 12.5 }}
+          >
+            <option value="ALL">All budgets</option>
+            {BUDGET_TIERS.map((tier) => (
+              <option key={tier.value} value={tier.value}>
+                {tier.label}
+              </option>
+            ))}
+          </select>
+
           {/* Source Filter */}
           <select
             value={sourceFilter}
@@ -253,7 +289,7 @@ export default function LeadsClient({
             <option value="TIKTOK">TikTok</option>
             <option value="SNAPCHAT">Snapchat</option>
             <option value="WEBSITE_FORM">Website Form</option>
-            <option value="PROPERTY_INQUIRY">Property Inquiry</option>
+            <option value="PROPERTY_INQUIRY">Brochure Download</option>
           </select>
         </div>
 

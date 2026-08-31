@@ -22,19 +22,22 @@ import {
   X,
   Check,
   Loader2,
+  Calendar,
   ExternalLink,
   Globe,
   UserCheck,
   User,
 } from 'lucide-react'
-import type {
-  Lead,
-  LeadStage,
-  Profile,
-  LeadNote,
-  LeadFollowup,
-  LeadActivity,
-  Project,
+import {
+  CLIENT_CATEGORIES,
+  BUDGET_TIERS,
+  type Lead,
+  type LeadStage,
+  type Profile,
+  type LeadNote,
+  type LeadFollowup,
+  type LeadActivity,
+  type Project,
 } from '@/types/database'
 import Link from 'next/link'
 import { formatCurrency, formatDate } from '@/lib/utils'
@@ -137,6 +140,10 @@ export default function LeadDetailClient({
     cityMode: isInitialCityPredefined ? ('PREDEFINED' as 'PREDEFINED' | 'CUSTOM') : ('CUSTOM' as 'PREDEFINED' | 'CUSTOM'),
     city: isInitialCityPredefined ? (initialLead.city || '') : 'CUSTOM',
     customCity: isInitialCityPredefined ? '' : (initialLead.city || ''),
+    client_category: initialLead.client_category || '',
+    budget_tier: initialLead.budget_tier || '',
+    meeting_date: initialLead.meeting_date || '',
+    meeting_time: initialLead.meeting_time || '',
     potential_value: initialLead.potential_value ? String(initialLead.potential_value) : '',
   })
   const [savingLead, setSavingLead] = useState(false)
@@ -207,8 +214,11 @@ export default function LeadDetailClient({
     ])
   }
 
-  // Handle Agent change with immediate UI feedback
+  // Handle Agent change with immediate UI feedback and duplicate guard
   async function handleAgentChange(newAgentId: string) {
+    // Guard against redundant/repeated triggers for the same agent
+    if (newAgentId === (lead.assigned_agent_id || '')) return
+
     const targetAgent = agents.find((a) => a.id === newAgentId)
     setLead((prev) => ({
       ...prev,
@@ -236,6 +246,10 @@ export default function LeadDetailClient({
       phone: editForm.phone.trim() || null,
       email: editForm.email.trim() || null,
       city: resolvedCity,
+      client_category: editForm.client_category || null,
+      budget_tier: editForm.budget_tier || null,
+      meeting_date: editForm.meeting_date || null,
+      meeting_time: editForm.meeting_time.trim() || null,
       potential_value: editForm.potential_value ? parseFloat(editForm.potential_value) : null,
     }
 
@@ -653,7 +667,7 @@ export default function LeadDetailClient({
             {/* Contact Details Card */}
             <div className="card">
               <div className="flex items-center justify-between" style={{ marginBottom: 12, borderBottom: '1px solid #F1F5F9', paddingBottom: 8 }}>
-                <h3 className="text-section-header">Contact Information</h3>
+                <h3 className="text-section-header">Contact &amp; Profile</h3>
                 <button
                   onClick={() => {
                     const isPredefined = lead.city
@@ -670,6 +684,10 @@ export default function LeadDetailClient({
                       cityMode: isPredefined ? 'PREDEFINED' : 'CUSTOM',
                       city: isPredefined ? matchedCity : 'CUSTOM',
                       customCity: isPredefined ? '' : (lead.city || ''),
+                      client_category: lead.client_category || '',
+                      budget_tier: lead.budget_tier || '',
+                      meeting_date: lead.meeting_date || '',
+                      meeting_time: lead.meeting_time || '',
                       potential_value: lead.potential_value ? String(lead.potential_value) : '',
                     })
                     setIsEditingLead(true)
@@ -714,12 +732,88 @@ export default function LeadDetailClient({
                 </div>
 
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <Tag size={16} style={{ color: '#6366F1' }} />
+                  <div>
+                    <div className="text-label" style={{ fontSize: 11 }}>CLIENT CATEGORY</div>
+                    {lead.client_category ? (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 2 }}>
+                        <span
+                          style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: 4,
+                            padding: '3px 8px',
+                            borderRadius: '6px',
+                            fontSize: '12px',
+                            fontWeight: 700,
+                            backgroundColor: '#EEF2FF',
+                            color: '#4338CA',
+                            border: '1px solid #C7D2FE',
+                          }}
+                        >
+                          🏷️ {lead.client_category}
+                        </span>
+                      </div>
+                    ) : (
+                      <div style={{ color: '#94A3B8', fontSize: 13 }}>Not categorized</div>
+                    )}
+                  </div>
+                </div>
+
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                   <DollarSign size={16} style={{ color: '#10B981' }} />
                   <div>
-                    <div className="text-label" style={{ fontSize: 11 }}>ESTIMATED VALUE</div>
-                    <div style={{ color: '#10B981', fontWeight: 700, fontSize: 15 }}>
-                      {formatCurrency(lead.potential_value)}
+                    <div className="text-label" style={{ fontSize: 11 }}>BUDGET &amp; VALUE</div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginTop: 2 }}>
+                      {lead.budget_tier && (
+                        <span
+                          style={{
+                            padding: '2px 8px',
+                            borderRadius: '4px',
+                            fontSize: '11.5px',
+                            fontWeight: 700,
+                            backgroundColor: '#ECFDF5',
+                            color: '#047857',
+                            border: '1px solid #A7F3D0',
+                          }}
+                        >
+                          {lead.budget_tier}
+                        </span>
+                      )}
+                      <span style={{ color: '#10B981', fontWeight: 700, fontSize: 14 }}>
+                        {formatCurrency(lead.potential_value)}
+                      </span>
                     </div>
+                  </div>
+                </div>
+
+                {/* Scheduled Meeting Info */}
+                <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+                  <Calendar size={16} style={{ color: '#2563EB', marginTop: 2 }} />
+                  <div style={{ width: '100%' }}>
+                    <div className="text-label" style={{ fontSize: 11 }}>SCHEDULED MEETING</div>
+                    {lead.meeting_date ? (
+                      <div
+                        style={{
+                          marginTop: 4,
+                          padding: '6px 10px',
+                          backgroundColor: '#EFF6FF',
+                          border: '1px solid #BFDBFE',
+                          borderRadius: '6px',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 8,
+                          fontSize: '12.5px',
+                          color: '#1E40AF',
+                          fontWeight: 600,
+                        }}
+                      >
+                        <span>📅 {formatDate(lead.meeting_date)}</span>
+                        {lead.meeting_time && <span>⏰ {lead.meeting_time}</span>}
+                      </div>
+                    ) : (
+                      <div style={{ color: '#94A3B8', fontSize: 13, marginTop: 2 }}>No meeting scheduled</div>
+                    )}
                   </div>
                 </div>
               </div>
@@ -1302,6 +1396,38 @@ export default function LeadDetailClient({
                 </div>
 
                 <div className="form-group">
+                  <label className="form-label">Client Category</label>
+                  <select
+                    value={editForm.client_category}
+                    onChange={(e) => setEditForm({ ...editForm, client_category: e.target.value })}
+                    className="form-select"
+                  >
+                    <option value="">Select Client Category...</option>
+                    {CLIENT_CATEGORIES.map((cat) => (
+                      <option key={cat.value} value={cat.value}>
+                        {cat.label} — {cat.description}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="form-group">
+                  <label className="form-label">Budget Tier</label>
+                  <select
+                    value={editForm.budget_tier}
+                    onChange={(e) => setEditForm({ ...editForm, budget_tier: e.target.value })}
+                    className="form-select"
+                  >
+                    <option value="">Select Budget Tier...</option>
+                    {BUDGET_TIERS.map((tier) => (
+                      <option key={tier.value} value={tier.value}>
+                        {tier.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="form-group">
                   <label className="form-label">Estimated Deal Value (SAR)</label>
                   <input
                     type="number"
@@ -1309,6 +1435,34 @@ export default function LeadDetailClient({
                     onChange={(e) => setEditForm({ ...editForm, potential_value: e.target.value })}
                     className="form-input"
                   />
+                </div>
+
+                {/* Scheduled Meeting section */}
+                <div className="form-group" style={{ background: '#F8FAFC', padding: '12px 14px', borderRadius: 8, border: '1px solid #E2E8F0' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
+                    <Calendar size={14} style={{ color: '#2563EB' }} />
+                    <span style={{ fontSize: 12, fontWeight: 700, color: '#1E293B' }}>Client Meeting Schedule</span>
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                    <div>
+                      <label className="form-label" style={{ fontSize: 11 }}>Date</label>
+                      <input
+                        type="date"
+                        value={editForm.meeting_date}
+                        onChange={(e) => setEditForm({ ...editForm, meeting_date: e.target.value })}
+                        className="form-input"
+                      />
+                    </div>
+                    <div>
+                      <label className="form-label" style={{ fontSize: 11 }}>Time</label>
+                      <input
+                        type="time"
+                        value={editForm.meeting_time}
+                        onChange={(e) => setEditForm({ ...editForm, meeting_time: e.target.value })}
+                        className="form-input"
+                      />
+                    </div>
+                  </div>
                 </div>
               </div>
 

@@ -248,6 +248,10 @@ export interface Lead {
   email?: string | null
   city?: string | null
   interest?: string | null
+  client_category?: string | null
+  budget_tier?: string | null
+  meeting_date?: string | null
+  meeting_time?: string | null
   potential_value?: number | null
   form_data?: Record<string, any>
   raw_payload?: any
@@ -265,6 +269,25 @@ export interface Lead {
   campaign?: { id: string; name: string } | null
   property?: { id: string; name_en: string; name_ar: string } | null
 }
+
+export const CLIENT_CATEGORIES = [
+  { value: 'End-User Buyer', label: 'End-User Buyer', description: 'Wants to live in it himself' },
+  { value: 'Investor', label: 'Investor', description: 'Wants ROI / rental income' },
+  { value: 'Tenant / Renter', label: 'Tenant / Renter', description: 'Looking for rental investment' },
+  { value: 'Seller / Landlord', label: 'Seller / Landlord', description: 'Wants to list his property with you' },
+  { value: 'Developer', label: 'Developer', description: 'Looking for land / bulk deal' },
+  { value: 'Cold Client', label: 'Cold Client', description: 'Just exploring' },
+] as const
+
+export type ClientCategoryValue = (typeof CLIENT_CATEGORIES)[number]['value']
+
+export const BUDGET_TIERS = [
+  { value: 'A - Premium: 2M+', label: 'A - Premium: 2M+', min: 2000000, max: null },
+  { value: 'B - Mid-Range: 700K - 2M SAR', label: 'B - Mid-Range: 700K - 2M SAR', min: 700000, max: 2000000 },
+  { value: 'C - Affordable: Below 700K SAR', label: 'C - Affordable: Below 700K SAR', min: 0, max: 700000 },
+] as const
+
+export type BudgetTierValue = (typeof BUDGET_TIERS)[number]['value']
 
 export interface ImportBatch {
   id: string

@@ -179,12 +179,12 @@ export default function LeadsTable({
       )}
 
       {/* Table Container */}
-      <div className="table-container">
-        <table className="crm-table">
+      <div className="table-container" style={{ width: '100%', overflowX: 'auto' }}>
+        <table className="crm-table" style={{ width: '100%', tableLayout: 'auto' }}>
           <thead>
             <tr>
               {isAdmin && (
-                <th style={{ width: 36, textAlign: 'center' }}>
+                <th style={{ width: 32, textAlign: 'center', padding: '8px 6px' }}>
                   <button
                     onClick={toggleSelectAll}
                     style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#64748B', display: 'flex', alignItems: 'center' }}
@@ -193,16 +193,15 @@ export default function LeadsTable({
                   </button>
                 </th>
               )}
-              <th>Lead Name</th>
-              <th>City</th>
-              <th>Contact Info</th>
-              <th>Stage</th>
-              <th>Source</th>
-              <th>Property</th>
-              <th>Value</th>
-              <th>Assigned Agent</th>
-              <th>Created</th>
-              <th style={{ textAlign: 'right' }}>Action</th>
+              <th style={{ padding: '8px 10px' }}>Lead Name &amp; City</th>
+              <th style={{ padding: '8px 10px' }}>Contact Info</th>
+              <th style={{ padding: '8px 10px' }}>Stage</th>
+              <th style={{ padding: '8px 10px' }}>Source</th>
+              <th style={{ padding: '8px 10px' }}>Property</th>
+              <th style={{ padding: '8px 10px' }}>Value</th>
+              <th style={{ padding: '8px 10px' }}>Assigned Agent</th>
+              <th style={{ padding: '8px 10px' }}>Created</th>
+              <th style={{ textAlign: 'right', padding: '8px 10px', width: 60 }}>Action</th>
             </tr>
           </thead>
 
@@ -212,7 +211,7 @@ export default function LeadsTable({
               return (
                 <tr key={lead.id} style={{ backgroundColor: isSelected ? '#EFF6FF' : undefined }}>
                   {isAdmin && (
-                    <td style={{ textAlign: 'center' }}>
+                    <td style={{ textAlign: 'center', padding: '8px 6px' }}>
                       <button
                         onClick={() => toggleSelectOne(lead.id)}
                         style={{ background: 'none', border: 'none', cursor: 'pointer', color: isSelected ? '#1D4ED8' : '#94A3B8', display: 'flex', alignItems: 'center' }}
@@ -222,116 +221,113 @@ export default function LeadsTable({
                     </td>
                   )}
 
-                  <td>
+                  <td style={{ padding: '8px 10px' }}>
                     <Link
                       href={`/leads/${lead.id}`}
-                      style={{ fontWeight: 700, fontSize: 13.5, color: '#0F172A', textDecoration: 'none', display: 'block' }}
+                      style={{ fontWeight: 700, fontSize: 13, color: '#0F172A', textDecoration: 'none', display: 'block' }}
                       className="hover:text-blue-700 hover:underline"
                     >
                       {lead.name || 'Unnamed Lead'}
                     </Link>
-                  </td>
-
-                  <td>
-                    {lead.city ? (
-                      <span style={{ fontSize: 12.5, fontWeight: 600, color: '#334155' }}>
-                        {lead.city}
-                      </span>
-                    ) : (
-                      <span style={{ color: '#94A3B8', fontSize: 12.5 }}>—</span>
+                    {lead.city && (
+                      <div style={{ fontSize: 11.5, color: '#64748B', marginTop: 1 }}>
+                        📍 {lead.city}
+                      </div>
                     )}
                   </td>
 
-                  <td>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 2, fontSize: 12.5 }}>
+                  <td style={{ padding: '8px 10px' }}>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 2, fontSize: 12 }}>
                       {lead.phone && (
                         <div style={{ display: 'flex', alignItems: 'center', gap: 4, color: '#0F172A', fontWeight: 500 }}>
-                          <Phone size={12} style={{ color: '#64748B' }} />
+                          <Phone size={11} style={{ color: '#64748B', flexShrink: 0 }} />
                           <span>{lead.phone}</span>
                         </div>
                       )}
                       {lead.email && (
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 4, color: '#64748B' }}>
-                          <Mail size={12} style={{ color: '#94A3B8' }} />
-                          <span>{lead.email}</span>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 4, color: '#64748B', fontSize: 11.5 }}>
+                          <Mail size={11} style={{ color: '#94A3B8', flexShrink: 0 }} />
+                          <span style={{ maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{lead.email}</span>
                         </div>
                       )}
                       {!lead.phone && !lead.email && <span style={{ color: '#94A3B8' }}>—</span>}
                     </div>
                   </td>
 
-                  <td>
+                  <td style={{ padding: '8px 10px' }}>
                     <span
                       className="badge"
                       style={{
                         backgroundColor: `${lead.stage?.color_hex || '#3B82F6'}15`,
                         color: lead.stage?.color_hex || '#3B82F6',
                         border: `1px solid ${lead.stage?.color_hex || '#3B82F6'}30`,
+                        fontSize: 11.5,
+                        padding: '2px 8px',
                       }}
                     >
                       {lead.stage?.label || '—'}
                     </span>
                   </td>
 
-                  <td>
-                    <span className="badge badge-source">
+                  <td style={{ padding: '8px 10px' }}>
+                    <span className="badge badge-source" style={{ fontSize: 11, padding: '2px 6px' }}>
                       {lead.source}
                     </span>
                   </td>
 
-                  <td>
+                  <td style={{ padding: '8px 10px' }}>
                     {lead.property ? (
-                      <span style={{ fontSize: 12.5, color: '#D97706', fontWeight: 600 }}>
+                      <span style={{ fontSize: 12, color: '#D97706', fontWeight: 600 }}>
                         {lead.property.name_en}
                       </span>
                     ) : lead.interest ? (
-                      <span style={{ fontSize: 12.5, color: '#D97706', fontWeight: 500 }}>
+                      <span style={{ fontSize: 12, color: '#D97706', fontWeight: 500 }}>
                         {lead.interest}
                       </span>
                     ) : (
-                      <span style={{ color: '#94A3B8', fontSize: 12.5 }}>—</span>
+                      <span style={{ color: '#94A3B8', fontSize: 12 }}>—</span>
                     )}
                   </td>
 
-                  <td>
-                    <span style={{ fontWeight: 700, color: lead.potential_value ? '#10B981' : '#94A3B8', fontSize: 13 }}>
+                  <td style={{ padding: '8px 10px' }}>
+                    <span style={{ fontWeight: 700, color: lead.potential_value ? '#10B981' : '#94A3B8', fontSize: 12.5 }}>
                       {formatCurrency(lead.potential_value)}
                     </span>
                   </td>
 
-                  <td>
+                  <td style={{ padding: '8px 10px' }}>
                     {lead.assigned_agent ? (
-                      <span style={{ fontSize: 12.5, color: '#1D4ED8', fontWeight: 600 }}>
+                      <span style={{ fontSize: 12, color: '#1D4ED8', fontWeight: 600 }}>
                         {lead.assigned_agent.name}
                       </span>
                     ) : (
-                      <span style={{ color: '#94A3B8', fontSize: 12.5 }}>Unassigned</span>
+                      <span style={{ color: '#94A3B8', fontSize: 12 }}>Unassigned</span>
                     )}
                   </td>
 
-                  <td style={{ fontSize: 12, color: '#64748B' }}>
+                  <td style={{ fontSize: 11.5, color: '#64748B', padding: '8px 10px', whiteSpace: 'nowrap' }}>
                     {formatDate(lead.created_at)}
                   </td>
 
-                  <td style={{ textAlign: 'right' }}>
-                    <div style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                  <td style={{ textAlign: 'right', padding: '8px 8px', whiteSpace: 'nowrap' }}>
+                    <div style={{ display: 'inline-flex', alignItems: 'center', gap: 2 }}>
                       <Link
                         href={`/leads/${lead.id}`}
                         className="btn btn-ghost btn-sm"
                         title="View Details"
-                        style={{ color: '#0F172A' }}
+                        style={{ color: '#0F172A', padding: '2px 4px' }}
                       >
-                        <ChevronRight size={16} />
+                        <ChevronRight size={15} />
                       </Link>
 
                       {isAdmin && (
                         <button
                           onClick={() => setLeadToDelete({ id: lead.id, name: lead.name || 'Unnamed Lead' })}
                           className="btn btn-ghost btn-sm"
-                          style={{ color: '#EF4444' }}
+                          style={{ color: '#EF4444', padding: '2px 4px' }}
                           title="Delete Lead"
                         >
-                          <Trash2 size={14} />
+                          <Trash2 size={13} />
                         </button>
                       )}
                     </div>

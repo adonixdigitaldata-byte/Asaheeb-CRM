@@ -1,8 +1,8 @@
 'use client'
 
 import { useState } from 'react'
-import { X, Building } from 'lucide-react'
-import type { LeadStage, Project, AdCampaign } from '@/types/database'
+import { X, Building, Calendar, Clock, DollarSign, Tag } from 'lucide-react'
+import { CLIENT_CATEGORIES, BUDGET_TIERS, type LeadStage, type Project, type AdCampaign } from '@/types/database'
 import { PREDEFINED_CITIES } from '@/lib/cities'
 
 interface Props {
@@ -23,13 +23,15 @@ const SOURCES = [
   { value: 'TIKTOK', label: 'TikTok' },
   { value: 'SNAPCHAT', label: 'Snapchat' },
   { value: 'WEBSITE_FORM', label: 'Website Form' },
-  { value: 'PROPERTY_INQUIRY', label: 'Property Inquiry' },
+  { value: 'PROPERTY_INQUIRY', label: 'Brochure Download' },
+  { value: 'XLSX_IMPORT', label: 'Excel Import' },
 ]
 
 export default function AddLeadModal({
   stages,
   agents,
   projects,
+  campaigns = [],
   currentUserId,
   userRole,
   onClose,
@@ -45,6 +47,10 @@ export default function AddLeadModal({
     cityMode: 'PREDEFINED' as 'PREDEFINED' | 'CUSTOM',
     city: '',
     customCity: '',
+    client_category: '',
+    budget_tier: '',
+    meeting_date: '',
+    meeting_time: '',
     propertyMode: 'NONE' as 'NONE' | 'DB' | 'CUSTOM',
     property_id: '',
     customProperty: '',
@@ -102,6 +108,10 @@ export default function AddLeadModal({
           email: form.email.trim() || null,
           city: resolvedCity,
           interest: resolvedInterest,
+          client_category: form.client_category || null,
+          budget_tier: form.budget_tier || null,
+          meeting_date: form.meeting_date || null,
+          meeting_time: form.meeting_time.trim() || null,
           potential_value: form.potential_value ? parseFloat(form.potential_value) : null,
           source: form.source,
           stage_id: form.stage_id,
@@ -312,6 +322,46 @@ export default function AddLeadModal({
                 )}
               </div>
 
+              {/* Client Category */}
+              <div className="form-group">
+                <label className="form-label flex items-center gap-1">
+                  <Tag size={13} style={{ color: '#6366F1' }} />
+                  <span>Client Category</span>
+                </label>
+                <select
+                  value={form.client_category}
+                  onChange={(e) => setForm({ ...form, client_category: e.target.value })}
+                  className="form-select"
+                >
+                  <option value="">Select Client Category...</option>
+                  {CLIENT_CATEGORIES.map((cat) => (
+                    <option key={cat.value} value={cat.value}>
+                      {cat.label} — {cat.description}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Budget Tier */}
+              <div className="form-group">
+                <label className="form-label flex items-center gap-1">
+                  <DollarSign size={13} style={{ color: '#10B981' }} />
+                  <span>Budget Tier</span>
+                </label>
+                <select
+                  value={form.budget_tier}
+                  onChange={(e) => setForm({ ...form, budget_tier: e.target.value })}
+                  className="form-select"
+                >
+                  <option value="">Select Budget Tier...</option>
+                  {BUDGET_TIERS.map((tier) => (
+                    <option key={tier.value} value={tier.value}>
+                      {tier.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
               {/* Potential Value */}
               <div className="form-group">
                 <label className="form-label">Estimated Deal Value (SAR)</label>
@@ -322,6 +372,34 @@ export default function AddLeadModal({
                   placeholder="e.g. 1500000"
                   className="form-input"
                 />
+              </div>
+
+              {/* Scheduled Meeting (Date & Time) */}
+              <div className="form-group" style={{ gridColumn: '1 / -1', background: '#F8FAFC', padding: '12px 14px', borderRadius: 8, border: '1px solid #E2E8F0' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
+                  <Calendar size={14} style={{ color: '#2563EB' }} />
+                  <span style={{ fontSize: 12, fontWeight: 700, color: '#1E293B' }}>Schedule Client Meeting (Optional)</span>
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 10 }}>
+                  <div>
+                    <label className="form-label" style={{ fontSize: 11 }}>Meeting Date</label>
+                    <input
+                      type="date"
+                      value={form.meeting_date}
+                      onChange={(e) => setForm({ ...form, meeting_date: e.target.value })}
+                      className="form-input"
+                    />
+                  </div>
+                  <div>
+                    <label className="form-label" style={{ fontSize: 11 }}>Meeting Time</label>
+                    <input
+                      type="time"
+                      value={form.meeting_time}
+                      onChange={(e) => setForm({ ...form, meeting_time: e.target.value })}
+                      className="form-input"
+                    />
+                  </div>
+                </div>
               </div>
 
               {/* Associated Property / Project (Dropdown & Custom Option) */}

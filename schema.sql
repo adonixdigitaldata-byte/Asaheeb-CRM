@@ -212,6 +212,10 @@ create table if not exists leads (
   email text,
   city text,
   interest text,
+  client_category text,
+  budget_tier text,
+  meeting_date date,
+  meeting_time text,
   potential_value numeric(12,2) default 0.00,
   form_data jsonb not null default '{}',
   raw_payload jsonb,
@@ -230,6 +234,8 @@ create index if not exists idx_leads_agent on leads(assigned_agent_id);
 create index if not exists idx_leads_property on leads(property_id);
 create index if not exists idx_leads_phone on leads(phone);
 create index if not exists idx_leads_email on leads(email);
+create index if not exists idx_leads_client_category on leads(client_category);
+create index if not exists idx_leads_meeting_date on leads(meeting_date);
 create index if not exists idx_leads_created on leads(created_at desc);
 
 -- ============================================================
@@ -364,6 +370,49 @@ $$ language plpgsql;
 
 drop trigger if exists leads_updated_at on leads;
 create trigger leads_updated_at before update on leads for each row execute function update_updated_at();
+
+-- Automatically record an initial activity in lead_activities when a lead is created
+create or replace function fn_log_lead_creation_activity()
+returns trigger as $$
+declare
+  v_agent_name text;
+begin
+  if NEW.assigned_agent_id is not null then
+    select name into v_agent_name from profiles where id = NEW.assigned_agent_id;
+  end if;
+
+  insert into lead_activities (
+    lead_id,
+    activity_type,
+    performed_by,
+    metadata,
+    created_at
+  ) values (
+    NEW.id,
+    'LEAD_CREATED',
+    null,
+    jsonb_build_object(
+      'source', coalesce(NEW.source, 'WEBSITE_FORM'),
+      'assigned_agent_id', NEW.assigned_agent_id,
+      'assigned_agent_name', v_agent_name,
+      'client_category', NEW.client_category,
+      'budget_tier', NEW.budget_tier,
+      'meeting_date', NEW.meeting_date,
+      'meeting_time', NEW.meeting_time,
+      'auto_assigned', (NEW.assigned_agent_id is not null)
+    ),
+    now()
+  );
+
+  return NEW;
+end;
+$$ language plpgsql security definer;
+
+drop trigger if exists trg_log_lead_creation_activity on leads;
+create trigger trg_log_lead_creation_activity
+  after insert on leads
+  for each row
+  execute function fn_log_lead_creation_activity();
 
 drop trigger if exists profiles_updated_at on profiles;
 create trigger profiles_updated_at before update on profiles for each row execute function update_updated_at();
