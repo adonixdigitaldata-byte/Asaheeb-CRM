@@ -113,7 +113,26 @@ export default function LeadsClient({
       }
     }
 
-    if (sourceFilter !== 'ALL' && lead.source !== sourceFilter) return false
+    if (sourceFilter !== 'ALL') {
+      if (sourceFilter === 'BROCHURE_DOWNLOAD') {
+        const isBrochure =
+          lead.source === 'BROCHURE_DOWNLOAD' ||
+          lead.form_data?.form_type?.toLowerCase?.().includes('brochure') ||
+          lead.form_data?.source?.toLowerCase?.().includes('brochure')
+        if (!isBrochure) return false
+      } else if (sourceFilter === 'PROPERTY_INQUIRY') {
+        const isBrochure =
+          lead.form_data?.form_type?.toLowerCase?.().includes('brochure') ||
+          lead.form_data?.source?.toLowerCase?.().includes('brochure')
+        const isPropertyInquiry =
+          (lead.source === 'PROPERTY_INQUIRY' && !isBrochure) ||
+          lead.form_data?.form_type?.toLowerCase?.().includes('project') ||
+          lead.form_data?.form_type?.toLowerCase?.().includes('property')
+        if (!isPropertyInquiry) return false
+      } else if (lead.source !== sourceFilter) {
+        return false
+      }
+    }
 
     if (categoryFilter !== 'ALL' && lead.client_category !== categoryFilter) return false
 
@@ -283,13 +302,15 @@ export default function LeadsClient({
             style={{ width: 'auto', fontSize: 12.5 }}
           >
             <option value="ALL">All sources</option>
-            <option value="MANUAL">Manual</option>
+            <option value="MANUAL">Manual Entry</option>
             <option value="WHATSAPP">WhatsApp</option>
             <option value="META_ADS">Meta Ads</option>
             <option value="TIKTOK">TikTok</option>
             <option value="SNAPCHAT">Snapchat</option>
             <option value="WEBSITE_FORM">Website Form</option>
-            <option value="PROPERTY_INQUIRY">Brochure Download</option>
+            <option value="PROPERTY_INQUIRY">Project Inquiry</option>
+            <option value="BROCHURE_DOWNLOAD">Brochure Download</option>
+            <option value="XLSX_IMPORT">Excel Import</option>
           </select>
         </div>
 

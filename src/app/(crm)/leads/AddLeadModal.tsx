@@ -1,9 +1,10 @@
 'use client'
 
 import { useState } from 'react'
-import { X, Building, Calendar, Clock, DollarSign, Tag } from 'lucide-react'
+import { X, Building, Calendar, Clock, DollarSign, Tag, Search, MapPin, Edit2 } from 'lucide-react'
 import { CLIENT_CATEGORIES, BUDGET_TIERS, type LeadStage, type Project, type AdCampaign } from '@/types/database'
 import { PREDEFINED_CITIES } from '@/lib/cities'
+import ProjectSearchModal from '@/components/ProjectSearchModal'
 
 interface Props {
   stages: LeadStage[]
@@ -23,7 +24,8 @@ const SOURCES = [
   { value: 'TIKTOK', label: 'TikTok' },
   { value: 'SNAPCHAT', label: 'Snapchat' },
   { value: 'WEBSITE_FORM', label: 'Website Form' },
-  { value: 'PROPERTY_INQUIRY', label: 'Brochure Download' },
+  { value: 'PROPERTY_INQUIRY', label: 'Project Inquiry' },
+  { value: 'BROCHURE_DOWNLOAD', label: 'Brochure Download' },
   { value: 'XLSX_IMPORT', label: 'Excel Import' },
 ]
 
@@ -39,6 +41,7 @@ export default function AddLeadModal({
 }: Props) {
   const [loading, setLoading] = useState(false)
   const [errors, setErrors] = useState<Record<string, string>>({})
+  const [isProjectModalOpen, setIsProjectModalOpen] = useState(false)
 
   const [form, setForm] = useState({
     name: '',
@@ -402,59 +405,191 @@ export default function AddLeadModal({
                 </div>
               </div>
 
-              {/* Associated Property / Project (Dropdown & Custom Option) */}
+              {/* Associated Property / Project (Searchable Modal & Custom Option) */}
               <div className="form-group" style={{ gridColumn: '1 / -1' }}>
                 <label className="form-label flex items-center justify-between">
-                  <span>Associated Property / Project</span>
-                </label>
-                <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-                  <select
-                    value={
-                      form.propertyMode === 'CUSTOM'
-                        ? 'CUSTOM'
-                        : form.propertyMode === 'DB'
-                        ? form.property_id
-                        : ''
-                    }
-                    onChange={(e) => {
-                      const val = e.target.value
-                      if (val === 'CUSTOM') {
-                        setForm({ ...form, propertyMode: 'CUSTOM', property_id: '' })
-                      } else if (val === '') {
-                        setForm({ ...form, propertyMode: 'NONE', property_id: '', customProperty: '' })
-                      } else {
-                        setForm({ ...form, propertyMode: 'DB', property_id: val, customProperty: '' })
-                      }
-                    }}
-                    className="form-select"
-                    style={{ flex: '1 1 240px' }}
-                  >
-                    <option value="">None / General Inquiry</option>
-                    {projects.length > 0 && (
-                      <optgroup label="Database Projects">
-                        {projects.map((p) => (
-                          <option key={p.id} value={p.id}>
-                            {p.name_en} ({p.city_en})
-                          </option>
-                        ))}
-                      </optgroup>
-                    )}
-                    <option value="CUSTOM">➕ Custom Property Name (Free text)</option>
-                  </select>
-
-                  {/* Custom Property text input if CUSTOM is selected */}
-                  {form.propertyMode === 'CUSTOM' && (
-                    <input
-                      type="text"
-                      autoFocus
-                      value={form.customProperty}
-                      onChange={(e) => setForm({ ...form, customProperty: e.target.value })}
-                      placeholder="Type property name (e.g. Al Narjis Luxury Villa)"
-                      className="form-input"
-                      style={{ flex: '1 1 260px' }}
-                    />
+                  <span className="flex items-center gap-1.5">
+                    <Building size={14} style={{ color: '#2563EB' }} />
+                    <span>Associated Property / Project</span>
+                  </span>
+                  {form.propertyMode !== 'NONE' && (
+                    <button
+                      type="button"
+                      onClick={() => setForm({ ...form, propertyMode: 'NONE', property_id: '', customProperty: '' })}
+                      className="btn btn-ghost btn-xs"
+                      style={{ color: '#94A3B8', fontSize: '11px', padding: '1px 6px' }}
+                    >
+                      Clear Selection
+                    </button>
                   )}
-                </div>
+                </label>
+
+                {/* Selected Database Project View */}
+                {form.propertyMode === 'DB' && form.property_id && (
+                  <div
+                    style={{
+                      padding: '12px 14px',
+                      borderRadius: '10px',
+                      backgroundColor: '#EFF6FF',
+                      border: '1.5px solid #93C5FD',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      gap: 12,
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0, flex: 1 }}>
+                      <div
+                        style={{
+                          width: 34,
+                          height: 34,
+                          borderRadius: 8,
+                          backgroundColor: '#DBEAFE',
+                          color: '#1D4ED8',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          flexShrink: 0,
+                        }}
+                      >
+                        <Building size={18} />
+                      </div>
+                      <div style={{ minWidth: 0, flex: 1 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                          <span style={{ fontWeight: 700, fontSize: '0.875rem', color: '#1E3A8A' }}>
+                            {projects.find((p) => p.id === form.property_id)?.name_en || 'Selected Project'}
+                          </span>
+                          {projects.find((p) => p.id === form.property_id)?.name_ar && (
+                            <span style={{ fontSize: '0.75rem', color: '#3B82F6', direction: 'rtl' }}>
+                              ({projects.find((p) => p.id === form.property_id)?.name_ar})
+                            </span>
+                          )}
+                        </div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: '0.75rem', color: '#60A5FA', marginTop: 2 }}>
+                          {(projects.find((p) => p.id === form.property_id)?.city_en || projects.find((p) => p.id === form.property_id)?.district_en) && (
+                            <span style={{ display: 'flex', alignItems: 'center', gap: 3, color: '#2563EB' }}>
+                              <MapPin size={11} />
+                              {[projects.find((p) => p.id === form.property_id)?.district_en, projects.find((p) => p.id === form.property_id)?.city_en].filter(Boolean).join(', ')}
+                            </span>
+                          )}
+                          {projects.find((p) => p.id === form.property_id)?.developer_en && (
+                            <span style={{ color: '#475569' }}>
+                              Dev: {projects.find((p) => p.id === form.property_id)?.developer_en}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+                      <button
+                        type="button"
+                        onClick={() => setIsProjectModalOpen(true)}
+                        className="btn btn-sm btn-secondary"
+                        style={{ fontSize: '0.75rem', padding: '5px 10px', height: 'auto', borderRadius: 6 }}
+                      >
+                        <Search size={13} style={{ marginRight: 4 }} />
+                        Change
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setForm({ ...form, propertyMode: 'NONE', property_id: '', customProperty: '' })}
+                        className="btn btn-ghost btn-icon btn-sm"
+                        style={{ color: '#64748B', padding: 4 }}
+                        title="Remove project"
+                      >
+                        <X size={16} />
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {/* Custom Property View */}
+                {form.propertyMode === 'CUSTOM' && (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                    <div style={{ display: 'flex', gap: 8 }}>
+                      <input
+                        type="text"
+                        autoFocus
+                        value={form.customProperty}
+                        onChange={(e) => setForm({ ...form, customProperty: e.target.value })}
+                        placeholder="Type property name (e.g. Al Narjis Luxury Villa, Compound Unit 4)"
+                        className="form-input"
+                        style={{ flex: 1 }}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setIsProjectModalOpen(true)}
+                        className="btn btn-sm btn-secondary"
+                        style={{ whiteSpace: 'nowrap', display: 'flex', alignItems: 'center', gap: 5 }}
+                      >
+                        <Search size={14} />
+                        <span>Search Database</span>
+                      </button>
+                    </div>
+                    <span style={{ fontSize: '11px', color: '#D97706' }}>
+                      ✍️ Custom property name will be recorded as client interest.
+                    </span>
+                  </div>
+                )}
+
+                {/* Unselected / None View */}
+                {form.propertyMode === 'NONE' && (
+                  <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                    <button
+                      type="button"
+                      onClick={() => setIsProjectModalOpen(true)}
+                      className="form-input"
+                      style={{
+                        flex: '1 1 280px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        cursor: 'pointer',
+                        textAlign: 'left',
+                        backgroundColor: '#F8FAFC',
+                        border: '1.5px dashed #CBD5E1',
+                        padding: '10px 14px',
+                        borderRadius: '8px',
+                        color: '#64748B',
+                      }}
+                    >
+                      <span style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.8125rem' }}>
+                        <Search size={15} style={{ color: '#2563EB' }} />
+                        <span>Click to search &amp; select project from database...</span>
+                      </span>
+                      <span
+                        style={{
+                          fontSize: '0.72rem',
+                          fontWeight: 700,
+                          backgroundColor: '#EFF6FF',
+                          color: '#2563EB',
+                          padding: '3px 8px',
+                          borderRadius: 4,
+                          flexShrink: 0,
+                        }}
+                      >
+                        Browse ({projects.length})
+                      </span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setForm({ ...form, propertyMode: 'CUSTOM', customProperty: '' })}
+                      className="btn btn-ghost btn-sm"
+                      style={{
+                        color: '#475569',
+                        fontSize: '0.78rem',
+                        padding: '8px 12px',
+                        border: '1px solid #E2E8F0',
+                        borderRadius: 8,
+                        whiteSpace: 'nowrap',
+                      }}
+                    >
+                      + Custom Property
+                    </button>
+                  </div>
+                )}
               </div>
             </div>
 
@@ -490,6 +625,40 @@ export default function AddLeadModal({
           </div>
         </form>
       </div>
+
+      {/* Project Search Modal */}
+      <ProjectSearchModal
+        isOpen={isProjectModalOpen}
+        projects={projects}
+        selectedProjectId={form.property_id}
+        customPropertyName={form.customProperty}
+        propertyMode={form.propertyMode}
+        onSelectProject={(project) => {
+          setForm({
+            ...form,
+            propertyMode: 'DB',
+            property_id: project.id,
+            customProperty: '',
+          })
+        }}
+        onSelectNone={() => {
+          setForm({
+            ...form,
+            propertyMode: 'NONE',
+            property_id: '',
+            customProperty: '',
+          })
+        }}
+        onSelectCustom={(customName) => {
+          setForm({
+            ...form,
+            propertyMode: 'CUSTOM',
+            property_id: '',
+            customProperty: customName,
+          })
+        }}
+        onClose={() => setIsProjectModalOpen(false)}
+      />
     </div>
   )
 }

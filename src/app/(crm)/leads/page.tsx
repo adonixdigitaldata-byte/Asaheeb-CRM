@@ -42,7 +42,7 @@ export default async function LeadsPage({
       .order('name'),
     supabase
       .from('projects')
-      .select('id, name_en, name_ar')
+      .select('id, name_en, name_ar, city_en, city_ar, district_en, district_ar, starting_price_en, developer_en')
       .order('sort_order'),
   ])
 

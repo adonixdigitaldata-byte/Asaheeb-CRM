@@ -43,6 +43,7 @@ import Link from 'next/link'
 import { formatCurrency, formatDate } from '@/lib/utils'
 import { PREDEFINED_CITIES } from '@/lib/cities'
 import ConfirmModal from '@/components/ConfirmModal'
+import ProjectSearchModal from '@/components/ProjectSearchModal'
 import { useEffect } from 'react'
 
 interface Props {
@@ -150,10 +151,6 @@ export default function LeadDetailClient({
 
   // Edit Property Modal State
   const [isEditingProperty, setIsEditingProperty] = useState(false)
-  const [propertyEditMode, setPropertyEditMode] = useState<'NONE' | 'DB' | 'CUSTOM'>('NONE')
-  const [selectedPropertyId, setSelectedPropertyId] = useState(initialLead.property_id || '')
-  const [customPropertyName, setCustomPropertyName] = useState(initialLead.interest || '')
-  const [savingProperty, setSavingProperty] = useState(false)
 
   // Edit / Delete Follow-up State
   const [showFollowupForm, setShowFollowupForm] = useState(false)
@@ -262,44 +259,64 @@ export default function LeadDetailClient({
     setSavingLead(false)
   }
 
-  // Save Property & Interest Details
-  async function handleSaveProperty(e: React.FormEvent) {
-    e.preventDefault()
-    setSavingProperty(true)
-
-    let updatedPropertyId: string | null = null
-    let updatedInterest: string | null = null
-    let updatedPropertyObj: any = null
-
-    if (propertyEditMode === 'DB' && selectedPropertyId) {
-      updatedPropertyId = selectedPropertyId
-      const p = projects.find((proj) => proj.id === selectedPropertyId)
-      updatedInterest = p ? p.name_en : null
-      updatedPropertyObj = p ? { id: p.id, name_en: p.name_en, name_ar: p.name_ar } : null
-    } else if (propertyEditMode === 'CUSTOM' && customPropertyName.trim()) {
-      updatedPropertyId = null
-      updatedInterest = customPropertyName.trim()
-      updatedPropertyObj = null
-    }
-
+  // Save Property & Interest Details via ProjectSearchModal
+  async function handleSelectProperty(project: Project) {
+    const updatedPropertyObj = { id: project.id, name_en: project.name_en, name_ar: project.name_ar }
     setLead((prev) => ({
       ...prev,
-      property_id: updatedPropertyId,
-      interest: updatedInterest,
+      property_id: project.id,
+      interest: project.name_en,
       property: updatedPropertyObj,
     }))
     setIsEditingProperty(false)
 
     logActivity('PROPERTY_UPDATED', {
-      property: updatedPropertyObj?.name_en || updatedInterest || 'General Inquiry',
+      property: project.name_en,
     })
 
     await supabase.from('leads').update({
-      property_id: updatedPropertyId,
-      interest: updatedInterest,
+      property_id: project.id,
+      interest: project.name_en,
     }).eq('id', lead.id)
+  }
 
-    setSavingProperty(false)
+  async function handleSelectNoneProperty() {
+    setLead((prev) => ({
+      ...prev,
+      property_id: null,
+      interest: null,
+      property: null,
+    }))
+    setIsEditingProperty(false)
+
+    logActivity('PROPERTY_UPDATED', {
+      property: 'General Inquiry',
+    })
+
+    await supabase.from('leads').update({
+      property_id: null,
+      interest: null,
+    }).eq('id', lead.id)
+  }
+
+  async function handleSelectCustomProperty(customName: string) {
+    const trimmed = customName.trim()
+    setLead((prev) => ({
+      ...prev,
+      property_id: null,
+      interest: trimmed || null,
+      property: null,
+    }))
+    setIsEditingProperty(false)
+
+    logActivity('PROPERTY_UPDATED', {
+      property: trimmed || 'General Inquiry',
+    })
+
+    await supabase.from('leads').update({
+      property_id: null,
+      interest: trimmed || null,
+    }).eq('id', lead.id)
   }
 
   // Add Note with instant UI feedback
@@ -746,12 +763,12 @@ export default function LeadDetailClient({
                             borderRadius: '6px',
                             fontSize: '12px',
                             fontWeight: 700,
-                            backgroundColor: '#EEF2FF',
-                            color: '#4338CA',
-                            border: '1px solid #C7D2FE',
+                            backgroundColor: lead.client_category === 'VIP' ? '#FEF3C7' : '#EEF2FF',
+                            color: lead.client_category === 'VIP' ? '#B45309' : '#4338CA',
+                            border: lead.client_category === 'VIP' ? '1px solid #FCD34D' : '1px solid #C7D2FE',
                           }}
                         >
-                          🏷️ {lead.client_category}
+                          {lead.client_category === 'VIP' ? '👑 VIP' : `🏷️ ${lead.client_category}`}
                         </span>
                       </div>
                     ) : (
@@ -826,22 +843,7 @@ export default function LeadDetailClient({
                   Property &amp; Source
                 </h3>
                 <button
-                  onClick={() => {
-                    if (lead.property_id) {
-                      setPropertyEditMode('DB')
-                      setSelectedPropertyId(lead.property_id)
-                      setCustomPropertyName('')
-                    } else if (lead.interest) {
-                      setPropertyEditMode('CUSTOM')
-                      setSelectedPropertyId('')
-                      setCustomPropertyName(lead.interest)
-                    } else {
-                      setPropertyEditMode('NONE')
-                      setSelectedPropertyId('')
-                      setCustomPropertyName('')
-                    }
-                    setIsEditingProperty(true)
-                  }}
+                  onClick={() => setIsEditingProperty(true)}
                   className="btn btn-ghost btn-sm"
                   style={{ color: 'var(--accent)', padding: '2px 6px' }}
                 >
@@ -1487,99 +1489,18 @@ export default function LeadDetailClient({
         </div>
       )}
 
-      {/* Edit Property & Project Association Modal */}
-      {isEditingProperty && (
-        <div className="modal-overlay">
-          <div className="modal-content" style={{ maxWidth: 500 }}>
-            <div className="modal-header">
-              <h3 className="text-section-header">Edit Associated Property</h3>
-              <button
-                onClick={() => setIsEditingProperty(false)}
-                className="btn btn-ghost btn-icon"
-              >
-                <X size={16} />
-              </button>
-            </div>
-
-            <form onSubmit={handleSaveProperty}>
-              <div className="modal-body" style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-                <div className="form-group">
-                  <label className="form-label">Property Selection Mode</label>
-                  <select
-                    value={
-                      propertyEditMode === 'CUSTOM'
-                        ? 'CUSTOM'
-                        : propertyEditMode === 'DB'
-                        ? selectedPropertyId
-                        : ''
-                    }
-                    onChange={(e) => {
-                      const val = e.target.value
-                      if (val === 'CUSTOM') {
-                        setPropertyEditMode('CUSTOM')
-                        setSelectedPropertyId('')
-                      } else if (val === '') {
-                        setPropertyEditMode('NONE')
-                        setSelectedPropertyId('')
-                        setCustomPropertyName('')
-                      } else {
-                        setPropertyEditMode('DB')
-                        setSelectedPropertyId(val)
-                        setCustomPropertyName('')
-                      }
-                    }}
-                    className="form-select"
-                  >
-                    <option value="">None / General Inquiry</option>
-                    {projects.length > 0 && (
-                      <optgroup label="Database Projects">
-                        {projects.map((p) => (
-                          <option key={p.id} value={p.id}>
-                            {p.name_en} ({p.city_en})
-                          </option>
-                        ))}
-                      </optgroup>
-                    )}
-                    <option value="CUSTOM">➕ Custom Property Name (Free text)</option>
-                  </select>
-                </div>
-
-                {propertyEditMode === 'CUSTOM' && (
-                  <div className="form-group">
-                    <label className="form-label">Custom Property Name *</label>
-                    <input
-                      type="text"
-                      autoFocus
-                      required
-                      value={customPropertyName}
-                      onChange={(e) => setCustomPropertyName(e.target.value)}
-                      placeholder="e.g. Al Narjis Luxury Villa, Tower B 401"
-                      className="form-input"
-                    />
-                  </div>
-                )}
-              </div>
-
-              <div className="modal-footer">
-                <button
-                  type="button"
-                  onClick={() => setIsEditingProperty(false)}
-                  className="btn btn-ghost"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={savingProperty}
-                  className="btn btn-primary"
-                >
-                  {savingProperty ? 'Saving...' : 'Update Property'}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
+      {/* Edit Property & Project Association Search Modal */}
+      <ProjectSearchModal
+        isOpen={isEditingProperty}
+        projects={projects}
+        selectedProjectId={lead.property_id}
+        customPropertyName={lead.interest || ''}
+        propertyMode={lead.property_id ? 'DB' : lead.interest ? 'CUSTOM' : 'NONE'}
+        onSelectProject={handleSelectProperty}
+        onSelectNone={handleSelectNoneProperty}
+        onSelectCustom={handleSelectCustomProperty}
+        onClose={() => setIsEditingProperty(false)}
+      />
 
       {/* Delete Lead Confirmation Modal */}
       <ConfirmModal

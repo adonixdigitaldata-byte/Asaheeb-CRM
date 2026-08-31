@@ -224,10 +224,28 @@ export default function LeadsTable({
                   <td style={{ padding: '8px 10px' }}>
                     <Link
                       href={`/leads/${lead.id}`}
-                      style={{ fontWeight: 700, fontSize: 13, color: '#0F172A', textDecoration: 'none', display: 'block' }}
+                      style={{ fontWeight: 700, fontSize: 13, color: '#0F172A', textDecoration: 'none', display: 'flex', alignItems: 'center', gap: '6px' }}
                       className="hover:text-blue-700 hover:underline"
                     >
-                      {lead.name || 'Unnamed Lead'}
+                      <span>{lead.name || 'Unnamed Lead'}</span>
+                      {lead.client_category === 'VIP' && (
+                        <span
+                          style={{
+                            fontSize: '9.5px',
+                            fontWeight: 800,
+                            backgroundColor: '#FEF3C7',
+                            color: '#B45309',
+                            padding: '1px 6px',
+                            borderRadius: '4px',
+                            border: '1px solid #FCD34D',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '3px',
+                          }}
+                        >
+                          👑 VIP
+                        </span>
+                      )}
                     </Link>
                     {lead.city && (
                       <div style={{ fontSize: 11.5, color: '#64748B', marginTop: 1 }}>

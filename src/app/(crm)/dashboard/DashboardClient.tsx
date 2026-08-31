@@ -31,7 +31,8 @@ const SOURCE_LABELS: Record<string, string> = {
   SNAPCHAT: 'Snapchat',
   WHATSAPP: 'WhatsApp',
   WEBSITE_FORM: 'Website Form',
-  PROPERTY_INQUIRY: 'Property Inquiry',
+  PROPERTY_INQUIRY: 'Project Inquiry',
+  BROCHURE_DOWNLOAD: 'Brochure Download',
 }
 
 export default function DashboardClient({

@@ -201,8 +201,8 @@ create table if not exists blogs (
 -- ============================================================
 create table if not exists leads (
   id uuid primary key default gen_random_uuid(),
-  source text not null check (source in
-    ('META_ADS','TIKTOK','SNAPCHAT','WHATSAPP','MANUAL','XLSX_IMPORT','WEBSITE_FORM','PROPERTY_INQUIRY')),
+  source text not null default 'MANUAL' check (source in
+    ('META_ADS','TIKTOK','SNAPCHAT','WHATSAPP','MANUAL','XLSX_IMPORT','WEBSITE_FORM','PROPERTY_INQUIRY','BROCHURE_DOWNLOAD')),
   campaign_id uuid references ad_campaigns(id),
   ad_set_id uuid references ad_sets(id),
   ad_id uuid references ads(id),

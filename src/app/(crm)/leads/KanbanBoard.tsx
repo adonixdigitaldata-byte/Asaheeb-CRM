@@ -89,11 +89,31 @@ function KanbanCardItem({
     >
       <div className="flex items-center justify-between" style={{ marginBottom: 4 }}>
         <div
-          className="kanban-card-title"
-          style={{ cursor: 'pointer' }}
+          className="kanban-card-title flex items-center"
+          style={{ cursor: 'pointer', flexWrap: 'wrap', gap: '6px' }}
           title={lead.name || 'Unnamed Lead'}
         >
-          {lead.name || 'Unnamed Lead'}
+          <span>{lead.name || 'Unnamed Lead'}</span>
+          {lead.client_category === 'VIP' && (
+            <span
+              style={{
+                fontSize: '9.5px',
+                fontWeight: 800,
+                backgroundColor: '#FEF3C7',
+                color: '#B45309',
+                padding: '1px 6px',
+                borderRadius: '4px',
+                border: '1px solid #FCD34D',
+                flexShrink: 0,
+                marginLeft: '4px',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '3px',
+              }}
+            >
+              👑 VIP
+            </span>
+          )}
         </div>
 
         {/* Drag Handle */}

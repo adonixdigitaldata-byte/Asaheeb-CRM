@@ -10,6 +10,7 @@ export type LeadSource =
   | 'XLSX_IMPORT'
   | 'WEBSITE_FORM'
   | 'PROPERTY_INQUIRY'
+  | 'BROCHURE_DOWNLOAD'
 
 export interface Profile {
   id: string
@@ -271,6 +272,7 @@ export interface Lead {
 }
 
 export const CLIENT_CATEGORIES = [
+  { value: 'VIP', label: 'VIP', description: 'High-net-worth individual / VIP investor' },
   { value: 'End-User Buyer', label: 'End-User Buyer', description: 'Wants to live in it himself' },
   { value: 'Investor', label: 'Investor', description: 'Wants ROI / rental income' },
   { value: 'Tenant / Renter', label: 'Tenant / Renter', description: 'Looking for rental investment' },
