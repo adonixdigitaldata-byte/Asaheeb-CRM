@@ -27,6 +27,7 @@ import {
   Globe,
   UserCheck,
   User,
+  Search,
 } from 'lucide-react'
 import {
   CLIENT_CATEGORIES,
@@ -146,11 +147,32 @@ export default function LeadDetailClient({
     meeting_date: initialLead.meeting_date || '',
     meeting_time: initialLead.meeting_time || '',
     potential_value: initialLead.potential_value ? String(initialLead.potential_value) : '',
+    property_type: initialLead.property_type || '',
   })
   const [savingLead, setSavingLead] = useState(false)
 
   // Edit Property Modal State
-  const [isEditingProperty, setIsEditingProperty] = useState(false)
+  const [isEditingPropertyModal, setIsEditingPropertyModal] = useState(false)
+  const [isProjectSearchOpen, setIsProjectSearchOpen] = useState(false)
+  const [propertyForm, setPropertyForm] = useState({
+    propertyMode: 'NONE' as 'NONE' | 'DB' | 'CUSTOM',
+    property_id: '',
+    customProperty: '',
+    property_type: 'Apartment',
+  })
+  const [savingProperty, setSavingProperty] = useState(false)
+
+  function handleOpenPropertyEdit() {
+    const isDb = Boolean(lead.property_id)
+    const isCustom = !isDb && Boolean(lead.interest)
+    setPropertyForm({
+      propertyMode: isDb ? 'DB' : isCustom ? 'CUSTOM' : 'NONE',
+      property_id: lead.property_id || '',
+      customProperty: isCustom ? (lead.interest || '') : '',
+      property_type: lead.property_type || 'Apartment',
+    })
+    setIsEditingPropertyModal(true)
+  }
 
   // Edit / Delete Follow-up State
   const [showFollowupForm, setShowFollowupForm] = useState(false)
@@ -248,6 +270,7 @@ export default function LeadDetailClient({
       meeting_date: editForm.meeting_date || null,
       meeting_time: editForm.meeting_time.trim() || null,
       potential_value: editForm.potential_value ? parseFloat(editForm.potential_value) : null,
+      property_type: editForm.property_type || null,
     }
 
     // Instant local update
@@ -259,64 +282,47 @@ export default function LeadDetailClient({
     setSavingLead(false)
   }
 
-  // Save Property & Interest Details via ProjectSearchModal
-  async function handleSelectProperty(project: Project) {
-    const updatedPropertyObj = { id: project.id, name_en: project.name_en, name_ar: project.name_ar }
+  // Save Property & Property Type Details
+  async function handleSavePropertyDetails(e: React.FormEvent) {
+    e.preventDefault()
+    setSavingProperty(true)
+
+    let resolvedPropertyId: string | null = null
+    let resolvedInterest: string | null = null
+    let resolvedPropertyObj: any = null
+
+    if (propertyForm.propertyMode === 'DB' && propertyForm.property_id) {
+      resolvedPropertyId = propertyForm.property_id
+      const matched = projects.find((p) => p.id === propertyForm.property_id)
+      resolvedInterest = matched ? matched.name_en : null
+      resolvedPropertyObj = matched ? { id: matched.id, name_en: matched.name_en, name_ar: matched.name_ar } : null
+    } else if (propertyForm.propertyMode === 'CUSTOM' && propertyForm.customProperty.trim()) {
+      resolvedPropertyId = null
+      resolvedInterest = propertyForm.customProperty.trim()
+      resolvedPropertyObj = null
+    }
+
+    const updatedFields = {
+      property_id: resolvedPropertyId,
+      interest: resolvedInterest,
+      property_type: propertyForm.property_type || null,
+    }
+
     setLead((prev) => ({
       ...prev,
-      property_id: project.id,
-      interest: project.name_en,
-      property: updatedPropertyObj,
+      ...updatedFields,
+      property: resolvedPropertyObj,
     }))
-    setIsEditingProperty(false)
+
+    setIsEditingPropertyModal(false)
 
     logActivity('PROPERTY_UPDATED', {
-      property: project.name_en,
+      property: resolvedInterest || 'General Inquiry',
+      property_type: propertyForm.property_type || 'None',
     })
 
-    await supabase.from('leads').update({
-      property_id: project.id,
-      interest: project.name_en,
-    }).eq('id', lead.id)
-  }
-
-  async function handleSelectNoneProperty() {
-    setLead((prev) => ({
-      ...prev,
-      property_id: null,
-      interest: null,
-      property: null,
-    }))
-    setIsEditingProperty(false)
-
-    logActivity('PROPERTY_UPDATED', {
-      property: 'General Inquiry',
-    })
-
-    await supabase.from('leads').update({
-      property_id: null,
-      interest: null,
-    }).eq('id', lead.id)
-  }
-
-  async function handleSelectCustomProperty(customName: string) {
-    const trimmed = customName.trim()
-    setLead((prev) => ({
-      ...prev,
-      property_id: null,
-      interest: trimmed || null,
-      property: null,
-    }))
-    setIsEditingProperty(false)
-
-    logActivity('PROPERTY_UPDATED', {
-      property: trimmed || 'General Inquiry',
-    })
-
-    await supabase.from('leads').update({
-      property_id: null,
-      interest: trimmed || null,
-    }).eq('id', lead.id)
+    await supabase.from('leads').update(updatedFields).eq('id', lead.id)
+    setSavingProperty(false)
   }
 
   // Add Note with instant UI feedback
@@ -706,6 +712,7 @@ export default function LeadDetailClient({
                       meeting_date: lead.meeting_date || '',
                       meeting_time: lead.meeting_time || '',
                       potential_value: lead.potential_value ? String(lead.potential_value) : '',
+                      property_type: lead.property_type || '',
                     })
                     setIsEditingLead(true)
                   }}
@@ -843,7 +850,7 @@ export default function LeadDetailClient({
                   Property &amp; Source
                 </h3>
                 <button
-                  onClick={() => setIsEditingProperty(true)}
+                  onClick={handleOpenPropertyEdit}
                   className="btn btn-ghost btn-sm"
                   style={{ color: 'var(--accent)', padding: '2px 6px' }}
                 >
@@ -882,6 +889,37 @@ export default function LeadDetailClient({
                           <span>View on Website</span>
                           <ExternalLink size={10} />
                         </a>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Property Type */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <Building size={16} style={{ color: '#6366F1', marginTop: '1px' }} />
+                  <div>
+                    <div className="text-label" style={{ fontSize: 11 }}>PROPERTY TYPE</div>
+                    <div style={{ marginTop: 3 }}>
+                      {lead.property_type ? (
+                        <span
+                          style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            padding: '3px 10px',
+                            borderRadius: '6px',
+                            fontSize: '12.5px',
+                            fontWeight: 700,
+                            backgroundColor: '#EEF2FF',
+                            color: '#4338CA',
+                            border: '1px solid #C7D2FE',
+                          }}
+                        >
+                          🏠 {lead.property_type}
+                        </span>
+                      ) : (
+                        <span style={{ color: '#94A3B8', fontSize: 13 }}>
+                          Not specified (Click Edit to set)
+                        </span>
                       )}
                     </div>
                   </div>
@@ -1489,17 +1527,316 @@ export default function LeadDetailClient({
         </div>
       )}
 
-      {/* Edit Property & Project Association Search Modal */}
+      {/* Edit Property & Inquired Project Modal */}
+      {isEditingPropertyModal && (
+        <div className="modal-overlay">
+          <div className="modal-content" style={{ maxWidth: '600px' }}>
+            <div className="modal-header">
+              <div>
+                <h2 style={{ fontSize: '1.15rem', fontWeight: 800, color: '#f8fafc' }}>
+                  Edit Property &amp; Inquired Project
+                </h2>
+                <p style={{ fontSize: '0.75rem', color: '#94a3b8', marginTop: '0.15rem' }}>
+                  Update the linked project and property type for this lead
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsEditingPropertyModal(false)}
+                className="btn btn-ghost btn-icon"
+                style={{ color: '#94a3b8' }}
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <form onSubmit={handleSavePropertyDetails} style={{ display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' }}>
+              <div className="modal-body" style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                {/* Associated Project */}
+                <div className="form-group">
+                  <label className="form-label flex items-center justify-between">
+                    <span className="flex items-center gap-1.5">
+                      <Building size={14} style={{ color: '#2563EB' }} />
+                      <span>Associated Property / Project</span>
+                    </span>
+                    {propertyForm.propertyMode !== 'NONE' && (
+                      <button
+                        type="button"
+                        onClick={() => setPropertyForm({ ...propertyForm, propertyMode: 'NONE', property_id: '', customProperty: '' })}
+                        className="btn btn-ghost btn-xs"
+                        style={{ color: '#94A3B8', fontSize: '11px', padding: '1px 6px' }}
+                      >
+                        Clear Selection
+                      </button>
+                    )}
+                  </label>
+
+                  {propertyForm.propertyMode === 'DB' && propertyForm.property_id && (
+                    <div
+                      style={{
+                        padding: '12px 14px',
+                        borderRadius: '10px',
+                        backgroundColor: '#EFF6FF',
+                        border: '1.5px solid #93C5FD',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        gap: 12,
+                      }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0, flex: 1 }}>
+                        <div
+                          style={{
+                            width: 34,
+                            height: 34,
+                            borderRadius: 8,
+                            backgroundColor: '#DBEAFE',
+                            color: '#1D4ED8',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            flexShrink: 0,
+                          }}
+                        >
+                          <Building size={18} />
+                        </div>
+                        <div style={{ minWidth: 0, flex: 1 }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                            <span style={{ fontWeight: 700, fontSize: '0.875rem', color: '#1E3A8A' }}>
+                              {projects.find((p) => p.id === propertyForm.property_id)?.name_en || 'Selected Project'}
+                            </span>
+                          </div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: '0.75rem', color: '#60A5FA', marginTop: 2 }}>
+                            {projects.find((p) => p.id === propertyForm.property_id)?.city_en && (
+                              <span style={{ display: 'flex', alignItems: 'center', gap: 3, color: '#2563EB' }}>
+                                <MapPin size={11} />
+                                {projects.find((p) => p.id === propertyForm.property_id)?.city_en}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+                        <button
+                          type="button"
+                          onClick={() => setIsProjectSearchOpen(true)}
+                          className="btn btn-sm btn-secondary"
+                          style={{ fontSize: '0.75rem', padding: '5px 10px', height: 'auto', borderRadius: 6 }}
+                        >
+                          <Search size={13} style={{ marginRight: 4 }} />
+                          Change
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setPropertyForm({ ...propertyForm, propertyMode: 'NONE', property_id: '', customProperty: '' })}
+                          className="btn btn-ghost btn-icon btn-sm"
+                          style={{ color: '#64748B', padding: 4 }}
+                          title="Remove project"
+                        >
+                          <X size={16} />
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {propertyForm.propertyMode === 'CUSTOM' && (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                      <div style={{ display: 'flex', gap: 8 }}>
+                        <input
+                          type="text"
+                          autoFocus
+                          value={propertyForm.customProperty}
+                          onChange={(e) => setPropertyForm({ ...propertyForm, customProperty: e.target.value })}
+                          placeholder="Type property name (e.g. Al Narjis Luxury Villa, Compound Unit 4)"
+                          className="form-input"
+                          style={{ flex: 1 }}
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setIsProjectSearchOpen(true)}
+                          className="btn btn-sm btn-secondary"
+                          style={{ whiteSpace: 'nowrap', display: 'flex', alignItems: 'center', gap: 5 }}
+                        >
+                          <Search size={14} />
+                          <span>Search Database</span>
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {propertyForm.propertyMode === 'NONE' && (
+                    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                      <button
+                        type="button"
+                        onClick={() => setIsProjectSearchOpen(true)}
+                        className="form-input"
+                        style={{
+                          flex: '1 1 240px',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          cursor: 'pointer',
+                          textAlign: 'left',
+                          backgroundColor: '#F8FAFC',
+                          border: '1.5px dashed #CBD5E1',
+                          padding: '10px 14px',
+                          borderRadius: '8px',
+                          color: '#64748B',
+                        }}
+                      >
+                        <span style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.8125rem' }}>
+                          <Search size={15} style={{ color: '#2563EB' }} />
+                          <span>Click to search project in database...</span>
+                        </span>
+                        <span
+                          style={{
+                            fontSize: '0.72rem',
+                            fontWeight: 700,
+                            backgroundColor: '#EFF6FF',
+                            color: '#2563EB',
+                            padding: '3px 8px',
+                            borderRadius: 4,
+                            flexShrink: 0,
+                          }}
+                        >
+                          Browse ({projects.length})
+                        </span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => setPropertyForm({ ...propertyForm, propertyMode: 'CUSTOM', customProperty: '' })}
+                        className="btn btn-ghost btn-sm"
+                        style={{
+                          color: '#475569',
+                          fontSize: '0.78rem',
+                          padding: '8px 12px',
+                          border: '1px solid #E2E8F0',
+                          borderRadius: 8,
+                          whiteSpace: 'nowrap',
+                        }}
+                      >
+                        + Custom Property
+                      </button>
+                    </div>
+                  )}
+                </div>
+
+                {/* Property Type Field */}
+                <div className="form-group">
+                  <label className="form-label" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <Building size={13} style={{ color: '#2563EB' }} />
+                    <span>Property Type</span>
+                    {propertyForm.propertyMode === 'DB' && propertyForm.property_type && (
+                      <span
+                        style={{
+                          fontSize: '10px',
+                          fontWeight: 700,
+                          backgroundColor: 'rgba(16, 185, 129, 0.12)',
+                          color: '#059669',
+                          padding: '2px 7px',
+                          borderRadius: '20px',
+                          border: '1px solid rgba(16, 185, 129, 0.25)',
+                        }}
+                      >
+                        Inherited from project
+                      </span>
+                    )}
+                  </label>
+
+                  <select
+                    value={propertyForm.property_type}
+                    onChange={(e) => setPropertyForm({ ...propertyForm, property_type: e.target.value })}
+                    className="form-select"
+                  >
+                    <option value="">Select Property Type...</option>
+                    <optgroup label="Residential">
+                      <option value="Apartment">Apartment</option>
+                      <option value="Villa">Villa</option>
+                      <option value="Townhouse">Townhouse</option>
+                      <option value="Duplex">Duplex</option>
+                      <option value="Studio">Studio</option>
+                      <option value="Penthouse">Penthouse</option>
+                      <option value="Compound Unit">Compound Unit</option>
+                      <option value="Chalet">Chalet</option>
+                    </optgroup>
+                    <optgroup label="Commercial">
+                      <option value="Office Space">Office Space</option>
+                      <option value="Retail / Shop">Retail / Shop</option>
+                      <option value="Showroom">Showroom</option>
+                      <option value="Warehouse">Warehouse</option>
+                      <option value="Commercial Building">Commercial Building</option>
+                    </optgroup>
+                    <optgroup label="Land">
+                      <option value="Residential Land">Residential Land</option>
+                      <option value="Commercial Land">Commercial Land</option>
+                      <option value="Agricultural Land">Agricultural Land</option>
+                      <option value="Mixed-Use Land">Mixed-Use Land</option>
+                    </optgroup>
+                    <option value="Mixed-Use">Mixed-Use</option>
+                    <option value="Other">Other</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="modal-footer">
+                <button
+                  type="button"
+                  onClick={() => setIsEditingPropertyModal(false)}
+                  className="btn btn-secondary"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={savingProperty}
+                  className="btn btn-primary"
+                >
+                  {savingProperty ? 'Saving...' : 'Save Changes'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Project Search Modal Triggered From Edit Property Modal */}
       <ProjectSearchModal
-        isOpen={isEditingProperty}
+        isOpen={isProjectSearchOpen}
         projects={projects}
-        selectedProjectId={lead.property_id}
-        customPropertyName={lead.interest || ''}
-        propertyMode={lead.property_id ? 'DB' : lead.interest ? 'CUSTOM' : 'NONE'}
-        onSelectProject={handleSelectProperty}
-        onSelectNone={handleSelectNoneProperty}
-        onSelectCustom={handleSelectCustomProperty}
-        onClose={() => setIsEditingProperty(false)}
+        selectedProjectId={propertyForm.property_id}
+        customPropertyName={propertyForm.customProperty}
+        propertyMode={propertyForm.propertyMode}
+        onSelectProject={(proj) => {
+          setPropertyForm({
+            ...propertyForm,
+            propertyMode: 'DB',
+            property_id: proj.id,
+            customProperty: '',
+            property_type: proj.type_en || propertyForm.property_type || 'Apartment',
+          })
+          setIsProjectSearchOpen(false)
+        }}
+        onSelectNone={() => {
+          setPropertyForm({
+            ...propertyForm,
+            propertyMode: 'NONE',
+            property_id: '',
+            customProperty: '',
+          })
+          setIsProjectSearchOpen(false)
+        }}
+        onSelectCustom={(customName) => {
+          setPropertyForm({
+            ...propertyForm,
+            propertyMode: 'CUSTOM',
+            property_id: '',
+            customProperty: customName,
+          })
+          setIsProjectSearchOpen(false)
+        }}
+        onClose={() => setIsProjectSearchOpen(false)}
       />
 
       {/* Delete Lead Confirmation Modal */}

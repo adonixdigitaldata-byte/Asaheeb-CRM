@@ -10,6 +10,7 @@ import {
   Search,
   RefreshCw,
   X,
+  Download,
 } from 'lucide-react'
 import { Lead, LeadStage, Profile, AdCampaign, Project, CLIENT_CATEGORIES, BUDGET_TIERS } from '@/types/database'
 import KanbanBoard from './KanbanBoard'
@@ -43,6 +44,7 @@ export default function LeadsClient({
   const [showAddModal, setShowAddModal] = useState(
     initialSearchParams?.action === 'new' || initialSearchParams?.new === 'true'
   )
+  const [exporting, setExporting] = useState(false)
 
   useEffect(() => {
     if (initialSearchParams?.action === 'new' || initialSearchParams?.new === 'true') {
@@ -141,6 +143,74 @@ export default function LeadsClient({
     return true
   })
 
+  // Export Leads to Excel Backup
+  async function handleExportXLSX() {
+    try {
+      setExporting(true)
+      const XLSX = await import('xlsx')
+
+      const exportList = filteredLeads.length > 0 ? filteredLeads : leads
+      const exportRows = exportList.map((l, index) => {
+        const agentName = l.assigned_agent?.name || agents.find((a) => a.id === l.assigned_agent_id)?.name || 'Unassigned'
+        const stageLabel = l.stage?.label || stages.find((s) => s.id === l.stage_id)?.label || l.stage_id || 'New'
+        const projectName = l.property?.name_en || l.interest || 'General Inquiry'
+
+        return {
+          '#': index + 1,
+          'Lead Name': l.name || '',
+          'Phone': l.phone || '',
+          'Email': l.email || '',
+          'City': l.city || '',
+          'Pipeline Stage': stageLabel,
+          'Assigned Agent': agentName,
+          'Project / Interest': projectName,
+          'Property Type': l.property_type || 'Apartment',
+          'Client Category': l.client_category || '',
+          'Budget Tier': l.budget_tier || '',
+          'Estimated Deal Value (SAR)': l.potential_value ? Number(l.potential_value) : '',
+          'Source': l.source || 'MANUAL',
+          'Meeting Date': l.meeting_date || '',
+          'Meeting Time': l.meeting_time || '',
+          'Created At': l.created_at ? new Date(l.created_at).toLocaleString() : '',
+          'Lead ID': l.id,
+        }
+      })
+
+      const worksheet = XLSX.utils.json_to_sheet(exportRows)
+      const workbook = XLSX.utils.book_new()
+      XLSX.utils.book_append_sheet(workbook, worksheet, 'Leads Backup')
+
+      // Set column widths for readable formatting
+      worksheet['!cols'] = [
+        { wch: 4 },  // #
+        { wch: 24 }, // Lead Name
+        { wch: 18 }, // Phone
+        { wch: 25 }, // Email
+        { wch: 15 }, // City
+        { wch: 18 }, // Pipeline Stage
+        { wch: 20 }, // Assigned Agent
+        { wch: 22 }, // Project / Interest
+        { wch: 18 }, // Property Type
+        { wch: 18 }, // Client Category
+        { wch: 25 }, // Budget Tier
+        { wch: 25 }, // Estimated Value
+        { wch: 16 }, // Source
+        { wch: 14 }, // Meeting Date
+        { wch: 12 }, // Meeting Time
+        { wch: 22 }, // Created At
+        { wch: 38 }, // Lead ID
+      ]
+
+      const dateStr = new Date().toISOString().split('T')[0]
+      XLSX.writeFile(workbook, `asaheeb_leads_backup_${dateStr}.xlsx`)
+    } catch (err) {
+      console.error('Error exporting XLSX:', err)
+      alert('Failed to export leads spreadsheet.')
+    } finally {
+      setExporting(false)
+    }
+  }
+
   return (
     <div>
       {/* Page Header */}
@@ -186,6 +256,19 @@ export default function LeadsClient({
           >
             <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
           </button>
+
+          {isLeadManager && (
+            <button
+              onClick={handleExportXLSX}
+              disabled={exporting || leads.length === 0}
+              className="btn btn-outline btn-sm"
+              title="Export leads to Excel spreadsheet"
+              style={{ display: 'flex', alignItems: 'center', gap: 5 }}
+            >
+              <Download size={14} />
+              <span>{exporting ? 'Exporting...' : 'Export XLSX'}</span>
+            </button>
+          )}
 
           {isLeadManager && (
             <button

@@ -795,5 +795,124 @@ drop policy if exists "Authenticated users can insert cms activities" on cms_act
 create policy "Authenticated users can insert cms activities" on cms_activities
   for insert with check (auth.role() = 'authenticated');
 
+-- ============================================================
+-- 11. COMPANY ASSETS & EQUIPMENT MANAGEMENT
+-- ============================================================
+create table if not exists company_assets (
+  id uuid primary key default gen_random_uuid(),
+  asset_tag text unique, -- E.g. AST-1001
+  name text not null, -- E.g. "MacBook Pro M3", "iPhone 15 Pro", "STC 5G Data SIM"
+  category text not null default 'Laptop', -- Laptop, Phone, SIM Card, Vehicle, Key / Access, Tablet, Monitor, Other
+  model_number text,
+  serial_number text,
+  sim_number text, -- SIM Card ICCID or Phone Number
+  sim_carrier text, -- STC, Mobily, Zain, Salam, Red Bull Mobile, Virgin, etc.
+  status text not null default 'AVAILABLE', -- AVAILABLE, ASSIGNED, MAINTENANCE, LOST, RETIRED
+  condition text not null default 'GOOD', -- NEW, EXCELLENT, GOOD, FAIR, DAMAGED
+  
+  -- Possession / Assignment info
+  assigned_to uuid references profiles(id) on delete set null,
+  assigned_at timestamptz,
+  assignment_notes text,
+  
+  -- Financial & Life-cycle specs
+  purchase_date date,
+  purchase_cost numeric(12,2),
+  warranty_expiry date,
+  notes text,
+  
+  created_by uuid references profiles(id) on delete set null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
 
+create index if not exists idx_company_assets_status on company_assets(status);
+create index if not exists idx_company_assets_category on company_assets(category);
+create index if not exists idx_company_assets_assigned_to on company_assets(assigned_to);
+create index if not exists idx_company_assets_serial on company_assets(serial_number);
+create index if not exists idx_company_assets_sim on company_assets(sim_number);
+
+drop trigger if exists company_assets_updated_at on company_assets;
+create trigger company_assets_updated_at 
+  before update on company_assets
+  for each row execute function update_updated_at();
+
+-- Asset Assignment History & Audit Trail
+create table if not exists asset_assignment_logs (
+  id uuid primary key default gen_random_uuid(),
+  asset_id uuid not null references company_assets(id) on delete cascade,
+  user_id uuid references profiles(id) on delete set null,
+  action text not null, -- 'ASSIGNED', 'RETURNED', 'MAINTENANCE', 'STATUS_CHANGE', 'CREATED'
+  condition_at_time text,
+  notes text,
+  performed_by uuid references profiles(id) on delete set null,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists idx_asset_assignment_logs_asset on asset_assignment_logs(asset_id);
+create index if not exists idx_asset_assignment_logs_user on asset_assignment_logs(user_id);
+
+-- RLS Policies
+alter table company_assets enable row level security;
+alter table asset_assignment_logs enable row level security;
+
+-- Authenticated users can view company assets
+drop policy if exists "Allow authenticated read company_assets" on company_assets;
+create policy "Allow authenticated read company_assets" 
+  on company_assets for select 
+  to authenticated 
+  using (true);
+
+-- Admins and Managers can modify company assets
+drop policy if exists "Allow staff managers to modify company_assets" on company_assets;
+create policy "Allow staff managers to modify company_assets" 
+  on company_assets for all 
+  to authenticated 
+  using (
+    exists (
+      select 1 from profiles 
+      where profiles.id = auth.uid() 
+      and profiles.role in ('ADMIN', 'SALES_MANAGER')
+    )
+  );
+
+drop policy if exists "Allow authenticated read asset_assignment_logs" on asset_assignment_logs;
+create policy "Allow authenticated read asset_assignment_logs" 
+  on asset_assignment_logs for select 
+  to authenticated 
+  using (true);
+
+drop policy if exists "Allow staff managers to insert asset_assignment_logs" on asset_assignment_logs;
+create policy "Allow staff managers to insert asset_assignment_logs" 
+  on asset_assignment_logs for insert 
+  to authenticated 
+  with check (
+    exists (
+      select 1 from profiles 
+      where profiles.id = auth.uid() 
+      and profiles.role in ('ADMIN', 'SALES_MANAGER')
+    )
+  );
+
+
+-- ============================================================
+-- LEADS — property_type column (backward-compatible migration)
+-- ============================================================
+-- Stores the type of property a lead is interested in.
+-- Automatically inherited from the linked project's type_en,
+-- or manually selected for general/custom inquiries.
+alter table leads add column if not exists property_type text default 'Apartment';
+
+-- 1. For past leads with a linked project, populate property_type from the project's type_en
+update leads
+set property_type = projects.type_en
+from projects
+where leads.property_id = projects.id
+  and (leads.property_type is null or leads.property_type = '')
+  and projects.type_en is not null;
+
+-- 2. For all other past leads (general inquiries), prefill to 'Apartment'
+update leads
+set property_type = 'Apartment'
+where property_type is null or property_type = '';
 

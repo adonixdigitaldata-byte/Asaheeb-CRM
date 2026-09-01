@@ -14,6 +14,7 @@ import {
   Banknote,
   Receipt,
   UserCheck,
+  Laptop,
 } from 'lucide-react'
 import { logout } from '@/app/login/actions'
 import type { Profile } from '@/types/database'
@@ -38,9 +39,10 @@ export default function Sidebar({ profile }: SidebarProps) {
       ],
     },
     {
-      section: 'Staff & Compensation',
+      section: 'Staff & Assets',
       items: [
         { href: '/team', label: 'Team Directory', icon: UserCheck },
+        { href: '/assets', label: 'Company Assets', icon: Laptop },
         { href: '/payroll', label: 'Payroll & Compensation', icon: Banknote },
         { href: '/payslips', label: 'My Payslips', icon: Receipt },
       ],
@@ -65,9 +67,10 @@ export default function Sidebar({ profile }: SidebarProps) {
       ],
     },
     {
-      section: 'Team & Personal',
+      section: 'Staff & Assets',
       items: [
         { href: '/team', label: 'Team Overview', icon: UserCheck },
+        { href: '/assets', label: 'Company Assets', icon: Laptop },
         { href: '/payslips', label: 'My Payslips', icon: Receipt },
       ],
     },
@@ -90,8 +93,9 @@ export default function Sidebar({ profile }: SidebarProps) {
       ],
     },
     {
-      section: 'Staff & Finance',
+      section: 'Staff & Assets',
       items: [
+        { href: '/assets', label: 'Company Assets', icon: Laptop },
         { href: '/payslips', label: 'My Payslips', icon: Receipt },
       ],
     },

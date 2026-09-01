@@ -2,7 +2,7 @@ import { createClient, createServiceClient } from '@/lib/supabase/server'
 import { redirect, notFound } from 'next/navigation'
 import type { Metadata } from 'next'
 import TeamMemberDetailClient from './TeamMemberDetailClient'
-import { sortLeadStages, type LeadStage } from '@/types/database'
+import { sortLeadStages, type LeadStage, type CompanyAsset } from '@/types/database'
 
 export const metadata: Metadata = { title: 'Staff Member Profile' }
 export const dynamic = 'force-dynamic'
@@ -38,6 +38,7 @@ export default async function TeamMemberDetailPage({ params }: { params: Promise
     { data: salaryProfile },
     { data: salaryHistory },
     { data: payslips },
+    { data: assignedAssets },
   ] = await Promise.all([
     serviceSupabase
       .from('leads')
@@ -76,6 +77,11 @@ export default async function TeamMemberDetailPage({ params }: { params: Promise
       .eq('employee_id', id)
       .order('year', { ascending: false })
       .order('month', { ascending: false }),
+    serviceSupabase
+      .from('company_assets')
+      .select('*')
+      .eq('assigned_to', id)
+      .order('assigned_at', { ascending: false }),
   ])
 
   return (
@@ -89,6 +95,7 @@ export default async function TeamMemberDetailPage({ params }: { params: Promise
       salaryProfile={salaryProfile}
       salaryHistory={salaryHistory ?? []}
       payslips={payslips ?? []}
+      assignedAssets={(assignedAssets as CompanyAsset[]) ?? []}
     />
   )
 }

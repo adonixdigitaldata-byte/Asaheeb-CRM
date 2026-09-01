@@ -57,6 +57,7 @@ export default function AddLeadModal({
     propertyMode: 'NONE' as 'NONE' | 'DB' | 'CUSTOM',
     property_id: '',
     customProperty: '',
+    property_type: '',
     potential_value: '',
     source: 'MANUAL',
     stage_id: stages[0]?.id ?? '',
@@ -111,6 +112,7 @@ export default function AddLeadModal({
           email: form.email.trim() || null,
           city: resolvedCity,
           interest: resolvedInterest,
+          property_type: form.property_type || null,
           client_category: form.client_category || null,
           budget_tier: form.budget_tier || null,
           meeting_date: form.meeting_date || null,
@@ -593,6 +595,90 @@ export default function AddLeadModal({
               </div>
             </div>
 
+            {/* Property Type — auto-inherited from DB project, or manual for custom/general */}
+            <div className="form-group" style={{ marginTop: '0.5rem' }}>
+              <label className="form-label" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <Building size={13} style={{ color: '#2563EB' }} />
+                <span>Property Type</span>
+                {form.propertyMode === 'DB' && form.property_type && (
+                  <span
+                    style={{
+                      fontSize: '10px',
+                      fontWeight: 700,
+                      backgroundColor: 'rgba(16, 185, 129, 0.12)',
+                      color: '#059669',
+                      padding: '2px 7px',
+                      borderRadius: '20px',
+                      border: '1px solid rgba(16, 185, 129, 0.25)',
+                    }}
+                  >
+                    Auto-inherited from project
+                  </span>
+                )}
+              </label>
+
+              {form.propertyMode === 'DB' && form.property_type ? (
+                /* Read-only inherited badge when DB project selected */
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 10,
+                    padding: '10px 14px',
+                    backgroundColor: '#F0FDF4',
+                    border: '1.5px solid #86EFAC',
+                    borderRadius: 8,
+                  }}
+                >
+                  <span style={{ fontSize: '13px', fontWeight: 700, color: '#15803D' }}>
+                    {form.property_type}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setForm({ ...form, property_type: '' })}
+                    className="btn btn-ghost btn-xs"
+                    style={{ color: '#64748B', fontSize: '11px', padding: '1px 6px', marginLeft: 'auto' }}
+                  >
+                    Override ✏️
+                  </button>
+                </div>
+              ) : (
+                /* Manual dropdown for CUSTOM/NONE modes, or when inherited is overridden */
+                <select
+                  value={form.property_type}
+                  onChange={(e) => setForm({ ...form, property_type: e.target.value })}
+                  className="form-select"
+                >
+                  <option value="">Select Property Type (Optional)</option>
+                  <optgroup label="Residential">
+                    <option value="Apartment">Apartment</option>
+                    <option value="Villa">Villa</option>
+                    <option value="Townhouse">Townhouse</option>
+                    <option value="Duplex">Duplex</option>
+                    <option value="Studio">Studio</option>
+                    <option value="Penthouse">Penthouse</option>
+                    <option value="Compound Unit">Compound Unit</option>
+                    <option value="Chalet">Chalet</option>
+                  </optgroup>
+                  <optgroup label="Commercial">
+                    <option value="Office Space">Office Space</option>
+                    <option value="Retail / Shop">Retail / Shop</option>
+                    <option value="Showroom">Showroom</option>
+                    <option value="Warehouse">Warehouse</option>
+                    <option value="Commercial Building">Commercial Building</option>
+                  </optgroup>
+                  <optgroup label="Land">
+                    <option value="Residential Land">Residential Land</option>
+                    <option value="Commercial Land">Commercial Land</option>
+                    <option value="Agricultural Land">Agricultural Land</option>
+                    <option value="Mixed-Use Land">Mixed-Use Land</option>
+                  </optgroup>
+                  <option value="Mixed-Use">Mixed-Use</option>
+                  <option value="Other">Other</option>
+                </select>
+              )}
+            </div>
+
             {/* Initial Note */}
             <div className="form-group" style={{ marginTop: '0.75rem', marginBottom: 0 }}>
               <label className="form-label">Initial Note / Requirements</label>
@@ -605,6 +691,7 @@ export default function AddLeadModal({
               />
             </div>
           </div>
+
 
           {/* Footer */}
           <div className="modal-footer">
@@ -639,6 +726,8 @@ export default function AddLeadModal({
             propertyMode: 'DB',
             property_id: project.id,
             customProperty: '',
+            // Auto-inherit the project's property type
+            property_type: project.type_en || '',
           })
         }}
         onSelectNone={() => {

@@ -4,8 +4,9 @@ import React, { useState, useMemo } from 'react'
 import { Profile, Payslip } from '@/types/database'
 import { formatCurrencyAmount, getMonthName } from '@/lib/payroll-utils'
 import PayslipDocument from '@/components/payroll/PayslipDocument'
-import { FileText, Eye, Printer, ShieldCheck, ArrowRight } from 'lucide-react'
+import { FileText, Eye, Printer, ShieldCheck, ArrowRight, Archive, Loader2, Download } from 'lucide-react'
 import Link from 'next/link'
+import { exportPayslipsAsZip, ZipExportProgress } from '@/lib/payslip-pdf-export'
 
 interface Props {
   currentProfile: Profile
@@ -15,6 +16,8 @@ interface Props {
 export default function MyPayslipsClient({ currentProfile, payslips }: Props) {
   const [selectedFY, setSelectedFY] = useState<string>('ALL')
   const [viewingPayslip, setViewingPayslip] = useState<Payslip | null>(null)
+  const [exportingZip, setExportingZip] = useState(false)
+  const [zipProgress, setZipProgress] = useState<ZipExportProgress | null>(null)
 
   // Extract available Financial Years
   const availableFYs = useMemo(() => {
@@ -29,6 +32,26 @@ export default function MyPayslipsClient({ currentProfile, payslips }: Props) {
     })
   }, [payslips, selectedFY])
 
+  async function handleDownloadZip() {
+    if (filteredPayslips.length === 0 || exportingZip) return
+
+    try {
+      setExportingZip(true)
+      await exportPayslipsAsZip(
+        filteredPayslips,
+        currentProfile,
+        selectedFY === 'ALL' ? 'All_Cycles' : selectedFY,
+        (progress) => setZipProgress(progress)
+      )
+    } catch (err) {
+      console.error('Failed to export payslips as ZIP:', err)
+      alert('An error occurred while generating payslip PDFs.')
+    } finally {
+      setExportingZip(false)
+      setZipProgress(null)
+    }
+  }
+
   return (
     <div>
       {/* Header */}
@@ -42,16 +65,83 @@ export default function MyPayslipsClient({ currentProfile, payslips }: Props) {
           </p>
         </div>
 
-        {currentProfile.role === 'ADMIN' && (
-          <Link href="/payroll" className="btn btn-outline btn-sm" style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontWeight: 600 }}>
-            <ShieldCheck size={14} /> Open Admin Payroll Vault <ArrowRight size={14} />
-          </Link>
-        )}
+        <div className="flex items-center gap-2">
+          {payslips.length > 0 && (
+            <button
+              onClick={handleDownloadZip}
+              disabled={exportingZip || filteredPayslips.length === 0}
+              className="btn btn-primary btn-sm"
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 6,
+                fontWeight: 700,
+                background: '#1E3A8A',
+                color: '#ffffff',
+              }}
+              title="Download all payslips in this cycle as a ZIP archive of official PDFs"
+            >
+              {exportingZip ? (
+                <>
+                  <Loader2 size={14} className="animate-spin" />
+                  <span>
+                    Generating ({zipProgress ? `${zipProgress.current}/${zipProgress.total}` : 'PDFs...'})
+                  </span>
+                </>
+              ) : (
+                <>
+                  <Archive size={14} />
+                  <span>Download ZIP ({filteredPayslips.length} PDFs)</span>
+                </>
+              )}
+            </button>
+          )}
+
+          {currentProfile.role === 'ADMIN' && (
+            <Link href="/payroll" className="btn btn-outline btn-sm" style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontWeight: 600 }}>
+              <ShieldCheck size={14} /> Open Admin Payroll Vault <ArrowRight size={14} />
+            </Link>
+          )}
+        </div>
       </div>
 
+
       <div className="page-body">
+        {/* Export Progress Notification Banner */}
+        {exportingZip && zipProgress && (
+          <div
+            style={{
+              padding: '14px 18px',
+              backgroundColor: '#EFF6FF',
+              border: '1.5px solid #93C5FD',
+              borderRadius: '8px',
+              marginBottom: '20px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: 12,
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+              <Loader2 size={20} className="animate-spin" style={{ color: '#1D4ED8', flexShrink: 0 }} />
+              <div>
+                <div style={{ fontSize: '13.5px', fontWeight: 700, color: '#1E3A8A' }}>
+                  Generating High-Resolution Payslip PDFs ({zipProgress.current} of {zipProgress.total})...
+                </div>
+                <div style={{ fontSize: '11.5px', color: '#3B82F6', marginTop: '2px' }}>
+                  Current: <code style={{ background: '#DBEAFE', padding: '1px 6px', borderRadius: 4, color: '#1E3A8A' }}>{zipProgress.currentFileName}</code>
+                </div>
+              </div>
+            </div>
+            <div style={{ fontSize: '13px', fontWeight: 800, color: '#1D4ED8' }}>
+              {Math.round((zipProgress.current / zipProgress.total) * 100)}%
+            </div>
+          </div>
+        )}
+
         {/* Financial Year Selector Tabs */}
         {availableFYs.length > 0 && (
+
           <div style={{
             display: 'flex',
             borderBottom: '1px solid var(--border)',

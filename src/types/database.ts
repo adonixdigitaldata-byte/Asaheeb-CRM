@@ -249,6 +249,7 @@ export interface Lead {
   email?: string | null
   city?: string | null
   interest?: string | null
+  property_type?: string | null
   client_category?: string | null
   budget_tier?: string | null
   meeting_date?: string | null
@@ -457,5 +458,47 @@ export interface CmsActivity {
   metadata?: Record<string, any> | null
   created_at: string
 }
+
+export type AssetStatus = 'AVAILABLE' | 'ASSIGNED' | 'MAINTENANCE' | 'LOST' | 'RETIRED'
+export type AssetCondition = 'NEW' | 'EXCELLENT' | 'GOOD' | 'FAIR' | 'DAMAGED'
+
+export interface CompanyAsset {
+  id: string
+  asset_tag: string
+  name: string
+  category: string
+  model_number?: string | null
+  serial_number?: string | null
+  sim_number?: string | null
+  sim_carrier?: string | null
+  status: AssetStatus
+  condition: AssetCondition
+  assigned_to?: string | null
+  assigned_at?: string | null
+  assignment_notes?: string | null
+  purchase_date?: string | null
+  purchase_cost?: number | null
+  warranty_expiry?: string | null
+  notes?: string | null
+  created_by?: string | null
+  created_at: string
+  updated_at: string
+  possessor?: Profile | null
+  creator?: Profile | null
+}
+
+export interface AssetAssignmentLog {
+  id: string
+  asset_id: string
+  user_id?: string | null
+  action: 'ASSIGNED' | 'RETURNED' | 'MAINTENANCE' | 'STATUS_CHANGE' | 'CREATED'
+  condition_at_time?: AssetCondition | string | null
+  notes?: string | null
+  performed_by?: string | null
+  created_at: string
+  user?: Profile | null
+  performer?: Profile | null
+}
+
 
 

@@ -2,13 +2,14 @@
 
 import React, { useState, useMemo } from 'react'
 import Link from 'next/link'
-import { Profile, Lead, LeadStage, LeadFollowup, LeadActivity, EmployeeSalaryProfile, Payslip } from '@/types/database'
+import { Profile, Lead, LeadStage, LeadFollowup, LeadActivity, EmployeeSalaryProfile, Payslip, CompanyAsset } from '@/types/database'
 import { formatCurrencyAmount, getMonthName } from '@/lib/payroll-utils'
 import { formatTimeAgo } from '@/lib/utils'
 import {
   ArrowLeft, Users, Phone, Mail, Calendar, DollarSign,
   FileText, Clock, CheckCircle2, ChevronRight, ChevronLeft,
-  Eye, Printer, Shield, Activity, AlertCircle, History, GitCommit
+  Eye, Printer, Shield, Activity, AlertCircle, History, GitCommit,
+  Laptop, Smartphone, CreditCard, Package
 } from 'lucide-react'
 
 interface Props {
@@ -21,6 +22,7 @@ interface Props {
   salaryProfile: EmployeeSalaryProfile | null
   salaryHistory: any[]
   payslips: Payslip[]
+  assignedAssets?: CompanyAsset[]
 }
 
 const PAGE_SIZE = 10
@@ -81,8 +83,9 @@ export default function TeamMemberDetailClient({
   salaryProfile,
   salaryHistory,
   payslips,
+  assignedAssets = [],
 }: Props) {
-  const [activeTab, setActiveTab] = useState<'leads' | 'followups' | 'activities'>('leads')
+  const [activeTab, setActiveTab] = useState<'leads' | 'followups' | 'activities' | 'assets'>('leads')
   const [sendingInvite, setSendingInvite] = useState(false)
   const [inviteStatus, setInviteStatus] = useState<string | null>(null)
 
@@ -545,7 +548,28 @@ export default function TeamMemberDetailClient({
             <Activity size={16} /> Activity log ({activities.length})
           </button>
 
-</div>
+          <button
+            onClick={() => setActiveTab('assets')}
+            style={{
+              padding: '10px 4px',
+              fontSize: 14,
+              fontWeight: 700,
+              color: activeTab === 'assets' ? '#1E3A8A' : 'var(--text-secondary)',
+              borderBottom: activeTab === 'assets' ? '2.5px solid #1E3A8A' : '2.5px solid transparent',
+              background: 'none',
+              borderTop: 'none',
+              borderLeft: 'none',
+              borderRight: 'none',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 6,
+              whiteSpace: 'nowrap',
+            }}
+          >
+            <Laptop size={16} /> Possessed Assets ({assignedAssets.length})
+          </button>
+        </div>
 
         {/* TAB 1: ASSIGNED LEADS */}
         {activeTab === 'leads' && (
@@ -740,6 +764,110 @@ export default function TeamMemberDetailClient({
               </div>
             )}
             {renderPaginationFooter(activitiesPage, totalActivitiesPages, activities.length, setActivitiesPage)}
+          </div>
+        )}
+
+        {/* TAB 4: POSSESSED ASSETS */}
+        {activeTab === 'assets' && (
+          <div className="card" style={{ overflow: 'hidden' }}>
+            <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div>
+                <h3 style={{ fontSize: '15px', fontWeight: 700, margin: 0, color: 'var(--text-primary)' }}>
+                  Company Equipment in Possession
+                </h3>
+                <p style={{ fontSize: '12px', color: 'var(--text-secondary)', margin: '2px 0 0' }}>
+                  Hardware, devices, SIM cards, and keys currently allocated to {member.name}.
+                </p>
+              </div>
+              <Link href="/assets" className="btn btn-outline btn-xs" style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                <Laptop size={13} /> Manage in Assets Directory
+              </Link>
+            </div>
+
+            <div className="table-responsive">
+              <table className="table">
+                <thead>
+                  <tr>
+                    <th>Asset Tag & Item</th>
+                    <th>Model / Specs</th>
+                    <th>Serial / SIM Number</th>
+                    <th>Condition</th>
+                    <th>Assigned Date</th>
+                    <th>Handover Notes</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {assignedAssets.length === 0 ? (
+                    <tr>
+                      <td colSpan={6} style={{ textAlign: 'center', padding: '40px 16px', color: 'var(--text-secondary)' }}>
+                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px' }}>
+                          <Package size={32} style={{ color: 'var(--text-tertiary)' }} />
+                          <div style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-primary)' }}>No Company Assets Assigned</div>
+                          <div style={{ fontSize: '12px' }}>This employee currently holds no company laptops, mobile phones, or SIM cards.</div>
+                          <Link href="/assets" className="btn btn-primary btn-xs" style={{ marginTop: '8px' }}>
+                            Go to Company Assets
+                          </Link>
+                        </div>
+                      </td>
+                    </tr>
+                  ) : (
+                    assignedAssets.map((asset) => (
+                      <tr key={asset.id}>
+                        <td>
+                          <div style={{ fontWeight: 700, color: 'var(--text-primary)' }}>{asset.name}</div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '2px' }}>
+                            <span style={{ fontSize: '11px', fontFamily: 'monospace', backgroundColor: 'var(--surface-sunken)', padding: '1px 5px', borderRadius: '4px', border: '1px solid var(--border)' }}>
+                              {asset.asset_tag}
+                            </span>
+                            <span style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>• {asset.category}</span>
+                          </div>
+                        </td>
+                        <td style={{ fontSize: '13px', fontWeight: 600 }}>{asset.model_number || '—'}</td>
+                        <td>
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                            {asset.serial_number && (
+                              <span style={{ fontSize: '12px', fontFamily: 'monospace' }}>
+                                <strong>S/N:</strong> {asset.serial_number}
+                              </span>
+                            )}
+                            {asset.sim_number && (
+                              <span style={{ fontSize: '12px', fontFamily: 'monospace', color: '#2563EB' }}>
+                                <strong>SIM:</strong> {asset.sim_number} {asset.sim_carrier ? `(${asset.sim_carrier})` : ''}
+                              </span>
+                            )}
+                            {!asset.serial_number && !asset.sim_number && '—'}
+                          </div>
+                        </td>
+                        <td>
+                          <span
+                            style={{
+                              fontSize: '12px',
+                              fontWeight: 600,
+                              color:
+                                asset.condition === 'NEW' || asset.condition === 'EXCELLENT'
+                                  ? '#059669'
+                                  : asset.condition === 'GOOD'
+                                  ? '#2563EB'
+                                  : asset.condition === 'FAIR'
+                                  ? '#D97706'
+                                  : '#DC2626',
+                            }}
+                          >
+                            {asset.condition || 'GOOD'}
+                          </span>
+                        </td>
+                        <td style={{ fontSize: '12.5px', color: 'var(--text-secondary)' }}>
+                          {asset.assigned_at ? new Date(asset.assigned_at).toLocaleDateString() : '—'}
+                        </td>
+                        <td style={{ fontSize: '12px', color: 'var(--text-secondary)', maxWidth: '200px' }}>
+                          {asset.assignment_notes || asset.notes || '—'}
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
           </div>
         )}
       </div>
