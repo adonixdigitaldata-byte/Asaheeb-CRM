@@ -77,6 +77,26 @@ export async function POST(req: Request) {
       })
       .eq('id', profile_id)
 
+    // Sync to active open-ended salary history interval (if exists) or create initial record
+    const { data: activeHistories } = await serviceClient
+      .from('employee_salary_history')
+      .select('*')
+      .eq('profile_id', profile_id)
+      .is('end_date', null)
+      .order('start_date', { ascending: false })
+
+    if (activeHistories && activeHistories.length > 0) {
+      // Update the active open-ended interval
+      await serviceClient
+        .from('employee_salary_history')
+        .update({
+          base_salary: Number(base_salary) || 0,
+          currency,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', activeHistories[0].id)
+    }
+
     return NextResponse.json({ success: true, data })
   } catch (err: any) {
     console.error('Salary profile server error:', err)

@@ -530,6 +530,35 @@ export default function PayrollClient({
         const filtered = prev.filter((s) => s.profile_id !== editingProfile.id)
         return [...filtered, result.data]
       })
+
+      // Immediately sync active salary history record in local timeline state
+      setSalaryHistory((prev) =>
+        prev.map((item) => {
+          if (!item.end_date) {
+            return {
+              ...item,
+              base_salary: gross,
+              currency: profCurrency,
+              updated_at: new Date().toISOString(),
+            }
+          }
+          return item
+        })
+      )
+      setAllSalaryHistories((prev) =>
+        prev.map((item) => {
+          if (item.profile_id === editingProfile.id && !item.end_date) {
+            return {
+              ...item,
+              base_salary: gross,
+              currency: profCurrency,
+              updated_at: new Date().toISOString(),
+            }
+          }
+          return item
+        })
+      )
+
       setEditingProfile(null)
       showToast('Salary profile saved successfully.', 'success')
     } catch (err: any) {
