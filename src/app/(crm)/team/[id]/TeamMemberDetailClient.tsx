@@ -2,15 +2,16 @@
 
 import React, { useState, useMemo } from 'react'
 import Link from 'next/link'
-import { Profile, Lead, LeadStage, LeadFollowup, LeadActivity, EmployeeSalaryProfile, Payslip, CompanyAsset } from '@/types/database'
+import { Profile, Lead, LeadStage, LeadFollowup, LeadActivity, EmployeeSalaryProfile, Payslip, CompanyAsset, EmployeeDocument, EmployeeCustomRecord } from '@/types/database'
 import { formatCurrencyAmount, getMonthName } from '@/lib/payroll-utils'
 import { formatTimeAgo } from '@/lib/utils'
 import {
   ArrowLeft, Users, Phone, Mail, Calendar, DollarSign,
   FileText, Clock, CheckCircle2, ChevronRight, ChevronLeft,
   Eye, Printer, Shield, Activity, AlertCircle, History, GitCommit,
-  Laptop, Smartphone, CreditCard, Package
+  Laptop, Smartphone, CreditCard, Package, FolderArchive
 } from 'lucide-react'
+import EmployeeDocumentsTab from '@/components/team/EmployeeDocumentsTab'
 
 interface Props {
   member: Profile
@@ -23,7 +24,10 @@ interface Props {
   salaryHistory: any[]
   payslips: Payslip[]
   assignedAssets?: CompanyAsset[]
+  initialDocuments?: EmployeeDocument[]
+  initialCustomRecords?: EmployeeCustomRecord[]
 }
+
 
 const PAGE_SIZE = 10
 
@@ -84,8 +88,10 @@ export default function TeamMemberDetailClient({
   salaryHistory,
   payslips,
   assignedAssets = [],
+  initialDocuments = [],
+  initialCustomRecords = [],
 }: Props) {
-  const [activeTab, setActiveTab] = useState<'leads' | 'followups' | 'activities' | 'assets'>('leads')
+  const [activeTab, setActiveTab] = useState<'leads' | 'followups' | 'activities' | 'assets' | 'documents'>('leads')
   const [sendingInvite, setSendingInvite] = useState(false)
   const [inviteStatus, setInviteStatus] = useState<string | null>(null)
 
@@ -569,7 +575,30 @@ export default function TeamMemberDetailClient({
           >
             <Laptop size={16} /> Possessed Assets ({assignedAssets.length})
           </button>
+
+          <button
+            onClick={() => setActiveTab('documents')}
+            style={{
+              padding: '10px 4px',
+              fontSize: 14,
+              fontWeight: 700,
+              color: activeTab === 'documents' ? '#1E3A8A' : 'var(--text-secondary)',
+              borderBottom: activeTab === 'documents' ? '2.5px solid #1E3A8A' : '2.5px solid transparent',
+              background: 'none',
+              borderTop: 'none',
+              borderLeft: 'none',
+              borderRight: 'none',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 6,
+              whiteSpace: 'nowrap',
+            }}
+          >
+            <FolderArchive size={16} /> Documents &amp; Records ({initialDocuments.length})
+          </button>
         </div>
+
 
         {/* TAB 1: ASSIGNED LEADS */}
         {activeTab === 'leads' && (
@@ -870,7 +899,18 @@ export default function TeamMemberDetailClient({
             </div>
           </div>
         )}
+
+        {/* TAB 5: EMPLOYEE DOCUMENTS & CUSTOM RECORDS */}
+        {activeTab === 'documents' && (
+          <EmployeeDocumentsTab
+            member={member}
+            isAdmin={isAdmin}
+            initialDocuments={initialDocuments}
+            initialCustomRecords={initialCustomRecords}
+          />
+        )}
       </div>
     </div>
   )
 }
+

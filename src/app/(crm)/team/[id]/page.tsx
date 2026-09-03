@@ -39,6 +39,8 @@ export default async function TeamMemberDetailPage({ params }: { params: Promise
     { data: salaryHistory },
     { data: payslips },
     { data: assignedAssets },
+    { data: employeeDocuments },
+    { data: employeeCustomRecords },
   ] = await Promise.all([
     serviceSupabase
       .from('leads')
@@ -82,7 +84,34 @@ export default async function TeamMemberDetailPage({ params }: { params: Promise
       .select('*')
       .eq('assigned_to', id)
       .order('assigned_at', { ascending: false }),
+    serviceSupabase
+      .from('employee_documents')
+      .select('*, uploader:profiles!employee_documents_uploaded_by_fkey(id, name, email)')
+      .eq('profile_id', id)
+      .order('created_at', { ascending: false }),
+    serviceSupabase
+      .from('employee_custom_records')
+      .select('*')
+      .eq('profile_id', id)
+      .order('created_at', { ascending: false }),
   ])
+
+  // Resolve signed URLs for private uploads
+  const resolvedDocuments = await Promise.all(
+    (employeeDocuments || []).map(async (doc: any) => {
+      if (doc.source_type === 'UPLOAD' && doc.file_path) {
+        try {
+          const { data: signed } = await serviceSupabase.storage
+            .from('employee-documents')
+            .createSignedUrl(doc.file_path, 60 * 60 * 2)
+          if (signed?.signedUrl) {
+            return { ...doc, download_url: signed.signedUrl }
+          }
+        } catch {}
+      }
+      return { ...doc, download_url: doc.file_url }
+    })
+  )
 
   return (
     <TeamMemberDetailClient
@@ -96,6 +125,9 @@ export default async function TeamMemberDetailPage({ params }: { params: Promise
       salaryHistory={salaryHistory ?? []}
       payslips={payslips ?? []}
       assignedAssets={(assignedAssets as CompanyAsset[]) ?? []}
+      initialDocuments={resolvedDocuments ?? []}
+      initialCustomRecords={employeeCustomRecords ?? []}
     />
   )
 }
+

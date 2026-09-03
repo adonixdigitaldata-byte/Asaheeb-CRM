@@ -916,3 +916,128 @@ update leads
 set property_type = 'Apartment'
 where property_type is null or property_type = '';
 
+
+-- ============================================================
+-- 18. EMPLOYEE DOCUMENTS & VAULT
+-- Tracks passports, certificates, contracts, and arbitrary custom docs
+-- Supports direct upload (Supabase Storage) & Google Drive links
+-- ============================================================
+create table if not exists employee_documents (
+  id uuid primary key default gen_random_uuid(),
+  profile_id uuid not null references profiles(id) on delete cascade,
+  category text not null default 'OTHER', -- 'PASSPORT', 'IQAMA_ID', 'EXPERIENCE_CERT', 'DEGREE_CERT', 'EMPLOYMENT_CONTRACT', 'DRIVING_LICENSE', 'INSURANCE', 'OTHER'
+  custom_category_name text,
+  title text not null,
+  document_number text,
+  source_type text not null default 'UPLOAD' check (source_type in ('UPLOAD', 'GOOGLE_DRIVE', 'EXTERNAL_LINK')),
+  file_url text not null,
+  file_path text, -- Internal Supabase storage bucket path (null for Google Drive links)
+  file_name text not null,
+  file_size_bytes bigint,
+  file_type text, -- MIME type or extension like 'application/pdf'
+  issue_date date,
+  expiry_date date,
+  notes text,
+  metadata jsonb default '{}'::jsonb,
+  is_verified boolean not null default false,
+  uploaded_by uuid references profiles(id) on delete set null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create index if not exists idx_employee_documents_profile on employee_documents(profile_id);
+create index if not exists idx_employee_documents_category on employee_documents(category);
+create index if not exists idx_employee_documents_expiry on employee_documents(expiry_date);
+
+-- RLS for employee_documents
+alter table employee_documents enable row level security;
+
+drop policy if exists "Allow staff to view own or admin view all employee_documents" on employee_documents;
+create policy "Allow staff to view own or admin view all employee_documents"
+  on employee_documents for select
+  to authenticated
+  using (
+    profile_id = auth.uid()
+    or exists (
+      select 1 from profiles
+      where profiles.id = auth.uid()
+      and profiles.role in ('ADMIN', 'SALES_MANAGER')
+    )
+  );
+
+drop policy if exists "Allow admins and managers to manage employee_documents" on employee_documents;
+create policy "Allow admins and managers to manage employee_documents"
+  on employee_documents for all
+  to authenticated
+  using (
+    exists (
+      select 1 from profiles
+      where profiles.id = auth.uid()
+      and profiles.role in ('ADMIN', 'SALES_MANAGER')
+    )
+  );
+
+
+-- ============================================================
+-- 19. EMPLOYEE CUSTOM RECORDS & PRIOR EXPERIENCE
+-- Structured previous job experience, emergency contacts, custom fields
+-- ============================================================
+create table if not exists employee_custom_records (
+  id uuid primary key default gen_random_uuid(),
+  profile_id uuid not null references profiles(id) on delete cascade,
+  record_type text not null check (record_type in ('EXPERIENCE', 'CUSTOM_FIELD', 'EMERGENCY_CONTACT', 'OTHER')),
+  title text not null,
+  data jsonb not null default '{}'::jsonb,
+  created_by uuid references profiles(id) on delete set null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create index if not exists idx_employee_custom_records_profile on employee_custom_records(profile_id);
+create index if not exists idx_employee_custom_records_type on employee_custom_records(record_type);
+
+-- RLS for employee_custom_records
+alter table employee_custom_records enable row level security;
+
+drop policy if exists "Allow staff to view own or admin view all employee_custom_records" on employee_custom_records;
+create policy "Allow staff to view own or admin view all employee_custom_records"
+  on employee_custom_records for select
+  to authenticated
+  using (
+    profile_id = auth.uid()
+    or exists (
+      select 1 from profiles
+      where profiles.id = auth.uid()
+      and profiles.role in ('ADMIN', 'SALES_MANAGER')
+    )
+  );
+
+drop policy if exists "Allow admins and managers to manage employee_custom_records" on employee_custom_records;
+create policy "Allow admins and managers to manage employee_custom_records"
+  on employee_custom_records for all
+  to authenticated
+  using (
+    exists (
+      select 1 from profiles
+      where profiles.id = auth.uid()
+      and profiles.role in ('ADMIN', 'SALES_MANAGER')
+    )
+  );
+
+
+-- ============================================================
+-- 20. SUPABASE STORAGE BUCKET: employee-documents
+-- Safe private bucket for passports, contracts, and scans
+-- ============================================================
+insert into storage.buckets (id, name, public)
+values ('employee-documents', 'employee-documents', false)
+on conflict (id) do update set public = false;
+
+-- Allow authenticated users with admin/manager role or owners to access files
+drop policy if exists "Allow authenticated access to employee-documents" on storage.objects;
+create policy "Allow authenticated access to employee-documents"
+  on storage.objects for all
+  to authenticated
+  using (bucket_id = 'employee-documents');
+
+

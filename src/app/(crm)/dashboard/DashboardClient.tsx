@@ -46,6 +46,7 @@ export default function DashboardClient({
 }: Props) {
   const router = useRouter()
 
+
   // Won stage metrics
   const wonStage = stages.find((s) => s.key === 'won')
   const wonCount = wonStage ? (stageCounts[wonStage.id] ?? 0) : 0

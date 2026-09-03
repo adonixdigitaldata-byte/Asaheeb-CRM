@@ -500,5 +500,54 @@ export interface AssetAssignmentLog {
   performer?: Profile | null
 }
 
+// ============================================================
+// EMPLOYEE DOCUMENTS & CUSTOM DATA TYPES
+// ============================================================
+export type DocumentCategory =
+  | 'PASSPORT'
+  | 'IQAMA_ID'
+  | 'EXPERIENCE_CERT'
+  | 'DEGREE_CERT'
+  | 'EMPLOYMENT_CONTRACT'
+  | 'DRIVING_LICENSE'
+  | 'INSURANCE'
+  | 'OTHER'
 
+export type DocumentSourceType = 'UPLOAD' | 'GOOGLE_DRIVE' | 'EXTERNAL_LINK'
 
+export interface EmployeeDocument {
+  id: string
+  profile_id: string
+  category: DocumentCategory
+  custom_category_name?: string | null
+  title: string
+  document_number?: string | null
+  source_type: DocumentSourceType
+  file_url: string
+  file_path?: string | null
+  file_name: string
+  file_size_bytes?: number | null
+  file_type?: string | null
+  issue_date?: string | null
+  expiry_date?: string | null
+  notes?: string | null
+  metadata?: Record<string, any> | null
+  is_verified: boolean
+  uploaded_by?: string | null
+  created_at: string
+  updated_at: string
+  uploader?: Profile | null
+}
+
+export type CustomRecordType = 'EXPERIENCE' | 'CUSTOM_FIELD' | 'EMERGENCY_CONTACT' | 'OTHER'
+
+export interface EmployeeCustomRecord {
+  id: string
+  profile_id: string
+  record_type: CustomRecordType
+  title: string
+  data: Record<string, any>
+  created_by?: string | null
+  created_at: string
+  updated_at: string
+}

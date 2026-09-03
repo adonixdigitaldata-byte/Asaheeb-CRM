@@ -7,8 +7,9 @@ import { formatTimeAgo } from '@/lib/utils'
 import {
   UserPlus, Search, Shield, User, Briefcase, Phone, Mail,
   CheckCircle2, AlertCircle, Edit3, Trash2, ChevronRight, Activity,
-  RotateCcw, Link as LinkIcon, Sparkles, ChevronLeft
+  RotateCcw, Link as LinkIcon, Sparkles, ChevronLeft, CalendarClock
 } from 'lucide-react'
+import DocumentExpiryTrackerModal from '@/components/team/DocumentExpiryTrackerModal'
 
 interface EnrichedMember extends Profile {
   last_sign_in_at?: string | null
@@ -18,6 +19,7 @@ interface EnrichedMember extends Profile {
   completedFollowups?: number
   salaryProfile?: { base_salary: number; currency: string } | null
 }
+
 
 interface Props {
   members: EnrichedMember[]
@@ -68,6 +70,7 @@ export default function TeamClient({ members: initialMembers, currentProfile }: 
 
   // Modals
   const [showInviteModal, setShowInviteModal] = useState(false)
+  const [showExpiryTracker, setShowExpiryTracker] = useState(false)
   const [inviteName, setInviteName] = useState('')
   const [inviteEmail, setInviteEmail] = useState('')
   const [invitePhone, setInvitePhone] = useState('')
@@ -124,6 +127,7 @@ export default function TeamClient({ members: initialMembers, currentProfile }: 
   const safeCurrentPage = Math.min(currentPage, totalPages) || 1
   const startIndex = (safeCurrentPage - 1) * PAGE_SIZE
   const paginatedMembers = filteredMembers.slice(startIndex, startIndex + PAGE_SIZE)
+
 
   // Handlers
   async function handleInviteMember(e: React.FormEvent) {
@@ -349,15 +353,27 @@ export default function TeamClient({ members: initialMembers, currentProfile }: 
           </p>
         </div>
 
-        {isAdmin && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           <button
-            onClick={() => setShowInviteModal(true)}
-            className="btn btn-primary"
-            style={{ fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: 6 }}
+            type="button"
+            onClick={() => setShowExpiryTracker(true)}
+            className="btn btn-outline"
+            style={{ fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: 6, background: '#fff' }}
+            title="View company-wide document expiration deadlines"
           >
-            <UserPlus size={15} /> Invite Team Member
+            <CalendarClock size={15} style={{ color: '#D97706' }} /> Expiry Tracker
           </button>
-        )}
+
+          {isAdmin && (
+            <button
+              onClick={() => setShowInviteModal(true)}
+              className="btn btn-primary"
+              style={{ fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: 6 }}
+            >
+              <UserPlus size={15} /> Invite Team Member
+            </button>
+          )}
+        </div>
       </div>
 
       <div className="page-body">
@@ -531,7 +547,7 @@ export default function TeamClient({ members: initialMembers, currentProfile }: 
                           </span>
                         </td>
 
-{/* Account Status Column */}
+                        {/* Account Status Column */}
                         <td style={{ padding: '8px 10px' }}>
                           {member.is_active === false ? (
                             <span className="badge badge-danger" style={{ fontSize: '11px' }}>
@@ -974,6 +990,11 @@ export default function TeamClient({ members: initialMembers, currentProfile }: 
           </div>
         </div>
       )}
+      {/* Document Expiry Tracker Modal */}
+      <DocumentExpiryTrackerModal
+        isOpen={showExpiryTracker}
+        onClose={() => setShowExpiryTracker(false)}
+      />
     </div>
   )
 }
