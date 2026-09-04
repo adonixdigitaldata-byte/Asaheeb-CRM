@@ -74,6 +74,7 @@ export async function POST(request: NextRequest) {
       expected_commission_ar,
       commission_notes_en,
       commission_notes_ar,
+      discount_offer,
       is_published,
       sort_order,
     } = body
@@ -155,6 +156,7 @@ export async function POST(request: NextRequest) {
       expected_commission_ar: expected_commission_ar?.trim() || null,
       commission_notes_en: commission_notes_en?.trim() || null,
       commission_notes_ar: commission_notes_ar?.trim() || null,
+      discount_offer: discount_offer && typeof discount_offer === 'object' ? discount_offer : null,
       is_published: typeof is_published === 'boolean' ? is_published : true,
       sort_order: typeof sort_order === 'number' ? sort_order : 0,
       updated_at: new Date().toISOString(),
@@ -277,6 +279,15 @@ export async function POST(request: NextRequest) {
       ) {
         changes.push(`Map Location`)
       }
+      if (JSON.stringify(discount_offer || null) !== JSON.stringify(existingProject.discount_offer || null)) {
+        if (discount_offer?.is_active) {
+          changes.push(`Promotional Offer ("${discount_offer.discount_badge_en || discount_offer.title_en || 'Active Offer'}")`)
+        } else if (existingProject.discount_offer?.is_active && !discount_offer?.is_active) {
+          changes.push(`Deactivated Promotional Offer`)
+        } else {
+          changes.push(`Discount Offer Settings`)
+        }
+      }
 
       // Determine main action badge
       let actionType: string = 'UPDATED_DETAILS'
@@ -284,6 +295,8 @@ export async function POST(request: NextRequest) {
         actionType = 'UPDATED_PHOTOS'
       } else if (changes.some((c) => c.startsWith('Brokerage Commission'))) {
         actionType = 'UPDATED_COMMISSION'
+      } else if (changes.some((c) => c.startsWith('Promotional Offer') || c.startsWith('Discount Offer') || c.startsWith('Deactivated Promotional Offer'))) {
+        actionType = 'UPDATED_DETAILS'
       }
 
       const summaryStr = changes.length > 0

@@ -581,7 +581,7 @@ export default function LeadDetailClient({
 
       <div className="page-body">
         {/* Layout Grid */}
-        <div className="rg-3" style={{ gridTemplateColumns: '340px 1fr' }}>
+        <div className="lead-detail-grid">
           {/* Left Column: Lead Info */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
             

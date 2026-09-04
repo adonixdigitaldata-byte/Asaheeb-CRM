@@ -110,19 +110,25 @@ export default function ImageGalleryManager({
     }
   }, [captionReminder])
 
-  // Central handler when new photos are added
+    // Central handler when new photos are added
   function handlePhotosAdded(newPhotos: ProjectImage[]) {
     if (!newPhotos || newPhotos.length === 0) return
 
+    // Deduplicate against existing images by URL
+    const existingUrls = new Set(imagesRef.current.map((img) => (img.url || '').trim().toLowerCase()))
+    const uniqueNew = newPhotos.filter((img) => img.url && !existingUrls.has(img.url.trim().toLowerCase()))
+    if (uniqueNew.length === 0) return
+
     const startIndex = imagesRef.current.length
-    const updated = [...imagesRef.current, ...newPhotos]
+    const updated = [...imagesRef.current, ...uniqueNew]
+    imagesRef.current = updated
     onChange(updated)
 
     // Set caption reminder & auto-open caption editor on the first new photo
-    setCaptionReminder({ count: newPhotos.length, index: startIndex })
+    setCaptionReminder({ count: uniqueNew.length, index: startIndex })
     setEditingIndex(startIndex)
-    setCaptionEn(newPhotos[0].captionEn || '')
-    setCaptionAr(newPhotos[0].captionAr || '')
+    setCaptionEn(uniqueNew[0].captionEn || '')
+    setCaptionAr(uniqueNew[0].captionAr || '')
   }
 
   // Open Native Cloudinary Upload Widget with full multi-file batch support
@@ -137,6 +143,7 @@ export default function ImageGalleryManager({
     if (!(window as any).cloudinary) {
       const script = document.createElement('script')
       script.src = 'https://upload-widget.cloudinary.com/global/all.js'
+      script.async = true
       script.onload = () => openCloudinaryNativeWidget()
       document.body.appendChild(script)
       return
@@ -150,7 +157,7 @@ export default function ImageGalleryManager({
           folder: folder,
           sources: ['local', 'url', 'camera', 'google_drive', 'dropbox', 'unsplash'],
           multiple: true,
-          maxFiles: 30,
+          maxFiles: 50,
           clientAllowedFormats: ['png', 'jpeg', 'jpg', 'webp', 'svg'],
           resourceType: 'image',
           theme: 'minimal',
@@ -177,18 +184,25 @@ export default function ImageGalleryManager({
             if (result.event === 'success') {
               const url = result.info?.secure_url || result.info?.url
               if (url) {
-                const newImg: ProjectImage = { url, captionEn: '', captionAr: '' }
-                uploadedBatchRef.current.push(newImg)
-                // Immediately reflect all items in state
-                const nextList = [...imagesRef.current, ...uploadedBatchRef.current]
-                onChange(nextList)
+                const cleanUrl = url.trim()
+                const lowerUrl = cleanUrl.toLowerCase()
+                // Deduplicate against existing list to prevent duplicate insertion
+                if (!imagesRef.current.some((img) => (img.url || '').trim().toLowerCase() === lowerUrl)) {
+                  const newImg: ProjectImage = { url: cleanUrl, captionEn: '', captionAr: '' }
+                  uploadedBatchRef.current.push(newImg)
+                  const nextList = [...imagesRef.current, newImg]
+                  imagesRef.current = nextList
+                  onChange(nextList)
+                }
               }
             } else if (result.event === 'queues-end' || result.event === 'close') {
               if (uploadedBatchRef.current.length > 0) {
                 const batchCount = uploadedBatchRef.current.length
-                const targetIdx = imagesRef.current.length
-                setCaptionReminder({ count: batchCount, index: targetIdx })
-                setEditingIndex(targetIdx)
+                const firstUrl = uploadedBatchRef.current[0].url.toLowerCase()
+                const targetIdx = imagesRef.current.findIndex((img) => (img.url || '').trim().toLowerCase() === firstUrl)
+                const safeIdx = targetIdx >= 0 ? targetIdx : 0
+                setCaptionReminder({ count: batchCount, index: safeIdx })
+                setEditingIndex(safeIdx)
                 uploadedBatchRef.current = []
               }
             }
@@ -366,6 +380,24 @@ export default function ImageGalleryManager({
   const fullyCaptionedCount = images.filter((img) => img.captionEn && img.captionAr).length
   const missingCaptionsCount = images.length - fullyCaptionedCount
 
+  // Detect duplicates
+  const uniqueUrls = new Set(images.map((img) => (img.url || '').trim().toLowerCase()))
+  const duplicateCount = images.length - uniqueUrls.size
+
+  function handleRemoveDuplicates() {
+    const seen = new Set<string>()
+    const deduplicated: ProjectImage[] = []
+    for (const img of images) {
+      const key = (img.url || '').trim().toLowerCase()
+      if (!seen.has(key)) {
+        seen.add(key)
+        deduplicated.push(img)
+      }
+    }
+    imagesRef.current = deduplicated
+    onChange(deduplicated)
+  }
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
       {/* Upload & Actions Bar */}
@@ -402,6 +434,29 @@ export default function ImageGalleryManager({
                 <Move size={11} />
                 Drag to rearrange
               </span>
+            )}
+            {duplicateCount > 0 && (
+              <button
+                type="button"
+                onClick={handleRemoveDuplicates}
+                style={{
+                  fontSize: '11px',
+                  fontWeight: 600,
+                  color: '#DC2626',
+                  backgroundColor: '#FEE2E2',
+                  border: '1px solid #FECACA',
+                  padding: '2px 8px',
+                  borderRadius: '12px',
+                  cursor: 'pointer',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '4px',
+                }}
+                title="Click to remove duplicate photos in gallery"
+              >
+                <Trash2 size={11} />
+                <span>Remove {duplicateCount} duplicate{duplicateCount > 1 ? 's' : ''}</span>
+              </button>
             )}
             {images.length > 0 && missingCaptionsCount > 0 && (
               <button

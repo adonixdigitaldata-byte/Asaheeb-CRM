@@ -1,6 +1,8 @@
 'use client'
 
 import React, { useState, useEffect, useCallback, useMemo } from 'react'
+import { useRouter } from 'next/navigation'
+import Link from 'next/link'
 import {
   Building,
   Plus,
@@ -34,6 +36,8 @@ import {
   BarChart3,
   Info,
   ShieldCheck,
+  Flame,
+  Clock,
 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import type { Project, Profile, ProjectCommission } from '@/types/database'
@@ -53,6 +57,7 @@ interface Props {
 }
 
 export default function ProjectsClient({ profile }: Props) {
+  const router = useRouter()
   const supabase = createClient()
   const isAdmin = true // Granted to all roles
 
@@ -67,6 +72,7 @@ export default function ProjectsClient({ profile }: Props) {
   const [typeFilter, setTypeFilter] = useState('ALL')
   const [statusFilter, setStatusFilter] = useState('ALL')
   const [stageFilter, setStageFilter] = useState('ALL')
+  const [offerFilter, setOfferFilter] = useState<'ALL' | 'ACTIVE_OFFER'>('ALL')
   const [sortBy, setSortBy] = useState<'default' | 'name' | 'price_asc' | 'price_desc' | 'photos'>('default')
 
   // Modal States
@@ -253,6 +259,15 @@ export default function ProjectsClient({ profile }: Props) {
 
       if (stageFilter !== 'ALL' && p.status_en !== stageFilter) return false
 
+      if (offerFilter === 'ACTIVE_OFFER') {
+        const isOfferActive = p.discount_offer?.is_active
+        if (!isOfferActive) return false
+        if (p.discount_offer?.valid_until) {
+          const isExpired = new Date(p.discount_offer.valid_until).getTime() < Date.now()
+          if (isExpired) return false
+        }
+      }
+
       return true
     })
 
@@ -264,7 +279,7 @@ export default function ProjectsClient({ profile }: Props) {
     }
 
     return result
-  }, [projects, search, cityFilter, typeFilter, statusFilter, stageFilter, sortBy])
+  }, [projects, search, cityFilter, typeFilter, statusFilter, stageFilter, offerFilter, sortBy])
 
   const totalPages = Math.ceil(filteredProjects.length / pageSize) || 1
   const effectivePage = Math.min(currentPage, totalPages)
@@ -272,7 +287,22 @@ export default function ProjectsClient({ profile }: Props) {
 
   const publishedCount = projects.filter((p) => p.is_published).length
   const draftCount = projects.length - publishedCount
-  const hasActiveFilters = search.trim() !== '' || cityFilter !== 'ALL' || typeFilter !== 'ALL' || statusFilter !== 'ALL' || stageFilter !== 'ALL' || sortBy !== 'default'
+  const activeOffersCount = projects.filter((p) => {
+    if (!p.discount_offer?.is_active) return false
+    if (p.discount_offer?.valid_until) {
+      return new Date(p.discount_offer.valid_until).getTime() >= Date.now()
+    }
+    return true
+  }).length
+
+  const hasActiveFilters =
+    search.trim() !== '' ||
+    cityFilter !== 'ALL' ||
+    typeFilter !== 'ALL' ||
+    statusFilter !== 'ALL' ||
+    stageFilter !== 'ALL' ||
+    offerFilter !== 'ALL' ||
+    sortBy !== 'default'
 
   function resetFilters() {
     setSearch('')
@@ -280,6 +310,7 @@ export default function ProjectsClient({ profile }: Props) {
     setTypeFilter('ALL')
     setStatusFilter('ALL')
     setStageFilter('ALL')
+    setOfferFilter('ALL')
     setSortBy('default')
     setCurrentPage(1)
   }
@@ -340,9 +371,30 @@ export default function ProjectsClient({ profile }: Props) {
             <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
           </button>
 
-          {isAdmin && (
+          {/* Commission Hub / Performance CTA */}
+          {profile?.role === 'ADMIN' && (
             <button
               type="button"
+              onClick={() => router.push('/projects/commissions')}
+              className="btn btn-outline btn-sm"
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '6px',
+                fontWeight: 700,
+                color: '#065F46',
+                borderColor: '#A7F3D0',
+                backgroundColor: '#ECFDF5',
+              }}
+              title="Open full Project Commissions Performance Hub page"
+            >
+              <BarChart3 size={14} style={{ color: '#059669' }} />
+              <span>Commission Hub</span>
+            </button>
+          )}
+
+          {isAdmin && (
+            <button
               onClick={() => setReorderModalOpen(true)}
               className="btn btn-outline btn-sm"
               style={{
@@ -375,7 +427,7 @@ export default function ProjectsClient({ profile }: Props) {
       </div>
 
       <div className="page-body" style={{ paddingBottom: '30px' }}>
-        {/* Admin Commission Performance KPI Cards */}
+        {/* Admin Commission Performance KPI Cards (Clickable to navigate to Commissions Page) */}
         {profile?.role === 'ADMIN' && (
           <div
             style={{
@@ -388,11 +440,24 @@ export default function ProjectsClient({ profile }: Props) {
             {/* Card 1: Total Commissions Earned */}
             <div
               className="card"
+              onClick={() => router.push('/projects/commissions')}
               style={{
                 padding: '16px 18px',
                 background: 'linear-gradient(135deg, #ECFDF5 0%, #D1FAE5 100%)',
                 border: '1px solid #A7F3D0',
+                cursor: 'pointer',
+                transition: 'all 0.18s ease',
+                position: 'relative',
               }}
+              onMouseEnter={(e) => {
+                ;(e.currentTarget as HTMLElement).style.transform = 'translateY(-2px)'
+                ;(e.currentTarget as HTMLElement).style.boxShadow = '0 6px 16px rgba(16, 185, 129, 0.2)'
+              }}
+              onMouseLeave={(e) => {
+                ;(e.currentTarget as HTMLElement).style.transform = 'none'
+                ;(e.currentTarget as HTMLElement).style.boxShadow = 'none'
+              }}
+              title="Click to open individual project commissions breakdown page"
             >
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                 <span style={{ fontSize: '11px', fontWeight: 700, color: '#047857', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
@@ -408,16 +473,31 @@ export default function ProjectsClient({ profile }: Props) {
               <div style={{ fontSize: '11.5px', color: '#059669', marginTop: '2px', fontWeight: 500 }}>
                 Across {commissionMetrics.totalUnitsSold} recorded layout / unit sale{commissionMetrics.totalUnitsSold === 1 ? '' : 's'}
               </div>
+              <div style={{ fontSize: '10.5px', fontWeight: 700, color: '#047857', marginTop: '6px', display: 'flex', alignItems: 'center', gap: '3px' }}>
+                <span>View ranked projects breakdown →</span>
+              </div>
             </div>
 
             {/* Card 2: Units Sold */}
             <div
               className="card"
+              onClick={() => router.push('/projects/commissions')}
               style={{
                 padding: '16px 18px',
                 background: 'linear-gradient(135deg, #EFF6FF 0%, #DBEAFE 100%)',
                 border: '1px solid #BFDBFE',
+                cursor: 'pointer',
+                transition: 'all 0.18s ease',
               }}
+              onMouseEnter={(e) => {
+                ;(e.currentTarget as HTMLElement).style.transform = 'translateY(-2px)'
+                ;(e.currentTarget as HTMLElement).style.boxShadow = '0 6px 16px rgba(37, 99, 235, 0.2)'
+              }}
+              onMouseLeave={(e) => {
+                ;(e.currentTarget as HTMLElement).style.transform = 'none'
+                ;(e.currentTarget as HTMLElement).style.boxShadow = 'none'
+              }}
+              title="Click to open unit sales ledger and commission records"
             >
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                 <span style={{ fontSize: '11px', fontWeight: 700, color: '#1D4ED8', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
@@ -433,16 +513,31 @@ export default function ProjectsClient({ profile }: Props) {
               <div style={{ fontSize: '11.5px', color: '#2563EB', marginTop: '2px', fontWeight: 500 }}>
                 Across {projects.length} managed project developments
               </div>
+              <div style={{ fontSize: '10.5px', fontWeight: 700, color: '#1D4ED8', marginTop: '6px', display: 'flex', alignItems: 'center', gap: '3px' }}>
+                <span>View all sales transactions →</span>
+              </div>
             </div>
 
             {/* Card 3: Top Revenue Project */}
             <div
               className="card"
+              onClick={() => router.push('/projects/commissions')}
               style={{
                 padding: '16px 18px',
                 background: 'linear-gradient(135deg, #FFFBEB 0%, #FEF3C7 100%)',
                 border: '1px solid #FDE68A',
+                cursor: 'pointer',
+                transition: 'all 0.18s ease',
               }}
+              onMouseEnter={(e) => {
+                ;(e.currentTarget as HTMLElement).style.transform = 'translateY(-2px)'
+                ;(e.currentTarget as HTMLElement).style.boxShadow = '0 6px 16px rgba(217, 119, 6, 0.2)'
+              }}
+              onMouseLeave={(e) => {
+                ;(e.currentTarget as HTMLElement).style.transform = 'none'
+                ;(e.currentTarget as HTMLElement).style.boxShadow = 'none'
+              }}
+              title="Click to view revenue rankings and leaderboard"
             >
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                 <span style={{ fontSize: '11px', fontWeight: 700, color: '#B45309', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
@@ -458,16 +553,31 @@ export default function ProjectsClient({ profile }: Props) {
               <div style={{ fontSize: '11.5px', color: '#B45309', marginTop: '2px', fontWeight: 500 }}>
                 {commissionMetrics.topProjectAmount > 0 ? `SAR ${commissionMetrics.topProjectAmount.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })} generated` : 'No sales recorded yet'}
               </div>
+              <div style={{ fontSize: '10.5px', fontWeight: 700, color: '#B45309', marginTop: '6px', display: 'flex', alignItems: 'center', gap: '3px' }}>
+                <span>View leaderboard ranking →</span>
+              </div>
             </div>
 
             {/* Card 4: Avg Commission per Deal */}
             <div
               className="card"
+              onClick={() => router.push('/projects/commissions')}
               style={{
                 padding: '16px 18px',
                 background: 'linear-gradient(135deg, #FAF5FF 0%, #F3E8FF 100%)',
                 border: '1px solid #E9D5FF',
+                cursor: 'pointer',
+                transition: 'all 0.18s ease',
               }}
+              onMouseEnter={(e) => {
+                ;(e.currentTarget as HTMLElement).style.transform = 'translateY(-2px)'
+                ;(e.currentTarget as HTMLElement).style.boxShadow = '0 6px 16px rgba(147, 51, 234, 0.2)'
+              }}
+              onMouseLeave={(e) => {
+                ;(e.currentTarget as HTMLElement).style.transform = 'none'
+                ;(e.currentTarget as HTMLElement).style.boxShadow = 'none'
+              }}
+              title="Click to open Commission Performance Hub"
             >
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                 <span style={{ fontSize: '11px', fontWeight: 700, color: '#7E22CE', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
@@ -482,6 +592,9 @@ export default function ProjectsClient({ profile }: Props) {
               </div>
               <div style={{ fontSize: '11.5px', color: '#7E22CE', marginTop: '2px', fontWeight: 500 }}>
                 Average broker yield per closed deal
+              </div>
+              <div style={{ fontSize: '10.5px', fontWeight: 700, color: '#7E22CE', marginTop: '6px', display: 'flex', alignItems: 'center', gap: '3px' }}>
+                <span>Explore all project yields →</span>
               </div>
             </div>
           </div>
@@ -541,6 +654,29 @@ export default function ProjectsClient({ profile }: Props) {
             }}
           >
             ○ Drafts ({draftCount})
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setOfferFilter(offerFilter === 'ACTIVE_OFFER' ? 'ALL' : 'ACTIVE_OFFER')}
+            style={{
+              padding: '4px 12px',
+              borderRadius: '20px',
+              fontSize: '12px',
+              fontWeight: 700,
+              border: offerFilter === 'ACTIVE_OFFER' ? '1px solid #EA580C' : '1px solid #FED7AA',
+              cursor: 'pointer',
+              backgroundColor: offerFilter === 'ACTIVE_OFFER' ? '#EA580C' : '#FFF7ED',
+              color: offerFilter === 'ACTIVE_OFFER' ? '#FFFFFF' : '#C2410C',
+              transition: 'all 0.15s ease',
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '4px',
+            }}
+            title="Filter projects with active discounts and promotional countdowns"
+          >
+            <Flame size={12} />
+            <span>Active Offers ({activeOffersCount})</span>
           </button>
 
           {cities.slice(0, 4).map((city) => {
@@ -707,12 +843,12 @@ export default function ProjectsClient({ profile }: Props) {
           )}
         </div>
 
-        {/* Clean, Non-Overflowing Fixed Table with Scroll Safety */}
+        {/* Projects Data Table */}
         {loading && projects.length === 0 ? (
           <LogoLoader size={44} text="Loading property projects..." />
-        ) : filteredProjects.length > 0 ? (
-          <div className="card" style={{ padding: 0, overflow: 'hidden', border: '1px solid var(--border)', width: '100%' }}>
-            <div style={{ overflowX: 'auto', width: '100%' }}>
+        ) : displayedProjects.length > 0 ? (
+          <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+            <div className="table-responsive-wrapper" style={{ overflowX: 'auto', width: '100%' }}>
               <table style={{ width: '100%', minWidth: '1060px', tableLayout: 'fixed', borderCollapse: 'collapse', textAlign: 'left', fontSize: '13px' }}>
                 <thead>
                   <tr
@@ -866,8 +1002,80 @@ export default function ProjectsClient({ profile }: Props) {
                           </span>
                         </div>
                         <div style={{ fontWeight: 700, color: '#16A34A', fontSize: '12px', marginTop: '2px' }}>
-                          {project.starting_price_en || 'On inquiry'}
+                          {project.discount_offer?.is_active && project.discount_offer?.discounted_price_en ? (
+                            <div style={{ display: 'flex', flexDirection: 'column' }}>
+                              <span style={{ textDecoration: 'line-through', color: '#94A3B8', fontSize: '11px', fontWeight: 500 }}>
+                                {project.discount_offer.original_price_en || project.starting_price_en}
+                              </span>
+                              <span style={{ color: '#EA580C', fontWeight: 800, fontSize: '12.5px' }}>
+                                {project.discount_offer.discounted_price_en}
+                              </span>
+                            </div>
+                          ) : (
+                            project.starting_price_en || 'On inquiry'
+                          )}
                         </div>
+
+                        {/* Active Promotional Offer Tag */}
+                        {project.discount_offer?.is_active && (() => {
+                          const validUntil = project.discount_offer.valid_until
+                          const isExpired = validUntil ? new Date(validUntil).getTime() < Date.now() : false
+                          const daysLeft = validUntil
+                            ? Math.ceil((new Date(validUntil).getTime() - Date.now()) / (1000 * 60 * 60 * 24))
+                            : null
+
+                          return (
+                            <div style={{ marginTop: '4px' }}>
+                              <div
+                                style={{
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: '3px',
+                                  backgroundColor: isExpired ? '#F1F5F9' : '#FFF7ED',
+                                  color: isExpired ? '#64748B' : '#EA580C',
+                                  border: isExpired ? '1px solid #E2E8F0' : '1px solid #FDBA74',
+                                  borderRadius: '4px',
+                                  padding: '1px 5px',
+                                  fontSize: '10.5px',
+                                  fontWeight: 800,
+                                }}
+                                title={
+                                  project.discount_offer.applies_to === 'SPECIFIC_UNITS' && project.discount_offer.applicable_units_en
+                                    ? `Offer on: ${project.discount_offer.applicable_units_en}`
+                                    : 'Offer on all units'
+                                }
+                              >
+                                <Flame size={10} style={{ color: isExpired ? '#94A3B8' : '#F97316' }} />
+                                <span>{isExpired ? 'EXPIRED OFFER' : project.discount_offer.discount_badge_en || 'SPECIAL OFFER'}</span>
+                              </div>
+
+                              {!isExpired && daysLeft !== null && daysLeft >= 0 && (
+                                <div style={{ fontSize: '10px', color: daysLeft <= 3 ? '#DC2626' : '#C2410C', fontWeight: 600, marginTop: '2px', display: 'flex', alignItems: 'center', gap: '2px' }}>
+                                  <Clock size={9} />
+                                  <span>{daysLeft === 0 ? 'Expires today!' : `${daysLeft}d left`}</span>
+                                </div>
+                              )}
+
+                              {project.discount_offer.applies_to === 'SPECIFIC_UNITS' && project.discount_offer.applicable_units_en && (
+                                <div
+                                  style={{
+                                    fontSize: '10px',
+                                    color: '#7C2D12',
+                                    fontWeight: 500,
+                                    marginTop: '1px',
+                                    maxWidth: '140px',
+                                    overflow: 'hidden',
+                                    textOverflow: 'ellipsis',
+                                    whiteSpace: 'nowrap',
+                                  }}
+                                  title={`Applicable to: ${project.discount_offer.applicable_units_en}`}
+                                >
+                                  🎯 {project.discount_offer.applicable_units_en}
+                                </div>
+                              )}
+                            </div>
+                          )
+                        })()}
                       </td>
 
                       {/* Brokerage Commission & Notes */}

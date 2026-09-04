@@ -21,8 +21,13 @@ import {
   ArrowDown,
   Star,
   ShieldCheck,
+  Tag,
+  Flame,
+  Clock,
+  Calendar,
+  Percent,
 } from 'lucide-react'
-import type { Project, ProjectVideo, Landmark, Amenity } from '@/types/database'
+import type { Project, ProjectVideo, Landmark, Amenity, ProjectDiscountOffer } from '@/types/database'
 import ImageGalleryManager from '@/components/ImageGalleryManager'
 import CmsActivityTimeline from '@/components/CmsActivityTimeline'
 
@@ -113,6 +118,26 @@ export default function ProjectEditorModal({
     expected_commission_ar: project?.expected_commission_ar || '',
     commission_notes_en: project?.commission_notes_en || '',
     commission_notes_ar: project?.commission_notes_ar || '',
+    discount_offer: project?.discount_offer || {
+      is_active: false,
+      title_en: '',
+      title_ar: '',
+      discount_type: 'PERCENTAGE',
+      discount_value: null,
+      discount_badge_en: 'LIMITED TIME OFFER',
+      discount_badge_ar: 'عرض لفترة محدودة',
+      applies_to: 'ALL_UNITS',
+      applicable_units_en: '',
+      applicable_units_ar: '',
+      original_price_en: '',
+      original_price_ar: '',
+      discounted_price_en: '',
+      discounted_price_ar: '',
+      valid_until: '',
+      show_countdown: true,
+      terms_note_en: '',
+      terms_note_ar: '',
+    },
     video_url: project?.video_url || '',
     video_items: initialVideos,
     map_embed_url: project?.map_embed_url || '',
@@ -465,6 +490,7 @@ export default function ProjectEditorModal({
 
         {/* Tab Navigation */}
         <div
+          className="modal-tabs-scroll"
           style={{
             display: 'flex',
             alignItems: 'center',
@@ -863,6 +889,541 @@ export default function ProjectEditorModal({
                       />
                     </div>
                   </div>
+                </div>
+
+                {/* PROMOTIONAL DISCOUNTS & SPECIAL OFFERS SECTION */}
+                <div
+                  style={{
+                    background: form.discount_offer?.is_active
+                      ? 'linear-gradient(135deg, #FFF7ED 0%, #FFEDD5 100%)'
+                      : '#F8FAFC',
+                    border: form.discount_offer?.is_active
+                      ? '1.5px solid #FDBA74'
+                      : '1px solid #E2E8F0',
+                    borderRadius: '10px',
+                    padding: '16px 18px',
+                    transition: 'all 0.2s ease',
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '10px', flexWrap: 'wrap', gap: '8px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <div
+                        style={{
+                          width: '28px',
+                          height: '28px',
+                          borderRadius: '6px',
+                          backgroundColor: form.discount_offer?.is_active ? '#EA580C' : '#94A3B8',
+                          color: '#FFFFFF',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                        }}
+                      >
+                        <Flame size={16} />
+                      </div>
+                      <div>
+                        <span style={{ fontWeight: 800, fontSize: '14px', color: form.discount_offer?.is_active ? '#9A3412' : '#334155' }}>
+                          Promotional Discounts &amp; Limited-Time Offers
+                        </span>
+                        <div style={{ fontSize: '11px', color: form.discount_offer?.is_active ? '#C2410C' : '#64748B' }}>
+                          Showcase discounts on specific unit types or whole project with countdown urgency on website
+                        </div>
+                      </div>
+                    </div>
+
+                    <label
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '8px',
+                        cursor: 'pointer',
+                        backgroundColor: form.discount_offer?.is_active ? '#FFEDD5' : '#FFFFFF',
+                        border: form.discount_offer?.is_active ? '1.5px solid #EA580C' : '1px solid #CBD5E1',
+                        padding: '6px 12px',
+                        borderRadius: '20px',
+                        boxShadow: '0 1px 2px rgba(0,0,0,0.05)',
+                      }}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={!!form.discount_offer?.is_active}
+                        onChange={(e) => {
+                          const isActive = e.target.checked
+                          setForm({
+                            ...form,
+                            discount_offer: {
+                              ...(form.discount_offer || {
+                                title_en: '',
+                                title_ar: '',
+                                discount_type: 'PERCENTAGE',
+                                applies_to: 'ALL_UNITS',
+                                show_countdown: true,
+                              }),
+                              is_active: isActive,
+                              discount_badge_en: form.discount_offer?.discount_badge_en || 'LIMITED TIME OFFER',
+                              discount_badge_ar: form.discount_offer?.discount_badge_ar || 'عرض لفترة محدودة',
+                            },
+                          })
+                        }}
+                        style={{ width: '16px', height: '16px', accentColor: '#EA580C' }}
+                      />
+                      <span style={{ fontSize: '12px', fontWeight: 700, color: form.discount_offer?.is_active ? '#9A3412' : '#64748B' }}>
+                        {form.discount_offer?.is_active ? '🔥 Discount Offer Active' : 'Enable Discount Offer'}
+                      </span>
+                    </label>
+                  </div>
+
+                  {form.discount_offer?.is_active && (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '14px', marginTop: '14px' }}>
+                      {/* Live Enthusiasm Preview Banner */}
+                      <div
+                        style={{
+                          background: 'linear-gradient(135deg, #1E293B 0%, #0F172A 100%)',
+                          color: '#FFFFFF',
+                          padding: '14px 16px',
+                          borderRadius: '8px',
+                          border: '1px solid #334155',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          flexWrap: 'wrap',
+                          gap: '10px',
+                        }}
+                      >
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                          <span
+                            style={{
+                              backgroundColor: '#EA580C',
+                              color: '#FFFFFF',
+                              padding: '3px 8px',
+                              borderRadius: '4px',
+                              fontSize: '11px',
+                              fontWeight: 800,
+                              letterSpacing: '0.04em',
+                              textTransform: 'uppercase',
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '4px',
+                            }}
+                          >
+                            <Flame size={12} />
+                            {form.discount_offer.discount_badge_en || 'EXCLUSIVE OFFER'}
+                          </span>
+                          <div>
+                            <div style={{ fontSize: '13px', fontWeight: 700, color: '#F8FAFC' }}>
+                              {form.discount_offer.title_en || 'Special Limited-Time Promotional Discount'}
+                            </div>
+                            <div style={{ fontSize: '11px', color: '#CBD5E1' }}>
+                              {form.discount_offer.applies_to === 'SPECIFIC_UNITS' && form.discount_offer.applicable_units_en
+                                ? `Valid on: ${form.discount_offer.applicable_units_en}`
+                                : 'Valid across all project layouts'}
+                            </div>
+                          </div>
+                        </div>
+
+                        {form.discount_offer.valid_until && (
+                          <div
+                            style={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: '6px',
+                              backgroundColor: '#334155',
+                              padding: '4px 10px',
+                              borderRadius: '6px',
+                              fontSize: '11.5px',
+                              fontWeight: 600,
+                              color: '#FED7AA',
+                            }}
+                          >
+                            <Clock size={13} style={{ color: '#FB923C' }} />
+                            <span>
+                              Expires:{' '}
+                              {new Date(form.discount_offer.valid_until).toLocaleDateString('en-US', {
+                                month: 'short',
+                                day: 'numeric',
+                                year: 'numeric',
+                              })}
+                            </span>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Offer Titles */}
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                        <div className="form-group" style={{ marginBottom: 0 }}>
+                          <label className="form-label" style={{ fontSize: '12px', fontWeight: 700, color: '#9A3412' }}>
+                            Offer Title / Headline (English) *
+                          </label>
+                          <input
+                            type="text"
+                            value={form.discount_offer.title_en || ''}
+                            onChange={(e) =>
+                              setForm({
+                                ...form,
+                                discount_offer: { ...form.discount_offer!, title_en: e.target.value },
+                              })
+                            }
+                            placeholder="e.g. Early Bird 5% Discount or National Day Special Offer"
+                            className="form-input"
+                            style={{ backgroundColor: '#FFFFFF' }}
+                          />
+                        </div>
+
+                        <div className="form-group" style={{ marginBottom: 0 }}>
+                          <label className="form-label" style={{ textAlign: 'right', fontSize: '12px', fontWeight: 700, color: '#9A3412' }}>
+                            عنوان العرض والخصم (بالعربية) *
+                          </label>
+                          <input
+                            type="text"
+                            dir="rtl"
+                            value={form.discount_offer.title_ar || ''}
+                            onChange={(e) =>
+                              setForm({
+                                ...form,
+                                discount_offer: { ...form.discount_offer!, title_ar: e.target.value },
+                              })
+                            }
+                            placeholder="مثال: خصم 5% للحجز المبكر أو عرض اليوم الوطني الحصري"
+                            className="form-input"
+                            style={{ backgroundColor: '#FFFFFF' }}
+                          />
+                        </div>
+                      </div>
+
+                      {/* Discount Badges */}
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                        <div className="form-group" style={{ marginBottom: 0 }}>
+                          <label className="form-label" style={{ fontSize: '12px', fontWeight: 600, color: '#9A3412' }}>
+                            Marketing Badge / Tag (EN)
+                          </label>
+                          <input
+                            type="text"
+                            value={form.discount_offer.discount_badge_en || ''}
+                            onChange={(e) =>
+                              setForm({
+                                ...form,
+                                discount_offer: { ...form.discount_offer!, discount_badge_en: e.target.value },
+                              })
+                            }
+                            placeholder="e.g. 5% OFF, SAR 50K DISCOUNT, LIMITED TIME"
+                            className="form-input"
+                            style={{ backgroundColor: '#FFFFFF' }}
+                          />
+                        </div>
+
+                        <div className="form-group" style={{ marginBottom: 0 }}>
+                          <label className="form-label" style={{ textAlign: 'right', fontSize: '12px', fontWeight: 600, color: '#9A3412' }}>
+                            شارة العرض التسويقية (AR)
+                          </label>
+                          <input
+                            type="text"
+                            dir="rtl"
+                            value={form.discount_offer.discount_badge_ar || ''}
+                            onChange={(e) =>
+                              setForm({
+                                ...form,
+                                discount_offer: { ...form.discount_offer!, discount_badge_ar: e.target.value },
+                              })
+                            }
+                            placeholder="مثال: خصم ٥٪، خصم ٥٠,٠٠٠ ر.س، لفترة محدودة"
+                            className="form-input"
+                            style={{ backgroundColor: '#FFFFFF' }}
+                          />
+                        </div>
+                      </div>
+
+                      {/* Discount Calculation Type & Unit Applicability */}
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                        <div className="form-group" style={{ marginBottom: 0 }}>
+                          <label className="form-label" style={{ fontSize: '12px', fontWeight: 700, color: '#9A3412' }}>
+                            Discount Type &amp; Value
+                          </label>
+                          <div style={{ display: 'flex', gap: '8px' }}>
+                            <select
+                              className="form-select"
+                              style={{ width: '55%', backgroundColor: '#FFFFFF', fontSize: '12px' }}
+                              value={form.discount_offer.discount_type}
+                              onChange={(e) =>
+                                setForm({
+                                  ...form,
+                                  discount_offer: {
+                                    ...form.discount_offer!,
+                                    discount_type: e.target.value as any,
+                                  },
+                                })
+                              }
+                            >
+                              <option value="PERCENTAGE">Percentage (% Off)</option>
+                              <option value="FIXED_AMOUNT">Fixed SAR Discount</option>
+                              <option value="CUSTOM_TEXT">Custom Package Offer</option>
+                            </select>
+
+                            <input
+                              type="number"
+                              value={form.discount_offer.discount_value ?? ''}
+                              onChange={(e) =>
+                                setForm({
+                                  ...form,
+                                  discount_offer: {
+                                    ...form.discount_offer!,
+                                    discount_value: e.target.value ? Number(e.target.value) : null,
+                                  },
+                                })
+                              }
+                              placeholder={
+                                form.discount_offer.discount_type === 'PERCENTAGE'
+                                  ? 'e.g. 5 (%)'
+                                  : form.discount_offer.discount_type === 'FIXED_AMOUNT'
+                                  ? 'e.g. 50000 (SAR)'
+                                  : 'Optional value'
+                              }
+                              className="form-input"
+                              style={{ width: '45%', backgroundColor: '#FFFFFF' }}
+                            />
+                          </div>
+                        </div>
+
+                        {/* Unit Applicability Selector */}
+                        <div className="form-group" style={{ marginBottom: 0 }}>
+                          <label className="form-label" style={{ fontSize: '12px', fontWeight: 700, color: '#9A3412' }}>
+                            Applicability (Targeted Apartments / Layouts) *
+                          </label>
+                          <select
+                            className="form-select"
+                            style={{ backgroundColor: '#FFFFFF', fontSize: '12px' }}
+                            value={form.discount_offer.applies_to}
+                            onChange={(e) =>
+                              setForm({
+                                ...form,
+                                discount_offer: {
+                                  ...form.discount_offer!,
+                                  applies_to: e.target.value as any,
+                                },
+                              })
+                            }
+                          >
+                            <option value="ALL_UNITS">All Apartments / Entire Project (الكل)</option>
+                            <option value="SPECIFIC_UNITS">Specific Unit Types Only (شقق / نماذج محددة فقط)</option>
+                          </select>
+                        </div>
+                      </div>
+
+                      {/* If Specific Units Selected */}
+                      {form.discount_offer.applies_to === 'SPECIFIC_UNITS' && (
+                        <div
+                          style={{
+                            display: 'grid',
+                            gridTemplateColumns: '1fr 1fr',
+                            gap: '12px',
+                            backgroundColor: '#FFFFFF',
+                            padding: '12px',
+                            borderRadius: '8px',
+                            border: '1px dashed #F97316',
+                          }}
+                        >
+                          <div className="form-group" style={{ marginBottom: 0 }}>
+                            <label className="form-label" style={{ fontSize: '11.5px', fontWeight: 700, color: '#C2410C' }}>
+                              Eligible Unit Types (EN) *
+                            </label>
+                            <input
+                              type="text"
+                              value={form.discount_offer.applicable_units_en || ''}
+                              onChange={(e) =>
+                                setForm({
+                                  ...form,
+                                  discount_offer: {
+                                    ...form.discount_offer!,
+                                    applicable_units_en: e.target.value,
+                                  },
+                                })
+                              }
+                              placeholder="e.g. 3-Bedroom Apartments &amp; Penthouses Only"
+                              className="form-input"
+                              style={{ backgroundColor: '#FFF7ED' }}
+                            />
+                            <span style={{ fontSize: '10.5px', color: '#9A3412', marginTop: '2px' }}>
+                              Clarifies to buyers exactly which apartment models receive this discount.
+                            </span>
+                          </div>
+
+                          <div className="form-group" style={{ marginBottom: 0 }}>
+                            <label className="form-label" style={{ textAlign: 'right', fontSize: '11.5px', fontWeight: 700, color: '#C2410C' }}>
+                              النماذج والشقق المؤهلة للخصم (AR) *
+                            </label>
+                            <input
+                              type="text"
+                              dir="rtl"
+                              value={form.discount_offer.applicable_units_ar || ''}
+                              onChange={(e) =>
+                                setForm({
+                                  ...form,
+                                  discount_offer: {
+                                    ...form.discount_offer!,
+                                    applicable_units_ar: e.target.value,
+                                  },
+                                })
+                              }
+                              placeholder="مثال: شقق ٣ غرف نوم والبنتهاوس فقط"
+                              className="form-input"
+                              style={{ backgroundColor: '#FFF7ED' }}
+                            />
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Original vs Discounted Pricing Display (Optional strike-through) */}
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                        <div className="form-group" style={{ marginBottom: 0 }}>
+                          <label className="form-label" style={{ fontSize: '11.5px', color: '#78350F' }}>
+                            Original Starting Price (Before Discount Display - EN)
+                          </label>
+                          <input
+                            type="text"
+                            value={form.discount_offer.original_price_en || ''}
+                            onChange={(e) =>
+                              setForm({
+                                ...form,
+                                discount_offer: {
+                                  ...form.discount_offer!,
+                                  original_price_en: e.target.value,
+                                },
+                              })
+                            }
+                            placeholder="e.g. SAR 750,000"
+                            className="form-input"
+                            style={{ backgroundColor: '#FFFFFF' }}
+                          />
+                        </div>
+
+                        <div className="form-group" style={{ marginBottom: 0 }}>
+                          <label className="form-label" style={{ fontSize: '11.5px', color: '#78350F', fontWeight: 700 }}>
+                            Discounted Price (Promotional Starting Price - EN)
+                          </label>
+                          <input
+                            type="text"
+                            value={form.discount_offer.discounted_price_en || ''}
+                            onChange={(e) =>
+                              setForm({
+                                ...form,
+                                discount_offer: {
+                                  ...form.discount_offer!,
+                                  discounted_price_en: e.target.value,
+                                },
+                              })
+                            }
+                            placeholder="e.g. SAR 699,000 (Special Deal)"
+                            className="form-input"
+                            style={{ backgroundColor: '#FFFFFF', borderColor: '#F97316', fontWeight: 700 }}
+                          />
+                        </div>
+                      </div>
+
+                      {/* Validity Date & Countdown */}
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', alignItems: 'center' }}>
+                        <div className="form-group" style={{ marginBottom: 0 }}>
+                          <label className="form-label" style={{ fontSize: '12px', fontWeight: 700, color: '#9A3412', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                            <Calendar size={13} style={{ color: '#EA580C' }} />
+                            <span>Valid Until / Expiration Date (ISO Date)</span>
+                          </label>
+                          <input
+                            type="date"
+                            value={
+                              form.discount_offer.valid_until
+                                ? form.discount_offer.valid_until.split('T')[0]
+                                : ''
+                            }
+                            onChange={(e) =>
+                              setForm({
+                                ...form,
+                                discount_offer: {
+                                  ...form.discount_offer!,
+                                  valid_until: e.target.value ? new Date(e.target.value).toISOString() : '',
+                                },
+                              })
+                            }
+                            className="form-input"
+                            style={{ backgroundColor: '#FFFFFF' }}
+                          />
+                          <span style={{ fontSize: '10.5px', color: '#9A3412', marginTop: '2px' }}>
+                            Offer will automatically show countdown urgency and expire once date is reached.
+                          </span>
+                        </div>
+
+                        <div className="form-group" style={{ marginBottom: 0 }}>
+                          <label className="form-label" style={{ fontSize: '12px', fontWeight: 600, color: '#9A3412' }}>
+                            Countdown Timer &amp; Urgency
+                          </label>
+                          <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', marginTop: '6px' }}>
+                            <input
+                              type="checkbox"
+                              checked={form.discount_offer.show_countdown ?? true}
+                              onChange={(e) =>
+                                setForm({
+                                  ...form,
+                                  discount_offer: {
+                                    ...form.discount_offer!,
+                                    show_countdown: e.target.checked,
+                                  },
+                                })
+                              }
+                              style={{ width: '16px', height: '16px', accentColor: '#EA580C' }}
+                            />
+                            <span style={{ fontSize: '12px', fontWeight: 600, color: '#7C2D12' }}>
+                              Show Live Countdown Timer on Public Website
+                            </span>
+                          </label>
+                        </div>
+                      </div>
+
+                      {/* Offer Terms & Exclusivity Note */}
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                        <div className="form-group" style={{ marginBottom: 0 }}>
+                          <label className="form-label" style={{ fontSize: '11.5px', color: '#9A3412' }}>
+                            Offer Terms / Urgency Note (EN)
+                          </label>
+                          <input
+                            type="text"
+                            value={form.discount_offer.terms_note_en || ''}
+                            onChange={(e) =>
+                              setForm({
+                                ...form,
+                                discount_offer: {
+                                  ...form.discount_offer!,
+                                  terms_note_en: e.target.value,
+                                },
+                              })
+                            }
+                            placeholder="e.g. Valid on first 5 signed reservations this month only."
+                            className="form-input"
+                            style={{ backgroundColor: '#FFFFFF', fontSize: '12px' }}
+                          />
+                        </div>
+
+                        <div className="form-group" style={{ marginBottom: 0 }}>
+                          <label className="form-label" style={{ textAlign: 'right', fontSize: '11.5px', color: '#9A3412' }}>
+                            شروط العرض والرمز التسويقي (AR)
+                          </label>
+                          <input
+                            type="text"
+                            dir="rtl"
+                            value={form.discount_offer.terms_note_ar || ''}
+                            onChange={(e) =>
+                              setForm({
+                                ...form,
+                                discount_offer: {
+                                  ...form.discount_offer!,
+                                  terms_note_ar: e.target.value,
+                                },
+                              })
+                            }
+                            placeholder="مثال: يسري على أول ٥ حجوزات مؤكدة فقط هذا الشهر."
+                            className="form-input"
+                            style={{ backgroundColor: '#FFFFFF', fontSize: '12px' }}
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  )}
                 </div>
 
                 {/* Payment Terms / Options */}

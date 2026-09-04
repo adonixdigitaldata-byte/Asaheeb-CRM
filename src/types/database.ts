@@ -137,6 +137,27 @@ export interface Amenity {
   descAr: string
 }
 
+export interface ProjectDiscountOffer {
+  is_active: boolean
+  title_en: string
+  title_ar: string
+  discount_type: 'PERCENTAGE' | 'FIXED_AMOUNT' | 'CUSTOM_TEXT'
+  discount_value?: number | null
+  discount_badge_en?: string | null
+  discount_badge_ar?: string | null
+  applies_to: 'ALL_UNITS' | 'SPECIFIC_UNITS'
+  applicable_units_en?: string | null
+  applicable_units_ar?: string | null
+  original_price_en?: string | null
+  original_price_ar?: string | null
+  discounted_price_en?: string | null
+  discounted_price_ar?: string | null
+  valid_until?: string | null
+  show_countdown?: boolean
+  terms_note_en?: string | null
+  terms_note_ar?: string | null
+}
+
 export interface Project {
   id: string
   name_en: string
@@ -186,6 +207,7 @@ export interface Project {
   expected_commission_ar?: string | null
   commission_notes_en?: string | null
   commission_notes_ar?: string | null
+  discount_offer?: ProjectDiscountOffer | null
   is_published: boolean
   sort_order: number
   created_by?: string | null

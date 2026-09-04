@@ -1,7 +1,6 @@
 import { createClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
-import Sidebar from '@/components/Sidebar'
-import ActivityTracker from '@/components/ActivityTracker'
+import CRMAppShell from '@/components/CRMAppShell'
 import type { Profile } from '@/types/database'
 
 export default async function CRMProtectedLayout({
@@ -25,12 +24,8 @@ export default async function CRMProtectedLayout({
     .single()
 
   return (
-    <div className="app-shell">
-      <Sidebar profile={profile as Profile} />
-      <ActivityTracker userId={user.id} />
-      <main className="main-content">
-        {children}
-      </main>
-    </div>
+    <CRMAppShell profile={profile as Profile} userId={user.id}>
+      {children}
+    </CRMAppShell>
   )
 }

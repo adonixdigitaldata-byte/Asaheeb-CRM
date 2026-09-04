@@ -21,9 +21,11 @@ import type { Profile } from '@/types/database'
 
 interface SidebarProps {
   profile: Profile | null
+  isOpen?: boolean
+  onClose?: () => void
 }
 
-export default function Sidebar({ profile }: SidebarProps) {
+export default function Sidebar({ profile, isOpen, onClose }: SidebarProps) {
   const pathname = usePathname()
   const role = profile?.role || 'AGENT'
   const isAdmin = role === 'ADMIN'
@@ -117,101 +119,128 @@ export default function Sidebar({ profile }: SidebarProps) {
     role === 'EMPLOYEE' ? 'EMPLOYEE' : 'SALES AGENT'
 
   return (
-    <aside className="sidebar">
-      {/* Brand Header */}
-      <div className="sidebar-header">
-        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-          <div style={{
-            width: '36px',
-            height: '36px',
-            position: 'relative',
-            borderRadius: '50%',
-            overflow: 'hidden',
-            backgroundColor: '#FFFFFF',
-            boxShadow: '0 1px 3px rgba(0,0,0,0.08)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            padding: '2px',
-            flexShrink: 0,
-          }}>
-            <Image
-              src="/Favicon.png"
-              alt="Asaheeb Real Estate"
-              width={32}
-              height={32}
-              style={{ objectFit: 'contain', borderRadius: '50%' }}
-              priority
-            />
-          </div>
-          <div>
-            <div style={{ fontWeight: 800, fontSize: '15px', color: 'var(--text-primary)', letterSpacing: '-0.02em', lineHeight: 1.1 }}>
-              Asaheeb
-            </div>
-            <div style={{ fontSize: '11px', color: 'var(--accent)', fontWeight: 700, letterSpacing: '0.04em' }}>
-              العقارية · REAL ESTATE
-            </div>
-          </div>
-        </div>
-      </div>
+    <>
+      {/* Mobile Dark Backdrop */}
+      {isOpen && (
+        <div className="sidebar-backdrop" onClick={onClose} />
+      )}
 
-      {/* Navigation Links */}
-      <div className="sidebar-nav">
-        {navSections.map((sec, idx) => (
-          <div key={idx} style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
-            <div className="sidebar-section-label">{sec.section}</div>
-            {sec.items.map((item) => {
-              const Icon = item.icon
-              const isActive =
-                pathname === item.href ||
-                (item.href === '/leads'
-                  ? pathname.startsWith('/leads/') && !pathname.startsWith('/leads/import')
-                  : item.href !== '/dashboard' && pathname.startsWith(item.href + '/'))
-
-              return (
-                <Link
-                  key={item.href}
-                  href={item.href}
-                  className={`sidebar-item ${isActive ? 'active' : ''}`}
-                >
-                  <Icon size={16} />
-                  <span>{item.label}</span>
-                </Link>
-              )
-            })}
-          </div>
-        ))}
-      </div>
-
-      {/* Footer Profile & Logout */}
-      <div className="sidebar-footer">
-        <div className="user-badge">
-          <div className="avatar-circle">
-            {profile?.name ? profile.name.charAt(0).toUpperCase() : 'A'}
-          </div>
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-primary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-              {profile?.name || 'Staff'}
+      <aside className={`sidebar ${isOpen ? 'open' : ''}`}>
+        {/* Brand Header */}
+        <div className="sidebar-header" style={{ justifyContent: 'space-between' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+            <div style={{
+              width: '36px',
+              height: '36px',
+              position: 'relative',
+              borderRadius: '50%',
+              overflow: 'hidden',
+              backgroundColor: '#FFFFFF',
+              boxShadow: '0 1px 3px rgba(0,0,0,0.08)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              padding: '2px',
+              flexShrink: 0,
+            }}>
+              <Image
+                src="/Favicon.png"
+                alt="Asaheeb Real Estate"
+                width={32}
+                height={32}
+                style={{ objectFit: 'contain', borderRadius: '50%' }}
+                priority
+              />
             </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '4px', marginTop: '2px' }}>
-              <span className={`badge ${isAdmin ? 'badge-admin' : isManager ? 'badge-admin' : 'badge-agent'}`}>
-                {roleLabel}
-              </span>
+            <div>
+              <div style={{ fontWeight: 800, fontSize: '15px', color: 'var(--text-primary)', letterSpacing: '-0.02em', lineHeight: 1.1 }}>
+                Asaheeb
+              </div>
+              <div style={{ fontSize: '11px', color: 'var(--accent)', fontWeight: 700, letterSpacing: '0.04em' }}>
+                العقارية · REAL ESTATE
+              </div>
             </div>
           </div>
+
+          {/* Close button for mobile */}
+          {onClose && (
+            <button
+              type="button"
+              onClick={onClose}
+              className="mobile-close-btn"
+              style={{
+                background: 'none',
+                border: 'none',
+                color: '#64748B',
+                padding: '4px',
+                display: 'none',
+                cursor: 'pointer',
+              }}
+            >
+              ✕
+            </button>
+          )}
         </div>
 
-        <form action={logout}>
-          <button
-            type="submit"
-            className="btn btn-outline btn-sm"
-            style={{ width: '100%', justifyContent: 'center', color: 'var(--text-secondary)' }}
-          >
-            <LogOut size={13} />
-            <span>Sign Out</span>
-          </button>
-        </form>
-      </div>
-    </aside>
+        {/* Navigation Links */}
+        <div className="sidebar-nav">
+          {navSections.map((sec, idx) => (
+            <div key={idx} style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+              <div className="sidebar-section-label">{sec.section}</div>
+              {sec.items.map((item) => {
+                const Icon = item.icon
+                const isActive =
+                  pathname === item.href ||
+                  (item.href === '/leads'
+                    ? pathname.startsWith('/leads/') && !pathname.startsWith('/leads/import')
+                    : item.href !== '/dashboard' && pathname.startsWith(item.href + '/'))
+
+                return (
+                  <Link
+                    key={item.href}
+                    href={item.href}
+                    onClick={onClose}
+                    className={`sidebar-item ${isActive ? 'active' : ''}`}
+                  >
+                    <Icon size={16} />
+                    <span>{item.label}</span>
+                  </Link>
+                )
+              })}
+            </div>
+          ))}
+        </div>
+
+        {/* Footer Profile & Logout */}
+        <div className="sidebar-footer">
+          <div className="user-badge">
+            <div className="avatar-circle">
+              {profile?.name ? profile.name.charAt(0).toUpperCase() : 'A'}
+            </div>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-primary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                {profile?.name || 'Staff'}
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '4px', marginTop: '2px' }}>
+                <span className={`badge ${isAdmin ? 'badge-admin' : isManager ? 'badge-admin' : 'badge-agent'}`}>
+                  {roleLabel}
+                </span>
+              </div>
+            </div>
+          </div>
+
+          <form action={logout}>
+            <button
+              type="submit"
+              className="btn btn-outline btn-sm"
+              style={{ width: '100%', justifyContent: 'center', color: 'var(--text-secondary)' }}
+            >
+              <LogOut size={13} />
+              <span>Sign Out</span>
+            </button>
+          </form>
+        </div>
+      </aside>
+    </>
   )
 }

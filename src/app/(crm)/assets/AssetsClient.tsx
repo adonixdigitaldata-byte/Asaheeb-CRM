@@ -624,15 +624,8 @@ export default function AssetsClient({
         </div>
       </div>
 
-      {/* Metric Cards */}
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: isAdmin ? 'repeat(5, 1fr)' : 'repeat(4, 1fr)',
-          gap: '16px',
-          marginBottom: '28px',
-        }}
-      >
+      {/* KPI Cards Grid */}
+      <div className="rg-4 asset-kpi-grid" style={{ marginBottom: '28px' }}>
         <div
           className="card"
           style={{
@@ -928,7 +921,7 @@ export default function AssetsClient({
 
       {/* Main Asset Data Table */}
       <div className="card" style={{ padding: 0, overflow: 'hidden', border: '1px solid var(--border)', borderRadius: '12px' }}>
-        <div style={{ overflowX: 'auto', minHeight: '180px' }}>
+        <div className="table-responsive-wrapper" style={{ overflowX: 'auto', width: '100%', minHeight: '180px' }}>
           <table style={{ width: '100%', minWidth: '950px', borderCollapse: 'collapse', textAlign: 'left' }}>
             <thead>
               <tr style={{ backgroundColor: 'var(--surface-sunken)', borderBottom: '1px solid var(--border)' }}>

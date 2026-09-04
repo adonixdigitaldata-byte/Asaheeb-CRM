@@ -145,6 +145,7 @@ create table if not exists projects (
   expected_commission_ar text,
   commission_notes_en text, -- e.g. '10% for penthouses, 5% for 1BR/2BR; SAR 50,000 cap; Layout 3 has custom bonus'
   commission_notes_ar text,
+  discount_offer jsonb default null, -- Promotional discounts & limited-time offers { is_active, title_en, title_ar, discount_type, discount_value, discount_badge_en, discount_badge_ar, applies_to, applicable_units_en, applicable_units_ar, original_price_en, discounted_price_en, valid_until, show_countdown, terms_note_en, terms_note_ar }
   is_published boolean not null default true,
   sort_order int default 0,
   created_by uuid references profiles(id) on delete set null,
@@ -157,6 +158,7 @@ alter table projects add column if not exists expected_commission_en text;
 alter table projects add column if not exists expected_commission_ar text;
 alter table projects add column if not exists commission_notes_en text;
 alter table projects add column if not exists commission_notes_ar text;
+alter table projects add column if not exists discount_offer jsonb default null;
 
 -- Default existing projects to Apartments category
 update projects set type_en = 'Apartments', type_ar = 'شقق سكنية' where type_en is null or type_en = '' or type_en = 'Apartment';

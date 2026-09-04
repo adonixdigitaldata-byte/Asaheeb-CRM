@@ -430,9 +430,9 @@ export default function TeamClient({ members: initialMembers, currentProfile }: 
         </div>
 
         {/* Team Directory Table */}
-        <div className="card" style={{ overflow: 'hidden' }}>
-          <div className="table-responsive" style={{ overflowX: 'hidden' }}>
-            <table className="table" style={{ width: '100%', tableLayout: 'fixed', fontSize: '13px' }}>
+        <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+          <div className="table-responsive-wrapper" style={{ overflowX: 'auto', width: '100%' }}>
+            <table className="table" style={{ width: '100%', minWidth: '850px', tableLayout: 'fixed', fontSize: '13px' }}>
               <thead>
                 <tr>
                   <th style={{ width: '25%', padding: '8px 10px', fontSize: '11px' }}>Team Member</th>
