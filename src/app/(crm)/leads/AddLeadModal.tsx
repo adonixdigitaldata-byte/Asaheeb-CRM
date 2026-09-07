@@ -61,7 +61,7 @@ export default function AddLeadModal({
     potential_value: '',
     source: 'MANUAL',
     stage_id: stages[0]?.id ?? '',
-    assigned_agent_id: userRole === 'AGENT' ? currentUserId : 'AUTO',
+    assigned_agent_id: (userRole === 'AGENT' || userRole === 'EMPLOYEE') ? currentUserId : 'AUTO',
     notes: '',
   })
 
@@ -148,10 +148,10 @@ export default function AddLeadModal({
         {/* Header */}
         <div className="modal-header">
           <div>
-            <h2 style={{ fontSize: '1.15rem', fontWeight: 800, color: '#f8fafc' }}>
+            <h2 style={{ fontSize: '1.15rem', fontWeight: 800, color: '#0F172A' }}>
               Add New Lead
             </h2>
-            <p style={{ fontSize: '0.75rem', color: '#94a3b8', marginTop: '0.15rem' }}>
+            <p style={{ fontSize: '0.75rem', color: '#64748B', marginTop: '0.15rem' }}>
               Create a new client record and assign pipeline details
             </p>
           </div>
@@ -165,8 +165,8 @@ export default function AddLeadModal({
         </div>
 
         {/* Form Body */}
-        <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' }}>
-          <div className="modal-body">
+        <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', flex: 1, maxHeight: '88vh' }}>
+          <div className="modal-body" style={{ overflowY: 'auto', flex: 1, maxHeight: 'calc(85vh - 120px)' }}>
             {errors.form && (
               <div style={{
                 padding: '0.65rem 0.85rem',
@@ -308,21 +308,28 @@ export default function AddLeadModal({
                   value={form.assigned_agent_id}
                   onChange={(e) => setForm({ ...form, assigned_agent_id: e.target.value })}
                   className="form-select"
-                  disabled={userRole === 'AGENT'}
                 >
+                  {(userRole === 'AGENT' || userRole === 'EMPLOYEE') && (
+                    <option value={currentUserId}>👤 Assign to Myself (Current User)</option>
+                  )}
                   <option value="AUTO">⚡ Auto-Assign (Round-Robin to Available Agent)</option>
                   <option value="UNASSIGNED">Leave Unassigned</option>
                   <optgroup label="Specific Sales Agents">
                     {agents.map((a) => (
                       <option key={a.id} value={a.id}>
-                        {a.name}
+                        {a.name} {a.id === currentUserId ? '(You)' : ''}
                       </option>
                     ))}
                   </optgroup>
                 </select>
-                {form.assigned_agent_id === 'AUTO' && userRole !== 'AGENT' && (
+                {form.assigned_agent_id === 'AUTO' && (
                   <span style={{ fontSize: 11, color: '#2563EB', marginTop: 4, display: 'block' }}>
                     💡 Lead will be automatically assigned to the next active, available sales agent via round-robin.
+                  </span>
+                )}
+                {form.assigned_agent_id === currentUserId && (
+                  <span style={{ fontSize: 11, color: '#16A34A', marginTop: 4, display: 'block' }}>
+                    ✓ This lead will be added directly to your personal pipeline.
                   </span>
                 )}
               </div>
@@ -694,21 +701,36 @@ export default function AddLeadModal({
 
 
           {/* Footer */}
-          <div className="modal-footer">
-            <button
-              type="button"
-              onClick={onClose}
-              className="btn btn-secondary"
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              disabled={loading}
-              className="btn btn-primary"
-            >
-              {loading ? 'Saving...' : 'Create Lead'}
-            </button>
+          <div className="modal-footer" style={{ borderTop: '1px solid #E2E8F0', padding: '12px 20px', backgroundColor: '#FFFFFF', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px' }}>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              {errors.form && (
+                <span style={{ fontSize: '0.8rem', color: '#DC2626', fontWeight: 600, display: 'block' }}>
+                  ⚠️ {errors.form}
+                </span>
+              )}
+              {Object.keys(errors).length > 0 && !errors.form && (
+                <span style={{ fontSize: '0.8rem', color: '#D97706', fontWeight: 600, display: 'block' }}>
+                  ⚠️ Please fill required fields ({Object.values(errors).join(', ')})
+                </span>
+              )}
+            </div>
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <button
+                type="button"
+                onClick={onClose}
+                className="btn btn-secondary"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                disabled={loading}
+                className="btn btn-primary"
+              >
+                {loading ? 'Saving...' : 'Create Lead'}
+              </button>
+            </div>
           </div>
         </form>
       </div>

@@ -46,8 +46,9 @@ export async function POST(request: NextRequest) {
   let targetAgentId = assigned_agent_id || null
   let autoAssignedAgent: any = null
 
-  // 1. Auto-assign to self if current user is an AGENT and no agent was explicitly selected
-  if (profile?.role === 'AGENT' && (!targetAgentId || targetAgentId === 'AUTO')) {
+  // 1. Auto-assign to self if current user is an AGENT or EMPLOYEE and no agent was explicitly selected
+  const isIndividualContributor = profile?.role === 'AGENT' || profile?.role === 'EMPLOYEE'
+  if (isIndividualContributor && (!targetAgentId || targetAgentId === 'AUTO')) {
     targetAgentId = user.id
   } 
   // 2. If left unassigned, empty, or 'AUTO', run Round-Robin among available sales agents

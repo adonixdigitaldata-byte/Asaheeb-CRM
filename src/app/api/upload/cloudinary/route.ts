@@ -31,17 +31,11 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'No file provided' }, { status: 400 })
     }
 
-    // Convert file to base64 data URI
-    const bytes = await file.arrayBuffer()
-    const buffer = Buffer.from(bytes)
-    const mimeType = file.type || 'image/jpeg'
-    const base64Data = `data:${mimeType};base64,${buffer.toString('base64')}`
-
     const timestamp = Math.round(new Date().getTime() / 1000)
 
-    // Prepare upload payload
+    // Prepare upload payload directly with Blob to avoid large base64 serialization latency
     const uploadBody = new FormData()
-    uploadBody.append('file', base64Data)
+    uploadBody.append('file', file)
     uploadBody.append('folder', folder)
 
     if (apiKey && apiSecret) {

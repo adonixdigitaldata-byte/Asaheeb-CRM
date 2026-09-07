@@ -57,6 +57,9 @@ export async function updateSession(request: NextRequest) {
   const isApiWebhook = pathname.startsWith('/api/leads/webhook')
 
   if (!user && !isAuthRoute && !isApiWebhook) {
+    if (pathname.startsWith('/api/')) {
+      return NextResponse.json({ error: 'Session expired or unauthorized. Please log in again.' }, { status: 401 })
+    }
     const url = request.nextUrl.clone()
     url.pathname = '/login'
     return NextResponse.redirect(url)

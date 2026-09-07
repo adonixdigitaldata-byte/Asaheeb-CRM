@@ -1043,3 +1043,421 @@ create policy "Allow authenticated access to employee-documents"
   using (bucket_id = 'employee-documents');
 
 
+-- ============================================================
+-- 21. EXPENSES & OPERATIONAL DISBURSEMENTS
+-- Single source of truth for brokerage accounting & ZATCA VAT tracking
+-- ============================================================
+create table if not exists public.expenses (
+  id uuid primary key default gen_random_uuid(),
+  reference_number varchar(50) unique not null,
+  title varchar(255) not null,
+  category varchar(100) not null,
+  amount numeric(12, 2) not null,
+  currency varchar(10) default 'SAR',
+  vat_amount numeric(10, 2) default 0.00,
+  vat_rate numeric(5, 2) default 15.00,
+  expense_date date not null,
+  vendor_payee varchar(255) not null,
+  cost_center varchar(150) not null,
+  payment_method varchar(100) not null,
+  status varchar(50) default 'Paid' check (status in ('Paid', 'Pending Approval', 'Under Review')),
+  notes text,
+  receipt_url text,
+  receipt_file_name varchar(255),
+  is_recurring boolean default false,
+  approved_by varchar(150),
+  created_at timestamptz default now(),
+  updated_at timestamptz default now()
+);
+
+-- Backward-compatible column check
+do $$
+begin
+  if not exists (
+    select 1 from information_schema.columns 
+    where table_schema = 'public' 
+    and table_name = 'expenses' 
+    and column_name = 'vat_rate'
+  ) then
+    alter table public.expenses add column vat_rate numeric(5, 2) default 15.00;
+  end if;
+end $$;
+
+-- Indexes for fast analytics queries
+create index if not exists idx_expenses_date on public.expenses(expense_date desc);
+create index if not exists idx_expenses_category on public.expenses(category);
+create index if not exists idx_expenses_cost_center on public.expenses(cost_center);
+create index if not exists idx_expenses_status on public.expenses(status);
+
+-- Row Level Security (RLS)
+alter table public.expenses enable row level security;
+
+drop policy if exists "Allow read on expenses" on public.expenses;
+drop policy if exists "Allow insert on expenses" on public.expenses;
+drop policy if exists "Allow update on expenses" on public.expenses;
+drop policy if exists "Allow delete on expenses" on public.expenses;
+
+create policy "Allow read on expenses" on public.expenses for select using (true);
+create policy "Allow insert on expenses" on public.expenses for insert with check (true);
+create policy "Allow update on expenses" on public.expenses for update using (true);
+create policy "Allow delete on expenses" on public.expenses for delete using (true);
+
+-- ============================================================
+-- 22. OFFICE GEOFENCE & COMPANY LOCATIONS
+-- Configurable by ADMIN for attendance radius verification
+-- ============================================================
+create table if not exists public.company_locations (
+  id uuid primary key default gen_random_uuid(),
+  name text not null default 'Jeddah Headquarters',
+  address text default 'Al-Andalus District, Jeddah, Saudi Arabia',
+  latitude double precision not null default 21.5433,
+  longitude double precision not null default 39.1728,
+  radius_meters integer not null default 150,
+  is_active boolean default true,
+  created_at timestamptz default now(),
+  updated_at timestamptz default now()
+);
+
+-- Seed default Jeddah HQ if not exists
+insert into public.company_locations (name, address, latitude, longitude, radius_meters, is_active)
+select 'Jeddah Headquarters', 'Al-Andalus District, Jeddah, Saudi Arabia', 21.5433, 39.1728, 150, true
+where not exists (select 1 from public.company_locations);
+
+-- RLS for company_locations
+alter table public.company_locations enable row level security;
+
+drop policy if exists "Allow authenticated to view active company locations" on public.company_locations;
+create policy "Allow authenticated to view active company locations"
+  on public.company_locations for select
+  to authenticated
+  using (true);
+
+drop policy if exists "Allow admins to manage company locations" on public.company_locations;
+create policy "Allow admins to manage company locations"
+  on public.company_locations for all
+  to authenticated
+  using (
+    exists (
+      select 1 from profiles
+      where profiles.id = auth.uid()
+      and profiles.role = 'ADMIN'
+    )
+  );
+
+-- ============================================================
+-- 23. ATTENDANCE LOGS WITH GPS & FACIAL VERIFICATION
+-- Daily punch clock, geofenced location, exception tracking, and selfie audit
+-- ============================================================
+create table if not exists public.attendance_logs (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid references public.profiles(id) on delete cascade not null,
+  date date not null default current_date,
+  
+  -- Punch In
+  punch_in_at timestamptz,
+  punch_in_lat double precision,
+  punch_in_lng double precision,
+  punch_in_accuracy double precision,
+  punch_in_distance_m integer,
+  punch_in_selfie_url text,
+  punch_in_status text default 'APPROVED' check (punch_in_status in ('APPROVED', 'PENDING_REVIEW', 'FLAGGED')),
+  punch_in_reason text,
+  punch_in_explanation text,
+  
+  -- Punch Out
+  punch_out_at timestamptz,
+  punch_out_lat double precision,
+  punch_out_lng double precision,
+  punch_out_accuracy double precision,
+  punch_out_distance_m integer,
+  punch_out_selfie_url text,
+  punch_out_status text check (punch_out_status in ('APPROVED', 'PENDING_REVIEW', 'FLAGGED')),
+  punch_out_reason text,
+  punch_out_explanation text,
+
+  -- Work Time & Review
+  total_working_minutes integer default 0,
+  review_notes text,
+  reviewed_by uuid references public.profiles(id),
+  reviewed_at timestamptz,
+
+  created_at timestamptz default now(),
+  updated_at timestamptz default now(),
+
+  constraint unique_user_attendance_per_date unique (user_id, date)
+);
+
+-- Indexes for high-performance roster & review queries
+create index if not exists idx_attendance_user_date on public.attendance_logs(user_id, date desc);
+create index if not exists idx_attendance_date on public.attendance_logs(date desc);
+create index if not exists idx_attendance_in_status on public.attendance_logs(punch_in_status);
+create index if not exists idx_attendance_out_status on public.attendance_logs(punch_out_status);
+
+-- RLS for attendance_logs
+alter table public.attendance_logs enable row level security;
+
+drop policy if exists "Allow users to view own or admins/managers to view all attendance" on public.attendance_logs;
+create policy "Allow users to view own or admins/managers to view all attendance"
+  on public.attendance_logs for select
+  to authenticated
+  using (
+    user_id = auth.uid()
+    or exists (
+      select 1 from profiles
+      where profiles.id = auth.uid()
+      and profiles.role in ('ADMIN', 'SALES_MANAGER')
+    )
+  );
+
+drop policy if exists "Allow users to insert their own attendance" on public.attendance_logs;
+create policy "Allow users to insert their own attendance"
+  on public.attendance_logs for insert
+  to authenticated
+  with check (
+    user_id = auth.uid()
+    or exists (
+      select 1 from profiles
+      where profiles.id = auth.uid()
+      and profiles.role in ('ADMIN')
+    )
+  );
+
+drop policy if exists "Allow users to update own punch or admin/manager to review" on public.attendance_logs;
+create policy "Allow users to update own punch or admin/manager to review"
+  on public.attendance_logs for update
+  to authenticated
+  using (
+    user_id = auth.uid()
+    or exists (
+      select 1 from profiles
+      where profiles.id = auth.uid()
+      and profiles.role in ('ADMIN', 'SALES_MANAGER')
+    )
+  );
+
+-- ============================================================
+-- 24. LEAVE BALANCES & LEAVE REQUESTS
+-- Saudi Labor Law standards (21/30 days annual) & auto-deduction
+-- ============================================================
+create table if not exists public.employee_leave_balances (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid references public.profiles(id) on delete cascade not null,
+  year integer not null default extract(year from current_date),
+  annual_leave_total numeric(4,1) not null default 21.0,
+  annual_leave_used numeric(4,1) not null default 0.0,
+  sick_leave_total numeric(4,1) not null default 30.0,
+  sick_leave_used numeric(4,1) not null default 0.0,
+  unpaid_leave_used numeric(4,1) not null default 0.0,
+  emergency_leave_used numeric(4,1) not null default 0.0,
+  created_at timestamptz default now(),
+  updated_at timestamptz default now(),
+  constraint unique_user_leave_balance_per_year unique (user_id, year)
+);
+
+create table if not exists public.leave_requests (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid references public.profiles(id) on delete cascade not null,
+  leave_type text not null check (leave_type in ('ANNUAL', 'SICK', 'UNPAID', 'EMERGENCY')),
+  start_date date not null,
+  end_date date not null,
+  total_days numeric(4,1) not null check (total_days > 0),
+  reason text,
+  status text not null default 'PENDING' check (status in ('PENDING', 'APPROVED', 'REJECTED', 'CANCELLED')),
+  approved_by uuid references public.profiles(id),
+  admin_notes text,
+  created_at timestamptz default now(),
+  updated_at timestamptz default now()
+);
+
+-- Indexes for leave tables
+create index if not exists idx_leave_balances_user on public.employee_leave_balances(user_id, year);
+create index if not exists idx_leave_requests_user on public.leave_requests(user_id, start_date desc);
+create index if not exists idx_leave_requests_status on public.leave_requests(status);
+
+-- Trigger function to automatically deduct approved leave days from balance
+create or replace function public.handle_leave_approval_deduction()
+returns trigger as $$
+declare
+  req_year int;
+begin
+  if (new.status = 'APPROVED' and (old.status is null or old.status != 'APPROVED')) then
+    req_year := extract(year from new.start_date);
+    
+    -- Ensure balance record exists for user and year
+    insert into public.employee_leave_balances (user_id, year)
+    values (new.user_id, req_year)
+    on conflict (user_id, year) do nothing;
+    
+    if new.leave_type = 'ANNUAL' then
+      update public.employee_leave_balances
+      set annual_leave_used = annual_leave_used + new.total_days,
+          updated_at = now()
+      where user_id = new.user_id and year = req_year;
+    elsif new.leave_type = 'SICK' then
+      update public.employee_leave_balances
+      set sick_leave_used = sick_leave_used + new.total_days,
+          updated_at = now()
+      where user_id = new.user_id and year = req_year;
+    elsif new.leave_type = 'EMERGENCY' then
+      update public.employee_leave_balances
+      set emergency_leave_used = emergency_leave_used + new.total_days,
+          updated_at = now()
+      where user_id = new.user_id and year = req_year;
+    elsif new.leave_type = 'UNPAID' then
+      update public.employee_leave_balances
+      set unpaid_leave_used = unpaid_leave_used + new.total_days,
+          updated_at = now()
+      where user_id = new.user_id and year = req_year;
+    end if;
+  end if;
+  return new;
+end;
+$$ language plpgsql;
+
+drop trigger if exists trigger_leave_approval_deduction on public.leave_requests;
+create trigger trigger_leave_approval_deduction
+  after update of status on public.leave_requests
+  for each row
+  execute function public.handle_leave_approval_deduction();
+
+-- RLS for leave balances & requests
+alter table public.employee_leave_balances enable row level security;
+alter table public.leave_requests enable row level security;
+
+drop policy if exists "Allow users to view own or admins/managers to view all leave balances" on public.employee_leave_balances;
+create policy "Allow users to view own or admins/managers to view all leave balances"
+  on public.employee_leave_balances for select
+  to authenticated
+  using (
+    user_id = auth.uid()
+    or exists (
+      select 1 from profiles
+      where profiles.id = auth.uid()
+      and profiles.role in ('ADMIN', 'SALES_MANAGER')
+    )
+  );
+
+drop policy if exists "Allow admins to manage leave balances" on public.employee_leave_balances;
+create policy "Allow admins to manage leave balances"
+  on public.employee_leave_balances for all
+  to authenticated
+  using (
+    exists (
+      select 1 from profiles
+      where profiles.id = auth.uid()
+      and profiles.role = 'ADMIN'
+    )
+  );
+
+drop policy if exists "Allow users to view own or admins/managers to view all leave requests" on public.leave_requests;
+create policy "Allow users to view own or admins/managers to view all leave requests"
+  on public.leave_requests for select
+  to authenticated
+  using (
+    user_id = auth.uid()
+    or exists (
+      select 1 from profiles
+      where profiles.id = auth.uid()
+      and profiles.role in ('ADMIN', 'SALES_MANAGER')
+    )
+  );
+
+drop policy if exists "Allow users to create their own leave requests" on public.leave_requests;
+create policy "Allow users to create their own leave requests"
+  on public.leave_requests for insert
+  to authenticated
+  with check (user_id = auth.uid());
+
+drop policy if exists "Allow admins and managers to update leave requests" on public.leave_requests;
+create policy "Allow admins and managers to update leave requests"
+  on public.leave_requests for update
+  to authenticated
+  using (
+    exists (
+      select 1 from profiles
+      where profiles.id = auth.uid()
+      and profiles.role in ('ADMIN', 'SALES_MANAGER')
+    )
+  );
+
+-- ============================================================
+-- 25. STORAGE BUCKET: attendance-snapshots
+-- Publicly readable within app for selfie verification audit photos
+-- ============================================================
+insert into storage.buckets (id, name, public)
+values ('attendance-snapshots', 'attendance-snapshots', true)
+on conflict (id) do update set public = true;
+
+drop policy if exists "Allow authenticated access to attendance-snapshots" on storage.objects;
+create policy "Allow authenticated access to attendance-snapshots"
+  on storage.objects for all
+  to authenticated
+  using (bucket_id = 'attendance-snapshots');
+
+-- ============================================================
+-- 26. COMPANY WORK POLICY & SCHEDULE CONFIGURATION
+-- Admin configurable working days, shift hours, grace period, and leave quotas
+-- ============================================================
+create table if not exists public.company_work_policy (
+  id uuid primary key default gen_random_uuid(),
+  company_name text not null default 'Asaheeb Real Estate',
+  work_days text[] not null default array['SUNDAY', 'MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY'],
+  daily_expected_hours numeric(4,2) not null default 8.0,
+  shift_start_time time not null default '09:00:00',
+  shift_end_time time not null default '17:00:00',
+  grace_period_mins integer not null default 15,
+  default_annual_leave_quota integer not null default 21,
+  default_sick_leave_quota integer not null default 30,
+  custom_day_hours jsonb default '{}'::jsonb,
+  updated_at timestamptz default now()
+);
+
+-- Seed default policy if not exists
+insert into public.company_work_policy (
+  company_name,
+  work_days,
+  daily_expected_hours,
+  shift_start_time,
+  shift_end_time,
+  grace_period_mins,
+  default_annual_leave_quota,
+  default_sick_leave_quota,
+  custom_day_hours
+)
+select
+  'Asaheeb Real Estate',
+  array['SUNDAY', 'MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY'],
+  8.0,
+  '09:00:00',
+  '17:00:00',
+  15,
+  21,
+  30,
+  '{}'::jsonb
+where not exists (select 1 from public.company_work_policy);
+
+-- RLS
+alter table public.company_work_policy enable row level security;
+
+drop policy if exists "Allow authenticated to view work policy" on public.company_work_policy;
+create policy "Allow authenticated to view work policy"
+  on public.company_work_policy for select
+  to authenticated
+  using (true);
+
+drop policy if exists "Allow admins to manage work policy" on public.company_work_policy;
+create policy "Allow admins to manage work policy"
+  on public.company_work_policy for all
+  to authenticated
+  using (
+    exists (
+      select 1 from profiles
+      where profiles.id = auth.uid()
+      and profiles.role = 'ADMIN'
+    )
+  );
+
+
+
+
+

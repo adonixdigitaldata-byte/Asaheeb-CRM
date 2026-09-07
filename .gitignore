@@ -46,4 +46,5 @@ Reference/
 FRONTEND_INTEGRATION_GUIDE.md
 new-crm-build-plan.md
 supabase-upgrade.sql
+mock_expenses_dataset.sql
 
