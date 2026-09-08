@@ -70,6 +70,9 @@ export default function AddLeadModal({
     if (!form.name.trim()) e.name = 'Full Name is required'
     if (!form.phone.trim() && !form.email.trim()) e.phone = 'Phone number or email is required'
     if (!form.stage_id) e.stage_id = 'Please select a pipeline stage'
+    if (form.potential_value && (Number(form.potential_value) < 0 || Number(form.potential_value) >= 10000000000)) {
+      e.potential_value = 'Deal value must be less than 10,000,000,000 SAR'
+    }
     return e
   }
 
@@ -304,33 +307,55 @@ export default function AddLeadModal({
               {/* Assigned Agent */}
               <div className="form-group">
                 <label className="form-label">Assign to Agent</label>
-                <select
-                  value={form.assigned_agent_id}
-                  onChange={(e) => setForm({ ...form, assigned_agent_id: e.target.value })}
-                  className="form-select"
-                >
-                  {(userRole === 'AGENT' || userRole === 'EMPLOYEE') && (
-                    <option value={currentUserId}>👤 Assign to Myself (Current User)</option>
-                  )}
-                  <option value="AUTO">⚡ Auto-Assign (Round-Robin to Available Agent)</option>
-                  <option value="UNASSIGNED">Leave Unassigned</option>
-                  <optgroup label="Specific Sales Agents">
-                    {agents.map((a) => (
-                      <option key={a.id} value={a.id}>
-                        {a.name} {a.id === currentUserId ? '(You)' : ''}
-                      </option>
-                    ))}
-                  </optgroup>
-                </select>
-                {form.assigned_agent_id === 'AUTO' && (
-                  <span style={{ fontSize: 11, color: '#2563EB', marginTop: 4, display: 'block' }}>
-                    💡 Lead will be automatically assigned to the next active, available sales agent via round-robin.
-                  </span>
-                )}
-                {form.assigned_agent_id === currentUserId && (
-                  <span style={{ fontSize: 11, color: '#16A34A', marginTop: 4, display: 'block' }}>
-                    ✓ This lead will be added directly to your personal pipeline.
-                  </span>
+                {(userRole === 'AGENT' || userRole === 'EMPLOYEE') ? (
+                  <div>
+                    <div
+                      className="form-input flex items-center justify-between"
+                      style={{
+                        backgroundColor: '#F8FAFC',
+                        color: '#334155',
+                        cursor: 'not-allowed',
+                        border: '1px solid #E2E8F0',
+                      }}
+                    >
+                      <span className="flex items-center gap-2 font-medium">
+                        <span>👤</span>
+                        <span>Assign to Myself ({agents.find((a) => a.id === currentUserId)?.name || 'Current User'})</span>
+                      </span>
+                      <span style={{ fontSize: '11px', color: '#64748B', fontWeight: 600 }}>Default</span>
+                    </div>
+                    <span style={{ fontSize: 11, color: '#16A34A', marginTop: 4, display: 'block' }}>
+                      ✓ As a sales agent, leads you create are automatically assigned to your personal pipeline.
+                    </span>
+                  </div>
+                ) : (
+                  <>
+                    <select
+                      value={form.assigned_agent_id}
+                      onChange={(e) => setForm({ ...form, assigned_agent_id: e.target.value })}
+                      className="form-select"
+                    >
+                      <option value="AUTO">⚡ Auto-Assign (Round-Robin to Available Agent)</option>
+                      <option value="UNASSIGNED">Leave Unassigned</option>
+                      <optgroup label="Specific Sales Agents">
+                        {agents.map((a) => (
+                          <option key={a.id} value={a.id}>
+                            {a.name} {a.id === currentUserId ? '(You)' : ''}
+                          </option>
+                        ))}
+                      </optgroup>
+                    </select>
+                    {form.assigned_agent_id === 'AUTO' && (
+                      <span style={{ fontSize: 11, color: '#2563EB', marginTop: 4, display: 'block' }}>
+                        💡 Lead will be automatically assigned to the next active, available sales agent via round-robin.
+                      </span>
+                    )}
+                    {form.assigned_agent_id === currentUserId && (
+                      <span style={{ fontSize: 11, color: '#16A34A', marginTop: 4, display: 'block' }}>
+                        ✓ This lead will be added directly to your personal pipeline.
+                      </span>
+                    )}
+                  </>
                 )}
               </div>
 
@@ -379,11 +404,13 @@ export default function AddLeadModal({
                 <label className="form-label">Estimated Deal Value (SAR)</label>
                 <input
                   type="number"
+                  max="9999999999"
                   value={form.potential_value}
                   onChange={(e) => setForm({ ...form, potential_value: e.target.value })}
                   placeholder="e.g. 1500000"
                   className="form-input"
                 />
+                {errors.potential_value && <span className="form-error">{errors.potential_value}</span>}
               </div>
 
               {/* Scheduled Meeting (Date & Time) */}

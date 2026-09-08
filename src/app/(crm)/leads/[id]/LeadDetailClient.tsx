@@ -724,40 +724,40 @@ export default function LeadDetailClient({
                 </button>
               </div>
 
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                  <Phone size={16} style={{ color: '#3B82F6' }} />
-                  <div>
+              <div className="lead-info-compact-grid">
+                <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+                  <Phone size={16} style={{ color: '#3B82F6', marginTop: 2, flexShrink: 0 }} />
+                  <div style={{ minWidth: 0 }}>
                     <div className="text-label" style={{ fontSize: 11 }}>PHONE</div>
-                    <div style={{ color: '#0F172A', fontWeight: 600, fontSize: 13.5 }}>
+                    <div style={{ color: '#0F172A', fontWeight: 600, fontSize: 13.5, wordBreak: 'break-word' }}>
                       {lead.phone || '—'}
                     </div>
                   </div>
                 </div>
 
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                  <Mail size={16} style={{ color: '#8B5CF6' }} />
-                  <div>
+                <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+                  <Mail size={16} style={{ color: '#8B5CF6', marginTop: 2, flexShrink: 0 }} />
+                  <div style={{ minWidth: 0 }}>
                     <div className="text-label" style={{ fontSize: 11 }}>EMAIL</div>
-                    <div style={{ color: '#0F172A', fontWeight: 600, fontSize: 13.5 }}>
+                    <div style={{ color: '#0F172A', fontWeight: 600, fontSize: 13.5, wordBreak: 'break-word' }}>
                       {lead.email || '—'}
                     </div>
                   </div>
                 </div>
 
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                  <MapPin size={16} style={{ color: '#F59E0B' }} />
-                  <div>
+                <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+                  <MapPin size={16} style={{ color: '#F59E0B', marginTop: 2, flexShrink: 0 }} />
+                  <div style={{ minWidth: 0 }}>
                     <div className="text-label" style={{ fontSize: 11 }}>CITY / REGION</div>
-                    <div style={{ color: '#0F172A', fontWeight: 600, fontSize: 13.5 }}>
+                    <div style={{ color: '#0F172A', fontWeight: 600, fontSize: 13.5, wordBreak: 'break-word' }}>
                       {lead.city || '—'}
                     </div>
                   </div>
                 </div>
 
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                  <Tag size={16} style={{ color: '#6366F1' }} />
-                  <div>
+                <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+                  <Tag size={16} style={{ color: '#6366F1', marginTop: 2, flexShrink: 0 }} />
+                  <div style={{ minWidth: 0 }}>
                     <div className="text-label" style={{ fontSize: 11 }}>CLIENT CATEGORY</div>
                     {lead.client_category ? (
                       <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 2 }}>
@@ -784,9 +784,9 @@ export default function LeadDetailClient({
                   </div>
                 </div>
 
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                  <DollarSign size={16} style={{ color: '#10B981' }} />
-                  <div>
+                <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10, gridColumn: '1 / -1' }}>
+                  <DollarSign size={16} style={{ color: '#10B981', marginTop: 2, flexShrink: 0 }} />
+                  <div style={{ minWidth: 0 }}>
                     <div className="text-label" style={{ fontSize: 11 }}>BUDGET &amp; VALUE</div>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginTop: 2 }}>
                       {lead.budget_tier && (
@@ -812,8 +812,8 @@ export default function LeadDetailClient({
                 </div>
 
                 {/* Scheduled Meeting Info */}
-                <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
-                  <Calendar size={16} style={{ color: '#2563EB', marginTop: 2 }} />
+                <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10, gridColumn: '1 / -1' }}>
+                  <Calendar size={16} style={{ color: '#2563EB', marginTop: 2, flexShrink: 0 }} />
                   <div style={{ width: '100%' }}>
                     <div className="text-label" style={{ fontSize: 11 }}>SCHEDULED MEETING</div>
                     {lead.meeting_date ? (
@@ -1288,7 +1288,7 @@ export default function LeadDetailClient({
                         </div>
                       </div>
                     ) : (
-                      <div style={{ fontSize: 13, color: '#0F172A', whiteSpace: 'pre-wrap' }}>
+                      <div className="lead-note-content">
                         {n.body}
                       </div>
                     )}

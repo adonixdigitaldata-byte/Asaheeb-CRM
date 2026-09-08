@@ -609,6 +609,55 @@ textarea {
 }
 
 /* ============================================================
+   LEAD DETAIL RESPONSIVE LAYOUT
+   ============================================================ */
+.lead-detail-grid {
+  display: grid;
+  grid-template-columns: 460px minmax(0, 1fr);
+  gap: 20px;
+  align-items: start;
+  max-width: 1600px;
+  margin: 0 auto;
+}
+
+@media (max-width: 1280px) {
+  .lead-detail-grid {
+    grid-template-columns: 400px minmax(0, 1fr);
+    gap: 16px;
+  }
+}
+
+@media (max-width: 1024px) {
+  .lead-detail-grid {
+    grid-template-columns: 1fr;
+    gap: 16px;
+  }
+}
+
+.lead-info-compact-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px 18px;
+}
+
+@media (max-width: 640px) {
+  .lead-info-compact-grid {
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+}
+
+.lead-note-content {
+  font-size: 13px;
+  color: #0F172A;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+}
+
+
+/* ============================================================
    KANBAN PIPELINE (Vertical Grid & Card Stacking with Custom Scroller)
    ============================================================ */
 .kanban-grid {

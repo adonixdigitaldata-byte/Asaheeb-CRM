@@ -11,6 +11,7 @@ import {
   RefreshCw,
   X,
   Download,
+  Calendar,
 } from 'lucide-react'
 import { Lead, LeadStage, Profile, AdCampaign, Project, CLIENT_CATEGORIES, BUDGET_TIERS } from '@/types/database'
 import KanbanBoard from './KanbanBoard'
@@ -54,6 +55,7 @@ export default function LeadsClient({
 
   // Filters
   const [search, setSearch] = useState('')
+  const [monthFilter, setMonthFilter] = useState<string>('ALL')
   const [stageFilter, setStageFilter] = useState<string>('ALL')
   const [agentFilter, setAgentFilter] = useState<string>('ALL')
   const [sourceFilter, setSourceFilter] = useState<string>('ALL')
@@ -136,12 +138,38 @@ export default function LeadsClient({
       }
     }
 
+    // Month Filter (based on lead creation date: YYYY-MM)
+    if (monthFilter !== 'ALL') {
+      if (!lead.created_at) return false
+      const leadMonth = lead.created_at.substring(0, 7) // e.g. "2026-09"
+      if (leadMonth !== monthFilter) return false
+    }
+
     if (categoryFilter !== 'ALL' && lead.client_category !== categoryFilter) return false
 
     if (budgetTierFilter !== 'ALL' && lead.budget_tier !== budgetTierFilter) return false
 
     return true
   })
+
+  // Dynamically compute available distinct months from leads (sorted newest to oldest)
+  const availableMonths = Array.from(
+    new Set(
+      leads
+        .filter((l) => Boolean(l.created_at))
+        .map((l) => l.created_at.substring(0, 7))
+    )
+  ).sort((a, b) => b.localeCompare(a))
+
+  function formatMonthLabel(monthKey: string) {
+    try {
+      const [year, month] = monthKey.split('-')
+      const date = new Date(parseInt(year, 10), parseInt(month, 10) - 1, 1)
+      return date.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })
+    } catch {
+      return monthKey
+    }
+  }
 
   // Export Leads to Excel Backup
   async function handleExportXLSX() {
@@ -312,6 +340,30 @@ export default function LeadsClient({
                 <X size={13} />
               </button>
             )}
+          </div>
+
+          {/* Month Filter */}
+          <div style={{ display: 'flex', alignItems: 'center', position: 'relative' }}>
+            <select
+              value={monthFilter}
+              onChange={(e) => setMonthFilter(e.target.value)}
+              className="form-select"
+              style={{
+                width: 'auto',
+                fontSize: 12.5,
+                fontWeight: monthFilter !== 'ALL' ? 600 : 400,
+                color: monthFilter !== 'ALL' ? '#1D4ED8' : '#334155',
+                borderColor: monthFilter !== 'ALL' ? '#93C5FD' : 'var(--border)',
+                backgroundColor: monthFilter !== 'ALL' ? '#EFF6FF' : '#FFFFFF',
+              }}
+            >
+              <option value="ALL">📅 All Months</option>
+              {availableMonths.map((m) => (
+                <option key={m} value={m}>
+                  {formatMonthLabel(m)}
+                </option>
+              ))}
+            </select>
           </div>
 
           {/* Stage Filter */}
