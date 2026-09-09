@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import {
   X,
   MapPin,
@@ -10,6 +10,7 @@ import {
   ExternalLink,
   Loader2,
   User,
+  ShieldCheck,
 } from 'lucide-react'
 import { AttendanceLog } from '@/types/attendance'
 import { formatDistance, getGoogleMapsUrl } from '@/lib/geoUtils'
@@ -32,12 +33,24 @@ export default function ExceptionReviewModal({
   adminId,
   onReviewed,
 }: ExceptionReviewModalProps) {
+  const [activePunchType, setActivePunchType] = useState<'IN' | 'OUT'>(punchType)
   const [adminNotes, setAdminNotes] = useState('')
   const [isProcessing, setIsProcessing] = useState(false)
 
+  useEffect(() => {
+    setActivePunchType(punchType)
+  }, [punchType, isOpen])
+
+  useEffect(() => {
+    if (log) {
+      setAdminNotes(log.review_notes || '')
+    }
+  }, [log, isOpen])
+
   if (!isOpen || !log) return null
 
-  const isPunchIn = punchType === 'IN'
+  const isPunchIn = activePunchType === 'IN'
+  const currentStatus = isPunchIn ? log.punch_in_status : log.punch_out_status
   const reason = isPunchIn ? log.punch_in_reason : log.punch_out_reason
   const explanation = isPunchIn ? log.punch_in_explanation : log.punch_out_explanation
   const selfieUrl = isPunchIn ? log.punch_in_selfie_url : log.punch_out_selfie_url
@@ -46,6 +59,7 @@ export default function ExceptionReviewModal({
   const lng = isPunchIn ? log.punch_in_lng : log.punch_out_lng
   const accuracy = isPunchIn ? log.punch_in_accuracy : log.punch_out_accuracy
   const time = isPunchIn ? log.punch_in_at : log.punch_out_at
+  const matchScore = isPunchIn ? log.punch_in_face_match_score : log.punch_out_face_match_score
 
   async function handleAction(action: 'APPROVED' | 'FLAGGED') {
     if (!log) return
@@ -53,7 +67,7 @@ export default function ExceptionReviewModal({
     try {
       await reviewAttendancePunch(
         log.id,
-        punchType,
+        activePunchType,
         action,
         adminNotes || (action === 'APPROVED' ? 'Approved by admin' : 'Flagged for review'),
         adminId
@@ -109,12 +123,57 @@ export default function ExceptionReviewModal({
               <AlertTriangle size={20} />
             </div>
             <div>
-              <h2 style={{ fontSize: '16px', fontWeight: 700, color: '#0F172A', margin: 0 }}>
-                Remote Punch Exception Review
-              </h2>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <h2 style={{ fontSize: '16px', fontWeight: 700, color: '#0F172A', margin: 0 }}>
+                  Remote Punch Review
+                </h2>
+                {currentStatus === 'FLAGGED' ? (
+                  <span
+                    style={{
+                      fontSize: '11px',
+                      fontWeight: 700,
+                      padding: '2px 8px',
+                      borderRadius: '6px',
+                      backgroundColor: '#FEE2E2',
+                      color: '#DC2626',
+                      border: '1px solid #FCA5A5',
+                    }}
+                  >
+                    🚩 Flagged
+                  </span>
+                ) : currentStatus === 'APPROVED' ? (
+                  <span
+                    style={{
+                      fontSize: '11px',
+                      fontWeight: 700,
+                      padding: '2px 8px',
+                      borderRadius: '6px',
+                      backgroundColor: '#DCFCE7',
+                      color: '#16A34A',
+                      border: '1px solid #86EFAC',
+                    }}
+                  >
+                    ✅ Approved
+                  </span>
+                ) : (
+                  <span
+                    style={{
+                      fontSize: '11px',
+                      fontWeight: 700,
+                      padding: '2px 8px',
+                      borderRadius: '6px',
+                      backgroundColor: '#FEF3C7',
+                      color: '#B45309',
+                      border: '1px solid #FCD34D',
+                    }}
+                  >
+                    ⏳ Pending Review
+                  </span>
+                )}
+              </div>
               <p style={{ fontSize: '12px', color: '#64748B', margin: '2px 0 0 0' }}>
                 {log.employee_name || 'Employee'} • {log.date} at{' '}
-                {time ? new Date(time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}
+                {time ? new Date(time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'N/A'}
               </p>
             </div>
           </div>
@@ -133,6 +192,54 @@ export default function ExceptionReviewModal({
             <X size={16} />
           </button>
         </div>
+
+        {/* Punch In / Out Tab Selector if both exist */}
+        {log.punch_out_at && (
+          <div
+            style={{
+              display: 'flex',
+              padding: '8px 24px 0',
+              backgroundColor: '#F8FAFC',
+              borderBottom: '1px solid #E2E8F0',
+              gap: '8px',
+            }}
+          >
+            <button
+              type="button"
+              onClick={() => setActivePunchType('IN')}
+              style={{
+                padding: '6px 14px',
+                fontSize: '12px',
+                fontWeight: 600,
+                borderRadius: '6px 6px 0 0',
+                border: 'none',
+                borderBottom: activePunchType === 'IN' ? '2px solid #2563EB' : '2px solid transparent',
+                backgroundColor: activePunchType === 'IN' ? '#FFFFFF' : 'transparent',
+                color: activePunchType === 'IN' ? '#2563EB' : '#64748B',
+                cursor: 'pointer',
+              }}
+            >
+              Punch In ({log.punch_in_status || 'PENDING'})
+            </button>
+            <button
+              type="button"
+              onClick={() => setActivePunchType('OUT')}
+              style={{
+                padding: '6px 14px',
+                fontSize: '12px',
+                fontWeight: 600,
+                borderRadius: '6px 6px 0 0',
+                border: 'none',
+                borderBottom: activePunchType === 'OUT' ? '2px solid #2563EB' : '2px solid transparent',
+                backgroundColor: activePunchType === 'OUT' ? '#FFFFFF' : 'transparent',
+                color: activePunchType === 'OUT' ? '#2563EB' : '#64748B',
+                cursor: 'pointer',
+              }}
+            >
+              Punch Out ({log.punch_out_status || 'PENDING'})
+            </button>
+          </div>
+        )}
 
         {/* Content */}
         <div style={{ padding: '24px', maxHeight: '72vh', overflowY: 'auto' }}>
@@ -172,6 +279,24 @@ export default function ExceptionReviewModal({
               <div style={{ fontSize: '11px', color: '#64748B', marginTop: '2px' }}>
                 {log.employee_role || 'AGENT'}
               </div>
+              {matchScore !== undefined && matchScore !== null && (
+                <div
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '4px',
+                    fontSize: '11px',
+                    fontWeight: 700,
+                    color: '#16A34A',
+                    backgroundColor: '#DCFCE7',
+                    padding: '2px 6px',
+                    borderRadius: '4px',
+                    marginTop: '6px',
+                  }}
+                >
+                  <ShieldCheck size={12} /> Face Match: {matchScore}%
+                </div>
+              )}
             </div>
 
             <div

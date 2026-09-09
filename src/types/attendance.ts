@@ -38,6 +38,8 @@ export interface AttendanceLog {
   punch_out_status: AttendancePunchStatus | null
   punch_out_reason: string | null
   punch_out_explanation: string | null
+  punch_in_face_match_score?: number | null
+  punch_out_face_match_score?: number | null
 
   // Work Duration & Review
   total_working_minutes: number
@@ -105,6 +107,8 @@ export interface RosterEmployee {
   today_log: AttendanceLog | null
   live_status: LiveAttendanceStatus
   active_minutes: number
+  face_enrolled_at?: string | null
+  has_face_id?: boolean
 }
 
 export const EXCEPTION_REASONS = [

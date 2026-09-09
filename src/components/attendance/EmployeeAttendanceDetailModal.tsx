@@ -24,6 +24,7 @@ import {
 import { AttendanceLog, LeaveBalance, LeaveRequest, RosterEmployee } from '@/types/attendance'
 import { fetchUserAttendanceHistory, fetchLeaveBalances, fetchUserLeaveRequests } from '@/lib/attendanceService'
 import { formatDistance, getGoogleMapsUrl } from '@/lib/geoUtils'
+import { getEmployeeFaceEnrollment, resetEmployeeFaceEnrollment } from '@/lib/biometricEngine'
 
 interface EmployeeAttendanceDetailModalProps {
   isOpen: boolean
@@ -43,6 +44,8 @@ export default function EmployeeAttendanceDetailModal({
   const [leaveRequests, setLeaveRequests] = useState<LeaveRequest[]>([])
   const [loading, setLoading] = useState(true)
   const [selectedSelfie, setSelectedSelfie] = useState<{ url: string; title: string } | null>(null)
+  const [enrolledInfo, setEnrolledInfo] = useState<{ hasEnrolled: boolean; enrolledAt: string | null }>({ hasEnrolled: false, enrolledAt: null })
+  const [isResettingFace, setIsResettingFace] = useState(false)
   const scrollContainerRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -62,11 +65,31 @@ export default function EmployeeAttendanceDetailModal({
       setHistory(hist)
       setLeaveBalances(bal)
       setLeaveRequests(reqs)
+
+      getEmployeeFaceEnrollment(id).then((res) => {
+        setEnrolledInfo({
+          hasEnrolled: Boolean(res.descriptor && res.descriptor.length === 128),
+          enrolledAt: res.enrolled_at,
+        })
+      })
     } catch (err) {
       console.error(err)
     } finally {
       setLoading(false)
     }
+  }
+
+  async function handleResetFaceId() {
+    if (!employee) return
+    const confirmed = window.confirm(
+      `Are you sure you want to reset the Biometric Face ID for ${employee.name}?\n\nThey will be prompted to re-enroll a new face on their next attendance punch.`
+    )
+    if (!confirmed) return
+
+    setIsResettingFace(true)
+    await resetEmployeeFaceEnrollment(employee.profile_id)
+    setEnrolledInfo({ hasEnrolled: false, enrolledAt: null })
+    setIsResettingFace(false)
   }
 
   // Lock background window / body scroll when modal is open
@@ -420,6 +443,58 @@ export default function EmployeeAttendanceDetailModal({
                 {leaveBalances?.sick_leave_total ? leaveBalances.sick_leave_total - leaveBalances.sick_leave_used : 30} Sick
                 days remaining
               </div>
+            </div>
+
+            {/* Biometric Face ID Status & Reset */}
+            <div
+              style={{
+                padding: '16px',
+                borderRadius: '12px',
+                backgroundColor: enrolledInfo.hasEnrolled ? '#F0FDF4' : '#FFFBEB',
+                border: `1px solid ${enrolledInfo.hasEnrolled ? '#BBF7D0' : '#FDE68A'}`,
+                display: 'flex',
+                flexDirection: 'column',
+                justifyContent: 'space-between',
+              }}
+            >
+              <div>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <span style={{ fontSize: '11px', fontWeight: 700, color: enrolledInfo.hasEnrolled ? '#166534' : '#92400E', textTransform: 'uppercase' }}>
+                    Biometric Face ID
+                  </span>
+                  <ShieldCheck size={16} style={{ color: enrolledInfo.hasEnrolled ? '#16A34A' : '#D97706' }} />
+                </div>
+                <div style={{ fontSize: '15px', fontWeight: 800, color: enrolledInfo.hasEnrolled ? '#15803D' : '#B45309', marginTop: '4px' }}>
+                  {enrolledInfo.hasEnrolled ? '🟢 Registered' : '🟡 Pending Setup'}
+                </div>
+                <div style={{ fontSize: '11px', color: '#64748B', marginTop: '2px' }}>
+                  {enrolledInfo.hasEnrolled && enrolledInfo.enrolledAt
+                    ? `Enrolled ${new Date(enrolledInfo.enrolledAt).toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' })}`
+                    : 'Auto-enrolls on employee first punch'}
+                </div>
+              </div>
+
+              {enrolledInfo.hasEnrolled && (
+                <button
+                  type="button"
+                  onClick={handleResetFaceId}
+                  disabled={isResettingFace}
+                  className="btn btn-outline btn-sm"
+                  style={{
+                    marginTop: '10px',
+                    padding: '4px 8px',
+                    fontSize: '11px',
+                    fontWeight: 600,
+                    color: '#DC2626',
+                    borderColor: '#FECACA',
+                    backgroundColor: '#FFFFFF',
+                    alignSelf: 'flex-start',
+                  }}
+                  title="Reset Face ID so employee can register again"
+                >
+                  {isResettingFace ? 'Resetting...' : 'Reset Face ID'}
+                </button>
+              )}
             </div>
           </div>
 

@@ -32,6 +32,14 @@ import {
   FaceDetectionResult,
   FaceMatchResult,
 } from '@/lib/faceDetection'
+import {
+  analyzeLiveFace,
+  verifyFaceBiometrics,
+  getEmployeeFaceEnrollment,
+  enrollEmployeeFace,
+  BiometricMatchResult,
+} from '@/lib/biometricEngine'
+import FaceEnrollmentModal from './FaceEnrollmentModal'
 
 interface PunchModalProps {
   isOpen: boolean
@@ -87,6 +95,13 @@ export default function PunchModal({
   // Biometric Profile Match Result
   const [faceMatch, setFaceMatch] = useState<FaceMatchResult | null>(null)
 
+  // Real 128-d Biometric Face ID Vectors & Match State
+  const [enrolledDescriptor, setEnrolledDescriptor] = useState<number[] | null>(null)
+  const [hasEnrolledFace, setHasEnrolledFace] = useState<boolean>(false)
+  const [biometricMatch, setBiometricMatch] = useState<BiometricMatchResult | null>(null)
+  const [liveDescriptor, setLiveDescriptor] = useState<number[] | null>(null)
+  const [showReEnrollModal, setShowReEnrollModal] = useState<boolean>(false)
+
   // Loading / Error
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [submitError, setSubmitError] = useState<string | null>(null)
@@ -134,12 +149,25 @@ export default function PunchModal({
     if (isOpen) {
       resetState()
       detectLocation()
-      // Preload BlazeFace ML Model
+      // Preload Face ID Enrollment
+      if (userId) {
+        getEmployeeFaceEnrollment(userId).then((res) => {
+          if (res.descriptor && res.descriptor.length === 128) {
+            setEnrolledDescriptor(res.descriptor)
+            setHasEnrolledFace(true)
+          } else {
+            setEnrolledDescriptor(null)
+            setHasEnrolledFace(false)
+          }
+        })
+      }
+      // Preload BlazeFace & Biometric Models
       import('@/lib/faceDetection').then((m) => m.getBlazeFaceModel()).catch(() => {})
+      import('@/lib/biometricEngine').then((m) => m.loadBiometricModels()).catch(() => {})
     } else {
       terminateAllCameraHardware()
     }
-  }, [isOpen, terminateAllCameraHardware])
+  }, [isOpen, userId, terminateAllCameraHardware])
 
   // Guaranteed unmount & pagehide cleanup
   useEffect(() => {
@@ -212,6 +240,8 @@ export default function PunchModal({
     setCameraError(null)
     setSubmitError(null)
     setFaceMatch(null)
+    setBiometricMatch(null)
+    setLiveDescriptor(null)
     setFaceResult({
       detected: false,
       status: 'NO_FACE',
@@ -327,26 +357,45 @@ export default function PunchModal({
     ctx.scale(-1, 1)
     ctx.drawImage(video, 0, 0, canvas.width, canvas.height)
 
-    // 1. Biometric Face Detection Validation
+    // 1. Biometric Face Analysis & 128-d descriptor extraction
+    let scan: any = null
     try {
-      const verification = await detectFace(canvas, { requireCentered: true })
-
-      if (!verification.detected) {
+      scan = await analyzeLiveFace(canvas, { requireCentered: true })
+      if (!scan.detected || !scan.descriptor) {
         setCameraError(
-          `Biometric Scan: ${verification.message}. Please face the camera directly in the center.`
+          `Biometric Scan: ${scan?.message || 'Face not properly aligned. Please center your face inside the frame.'}`
         )
         return
       }
+      setLiveDescriptor(scan.descriptor)
     } catch (err) {
-      console.warn('Face detection error during capture:', err)
+      console.warn('Biometric analyzeLiveFace error:', err)
     }
 
-    // 2. Facial Identity Match against Profile
-    try {
-      const match = await matchFaceWithProfile(canvas, userAvatar, userName)
-      setFaceMatch(match)
-    } catch (err) {
-      console.warn('Match face error:', err)
+    // 2. Strict Biometric Matching against Enrolled Profile
+    if (hasEnrolledFace && enrolledDescriptor && scan?.descriptor) {
+      const match = verifyFaceBiometrics(scan.descriptor, enrolledDescriptor, userName)
+      setBiometricMatch(match)
+      setFaceMatch({
+        isMatch: match.isMatch,
+        similarity: match.similarityScore,
+        message: match.message,
+      })
+    } else {
+      // Manual registration required - punching strictly prohibited until enrolled
+      const notEnrolledMatch: BiometricMatchResult = {
+        isMatch: false,
+        similarityScore: 0,
+        euclideanDistance: 1.0,
+        message: `Face ID not registered. Manual registration is required before attendance can be recorded.`,
+        status: 'NO_ENROLLMENT',
+      }
+      setBiometricMatch(notEnrolledMatch)
+      setFaceMatch({
+        isMatch: false,
+        similarity: 0,
+        message: `Face ID not registered for ${userName}. Please complete manual registration first.`,
+      })
     }
 
     const dataUrl = canvas.toDataURL('image/jpeg', 0.88)
@@ -367,6 +416,8 @@ export default function PunchModal({
     setSelfieSnapshot(null)
     setLivenessPassed(false)
     setFaceMatch(null)
+    setBiometricMatch(null)
+    setLiveDescriptor(null)
     setVideoReady(false)
     startCamera()
   }
@@ -391,6 +442,21 @@ export default function PunchModal({
         punchType === 'IN' ? 'in' : 'out'
       )
 
+      // Validate that Face ID is registered and match passed
+      if (!hasEnrolledFace) {
+        setSubmitError('Face ID is not registered. Please complete manual 3D registration first.')
+        setIsSubmitting(false)
+        return
+      }
+
+      if (biometricMatch && !biometricMatch.isMatch) {
+        setSubmitError('Facial verification failed: Face does not match registered profile for this account.')
+        setIsSubmitting(false)
+        return
+      }
+
+      const matchScore = biometricMatch?.similarityScore ?? 95
+
       if (punchType === 'IN') {
         await submitPunchIn({
           userId,
@@ -402,6 +468,7 @@ export default function PunchModal({
           selfieUrl,
           reason: !isInside ? reason : undefined,
           explanation: !isInside ? explanation : undefined,
+          faceMatchScore: matchScore,
         })
       } else {
         await submitPunchOut({
@@ -414,6 +481,7 @@ export default function PunchModal({
           selfieUrl,
           reason: !isInside ? reason : undefined,
           explanation: !isInside ? explanation : undefined,
+          faceMatchScore: matchScore,
         })
       }
 
@@ -733,6 +801,40 @@ export default function PunchModal({
                 </div>
               </div>
 
+              {/* Not Enrolled Warning Banner */}
+              {!hasEnrolledFace && (
+                <div
+                  style={{
+                    padding: '12px 14px',
+                    backgroundColor: '#FEF2F2',
+                    border: '1.5px solid #FCA5A5',
+                    borderRadius: '8px',
+                    color: '#991B1B',
+                    fontSize: '12.5px',
+                    marginBottom: '12px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    gap: '10px',
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <AlertTriangle size={18} color="#DC2626" style={{ flexShrink: 0 }} />
+                    <span>
+                      <strong>Face ID Not Registered:</strong> Manual biometric registration is required before attendance can be recorded.
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setShowReEnrollModal(true)}
+                    className="btn btn-primary btn-sm"
+                    style={{ fontSize: '11.5px', padding: '6px 12px', flexShrink: 0, fontWeight: 700 }}
+                  >
+                    Register Now
+                  </button>
+                </div>
+              )}
+
               {/* Camera Viewport */}
               <div
                 style={{
@@ -745,7 +847,9 @@ export default function PunchModal({
                   overflow: 'hidden',
                   border: `2px solid ${
                     selfieSnapshot
-                      ? '#16A34A'
+                      ? biometricMatch && !biometricMatch.isMatch
+                        ? '#EF4444'
+                        : '#16A34A'
                       : faceResult.detected
                       ? '#22C55E'
                       : '#CBD5E1'
@@ -793,7 +897,7 @@ export default function PunchModal({
                         top: '12px',
                         right: '12px',
                         padding: '5px 12px',
-                        backgroundColor: '#16A34A',
+                        backgroundColor: biometricMatch && !biometricMatch.isMatch ? '#DC2626' : '#16A34A',
                         color: '#FFF',
                         fontSize: '11px',
                         fontWeight: 700,
@@ -801,10 +905,18 @@ export default function PunchModal({
                         display: 'flex',
                         alignItems: 'center',
                         gap: '5px',
-                        boxShadow: '0 4px 12px rgba(22, 163, 74, 0.4)',
+                        boxShadow: '0 4px 12px rgba(0, 0, 0, 0.4)',
                       }}
                     >
-                      <ShieldCheck size={14} /> Biometric Facial Identity Verified
+                      {biometricMatch && !biometricMatch.isMatch ? (
+                        <>
+                          <AlertTriangle size={14} /> Biometric Mismatch
+                        </>
+                      ) : (
+                        <>
+                          <ShieldCheck size={14} /> Biometric Facial Identity Verified
+                        </>
+                      )}
                     </div>
 
                     <div
@@ -826,8 +938,8 @@ export default function PunchModal({
                       }}
                     >
                       <span>{userName}</span>
-                      <span style={{ color: '#4ADE80' }}>
-                        {faceMatch ? faceMatch.message : 'Identity Authenticated'}
+                      <span style={{ color: biometricMatch && !biometricMatch.isMatch ? '#F87171' : '#4ADE80' }}>
+                        {biometricMatch ? biometricMatch.message : faceMatch ? faceMatch.message : 'Identity Authenticated'}
                       </span>
                     </div>
                   </div>
@@ -914,6 +1026,39 @@ export default function PunchModal({
                   </>
                 )}
               </div>
+
+              {/* Mismatch Alert Banner */}
+              {selfieSnapshot && biometricMatch && !biometricMatch.isMatch && (
+                <div
+                  style={{
+                    padding: '12px 14px',
+                    borderRadius: '8px',
+                    backgroundColor: '#FEF2F2',
+                    border: '1.5px solid #FCA5A5',
+                    color: '#991B1B',
+                    fontSize: '12.5px',
+                    marginBottom: '14px',
+                    lineHeight: 1.4,
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontWeight: 800, marginBottom: '4px', fontSize: '13px' }}>
+                    <AlertTriangle size={16} color="#DC2626" /> Biometric Identity Mismatch
+                  </div>
+                  <div>
+                    The person in the photo does not match the registered Face ID for <strong>{userName}</strong> ({biometricMatch.similarityScore}% match). Proxy attendance is blocked.
+                  </div>
+                  <div style={{ marginTop: '8px', fontSize: '11.5px', color: '#64748B' }}>
+                    Changed appearance or new glasses?{' '}
+                    <button
+                      type="button"
+                      onClick={() => setShowReEnrollModal(true)}
+                      style={{ background: 'none', border: 'none', padding: 0, color: '#2563EB', fontWeight: 700, cursor: 'pointer', textDecoration: 'underline' }}
+                    >
+                      Re-calibrate your Face ID
+                    </button>
+                  </div>
+                </div>
+              )}
 
               {submitError && (
                 <div
@@ -1002,21 +1147,51 @@ export default function PunchModal({
 
                   <button
                     onClick={handleConfirmPunch}
-                    disabled={isSubmitting}
+                    disabled={
+                      isSubmitting ||
+                      !hasEnrolledFace ||
+                      (biometricMatch ? !biometricMatch.isMatch : true)
+                    }
                     className="btn btn-primary"
                     style={{
                       padding: '11px',
                       fontSize: '14px',
                       fontWeight: 700,
-                      backgroundColor: punchType === 'IN' ? '#16A34A' : '#DC2626',
-                      borderColor: punchType === 'IN' ? '#16A34A' : '#DC2626',
+                      backgroundColor:
+                        !hasEnrolledFace || (biometricMatch && !biometricMatch.isMatch)
+                          ? '#94A3B8'
+                          : punchType === 'IN'
+                          ? '#16A34A'
+                          : '#DC2626',
+                      borderColor:
+                        !hasEnrolledFace || (biometricMatch && !biometricMatch.isMatch)
+                          ? '#94A3B8'
+                          : punchType === 'IN'
+                          ? '#16A34A'
+                          : '#DC2626',
+                      cursor:
+                        !hasEnrolledFace || (biometricMatch && !biometricMatch.isMatch)
+                          ? 'not-allowed'
+                          : 'pointer',
+                      opacity:
+                        !hasEnrolledFace || (biometricMatch && !biometricMatch.isMatch)
+                          ? 0.65
+                          : 1,
                       display: 'flex',
                       alignItems: 'center',
                       justifyContent: 'center',
                       gap: '8px',
                     }}
                   >
-                    {isSubmitting ? (
+                    {!hasEnrolledFace ? (
+                      <>
+                        <AlertTriangle size={16} /> Face ID Registration Required
+                      </>
+                    ) : biometricMatch && !biometricMatch.isMatch ? (
+                      <>
+                        <AlertTriangle size={16} /> Punch Blocked (Face Mismatch)
+                      </>
+                    ) : isSubmitting ? (
                       <>
                         <Loader2 size={16} className="animate-spin" /> Recording Punch...
                       </>
@@ -1061,6 +1236,23 @@ export default function PunchModal({
           )}
         </div>
       </div>
+
+      {/* Re-enroll Face ID Modal */}
+      {showReEnrollModal && (
+        <FaceEnrollmentModal
+          isOpen={showReEnrollModal}
+          userId={userId}
+          userName={userName}
+          isReEnrollment={true}
+          onClose={() => setShowReEnrollModal(false)}
+          onSuccess={(newDescriptor) => {
+            setEnrolledDescriptor(newDescriptor)
+            setHasEnrolledFace(true)
+            setShowReEnrollModal(false)
+            retakeSelfie()
+          }}
+        />
+      )}
     </div>
   )
 }

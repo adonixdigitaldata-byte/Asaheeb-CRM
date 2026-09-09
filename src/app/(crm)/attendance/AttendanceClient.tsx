@@ -1,6 +1,6 @@
 'use client'
 
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useMemo } from 'react'
 import {
   Clock,
   MapPin,
@@ -26,6 +26,7 @@ import {
   TrendingUp,
   Activity,
   Award,
+  Scan,
 } from 'lucide-react'
 import {
   CompanyLocation,
@@ -57,6 +58,11 @@ import LeaveRequestModal from '@/components/attendance/LeaveRequestModal'
 import ExceptionReviewModal from '@/components/attendance/ExceptionReviewModal'
 import EmployeeAttendanceDetailModal from '@/components/attendance/EmployeeAttendanceDetailModal'
 import WorkPolicyModal from '@/components/attendance/WorkPolicyModal'
+import FaceEnrollmentModal from '@/components/attendance/FaceEnrollmentModal'
+import BiometricManagementModal from '@/components/attendance/BiometricManagementModal'
+import TestBiometricModal from '@/components/attendance/TestBiometricModal'
+import Pagination from '@/components/Pagination'
+import { getEmployeeFaceEnrollment } from '@/lib/biometricEngine'
 import type { Profile } from '@/types/database'
 
 interface AttendanceClientProps {
@@ -71,7 +77,7 @@ export default function AttendanceClient({ profile }: AttendanceClientProps) {
   const userId = profile?.id || 'guest-user'
 
   // Tab State
-  type TabType = 'ROSTER' | 'EXCEPTIONS' | 'LEAVES' | 'HOURS_AUDIT' | 'MY_LOGS'
+  type TabType = 'ROSTER' | 'EXCEPTIONS' | 'LEAVES' | 'HOURS_AUDIT' | 'MY_LOGS' | 'MY_LEAVES'
   const [activeTab, setActiveTab] = useState<TabType>(canManage ? 'ROSTER' : 'MY_LOGS')
 
   // Core Data States
@@ -129,9 +135,50 @@ export default function AttendanceClient({ profile }: AttendanceClientProps) {
   const [selectedEmployeeForDetail, setSelectedEmployeeForDetail] = useState<RosterEmployee | null>(null)
   const [detailModalOpen, setDetailModalOpen] = useState(false)
 
+  // Biometric Face ID Status & Modals
+  const [hasFaceId, setHasFaceId] = useState<boolean>(false)
+  const [faceEnrolledAt, setFaceEnrolledAt] = useState<string | null>(null)
+  const [faceSnapshotUrl, setFaceSnapshotUrl] = useState<string | null>(null)
+  const [biometricHubOpen, setBiometricHubOpen] = useState<boolean>(false)
+  const [testScannerOpen, setTestScannerOpen] = useState<boolean>(false)
+  const [faceEnrollModalOpen, setFaceEnrollModalOpen] = useState<boolean>(false)
+
   // Filters & Search
   const [searchQuery, setSearchQuery] = useState('')
   const [rosterFilter, setRosterFilter] = useState<'ALL' | 'HQ' | 'REMOTE' | 'LEAVE' | 'ABSENT'>('ALL')
+  const [exceptionsFilter, setExceptionsFilter] = useState<'ALL' | 'ACTION_NEEDED' | 'FLAGGED' | 'APPROVED'>('ALL')
+
+  // Pagination states for all tables
+  const [rosterPage, setRosterPage] = useState(1)
+  const [rosterPageSize, setRosterPageSize] = useState(10)
+
+  const [exceptionsPage, setExceptionsPage] = useState(1)
+  const [exceptionsPageSize, setExceptionsPageSize] = useState(10)
+
+  const [auditPage, setAuditPage] = useState(1)
+  const [auditPageSize, setAuditPageSize] = useState(10)
+
+  const [leavesPage, setLeavesPage] = useState(1)
+  const [leavesPageSize, setLeavesPageSize] = useState(10)
+
+  const [myHistoryPage, setMyHistoryPage] = useState(1)
+  const [myHistoryPageSize, setMyHistoryPageSize] = useState(10)
+
+  const [myLeavesPage, setMyLeavesPage] = useState(1)
+  const [myLeavesPageSize, setMyLeavesPageSize] = useState(10)
+
+  // Reset pagination on filter or query change
+  useEffect(() => {
+    setRosterPage(1)
+  }, [searchQuery, rosterFilter])
+
+  useEffect(() => {
+    setExceptionsPage(1)
+  }, [exceptionsFilter])
+
+  useEffect(() => {
+    setAuditPage(1)
+  }, [selectedAuditMonth])
 
   // Initial Load
   useEffect(() => {
@@ -173,13 +220,89 @@ export default function AttendanceClient({ profile }: AttendanceClientProps) {
     }
   }, [selectedAuditMonth, activeTab, canManage])
 
+  // Personal Monthly Work Hours, Punctuality & Leave Statistics
+  const myMonthlyStats = useMemo(() => {
+    let totalWorkedMinutes = 0
+    let lateDaysCount = 0
+    let totalLateMinutes = 0
+    let deficitMinutes = 0
+    let overtimeMinutes = 0
+    const expectedMinutesPerDay = (workPolicy.daily_expected_hours || 8) * 60
+    const [shiftH, shiftM] = (workPolicy.shift_start_time || '09:00').split(':').map(Number)
+    const shiftHour = isNaN(shiftH) ? 9 : shiftH
+    const shiftMinute = isNaN(shiftM) ? 0 : shiftM
+    const graceMinutes = workPolicy.grace_period_mins ?? 15
+    const shiftStartCutoffMinutes = shiftHour * 60 + shiftMinute + graceMinutes
+
+    for (const log of myHistory) {
+      const worked = log.total_working_minutes || 0
+      totalWorkedMinutes += worked
+
+      // Calculate punctuality from punch_in_at
+      if (log.punch_in_at) {
+        const inDate = new Date(log.punch_in_at)
+        const inMinutes = inDate.getHours() * 60 + inDate.getMinutes()
+        if (inMinutes > shiftStartCutoffMinutes) {
+          lateDaysCount++
+          totalLateMinutes += inMinutes - (shiftHour * 60 + shiftMinute)
+        }
+      }
+
+      // Calculate daily deficit / short hours
+      if (log.punch_out_at) {
+        const diff = worked - expectedMinutesPerDay
+        if (diff < 0) {
+          deficitMinutes += Math.abs(diff)
+        } else {
+          overtimeMinutes += diff
+        }
+      }
+    }
+
+    const totalWorkedHours = (totalWorkedMinutes / 60).toFixed(1)
+    const deficitHours = (deficitMinutes / 60).toFixed(1)
+    const overtimeHours = (overtimeMinutes / 60).toFixed(1)
+
+    // Approved leave hours for this user
+    const approvedLeaveDays = myLeaveRequests
+      .filter((r) => r.status === 'APPROVED')
+      .reduce((acc, r) => acc + r.total_days, 0)
+    const approvedLeaveHours = (approvedLeaveDays * (workPolicy.daily_expected_hours || 8)).toFixed(1)
+
+    const pendingLeaveCount = myLeaveRequests.filter((r) => r.status === 'PENDING').length
+
+    return {
+      totalWorkedHours,
+      totalWorkedMinutes,
+      lateDaysCount,
+      totalLateMinutes,
+      deficitHours,
+      deficitMinutes,
+      overtimeHours,
+      approvedLeaveDays,
+      approvedLeaveHours,
+      pendingLeaveCount,
+      shiftStartCutoffMinutes,
+      shiftHour,
+      shiftMinute,
+      graceMinutes,
+      expectedMinutesPerDay,
+    }
+  }, [myHistory, workPolicy, myLeaveRequests])
+
   async function loadInitialData() {
     try {
       const loc = await fetchOfficeLocation()
-      setOffice(loc)
-
       const pol = await fetchCompanyWorkPolicy()
       setWorkPolicy(pol)
+
+      if (userId && userId !== 'guest-user') {
+        getEmployeeFaceEnrollment(userId).then((res) => {
+          setHasFaceId(Boolean(res.descriptor && res.descriptor.length === 128))
+          setFaceEnrolledAt(res.enrolled_at || null)
+          setFaceSnapshotUrl(res.snapshot_url || null)
+        })
+      }
 
       const tLog = await fetchTodayAttendance(userId)
       setTodayLog(tLog)
@@ -226,6 +349,10 @@ export default function AttendanceClient({ profile }: AttendanceClientProps) {
   }
 
   function handleOpenPunch() {
+    if (!hasFaceId) {
+      setFaceEnrollModalOpen(true)
+      return
+    }
     if (!todayLog?.punch_in_at) {
       setPunchType('IN')
       setPunchModalOpen(true)
@@ -319,6 +446,67 @@ export default function AttendanceClient({ profile }: AttendanceClientProps) {
     if (rosterFilter === 'ABSENT') return r.live_status === 'NOT_PUNCHED'
     return true
   })
+
+  // Filtered Exceptions
+  const filteredExceptions = useMemo(() => {
+    return pendingExceptions.filter((item) => {
+      const isFlagged = item.punch_in_status === 'FLAGGED' || item.punch_out_status === 'FLAGGED'
+      const isPending =
+        item.punch_in_status === 'PENDING_REVIEW' || item.punch_out_status === 'PENDING_REVIEW'
+      const isApproved =
+        item.punch_in_status === 'APPROVED' && (!item.punch_out_status || item.punch_out_status === 'APPROVED')
+
+      if (exceptionsFilter === 'ACTION_NEEDED') return isFlagged || isPending
+      if (exceptionsFilter === 'FLAGGED') return isFlagged
+      if (exceptionsFilter === 'APPROVED') return isApproved
+      return true
+    })
+  }, [pendingExceptions, exceptionsFilter])
+
+  const countExceptionsActionNeeded = pendingExceptions.filter(
+    (e) =>
+      e.punch_in_status === 'FLAGGED' ||
+      e.punch_in_status === 'PENDING_REVIEW' ||
+      e.punch_out_status === 'FLAGGED' ||
+      e.punch_out_status === 'PENDING_REVIEW'
+  ).length
+  const countExceptionsFlagged = pendingExceptions.filter(
+    (e) => e.punch_in_status === 'FLAGGED' || e.punch_out_status === 'FLAGGED'
+  ).length
+  const countExceptionsApproved = pendingExceptions.filter(
+    (e) => e.punch_in_status === 'APPROVED' && (!e.punch_out_status || e.punch_out_status === 'APPROVED')
+  ).length
+
+  // Sliced paginated arrays for clean page navigation
+  const paginatedRoster = useMemo(() => {
+    const start = (rosterPage - 1) * rosterPageSize
+    return filteredRoster.slice(start, start + rosterPageSize)
+  }, [filteredRoster, rosterPage, rosterPageSize])
+
+  const paginatedExceptions = useMemo(() => {
+    const start = (exceptionsPage - 1) * exceptionsPageSize
+    return filteredExceptions.slice(start, start + exceptionsPageSize)
+  }, [filteredExceptions, exceptionsPage, exceptionsPageSize])
+
+  const paginatedAudit = useMemo(() => {
+    const start = (auditPage - 1) * auditPageSize
+    return monthlyAuditList.slice(start, start + auditPageSize)
+  }, [monthlyAuditList, auditPage, auditPageSize])
+
+  const paginatedLeaves = useMemo(() => {
+    const start = (leavesPage - 1) * leavesPageSize
+    return allLeaveRequests.slice(start, start + leavesPageSize)
+  }, [allLeaveRequests, leavesPage, leavesPageSize])
+
+  const paginatedMyHistory = useMemo(() => {
+    const start = (myHistoryPage - 1) * myHistoryPageSize
+    return myHistory.slice(start, start + myHistoryPageSize)
+  }, [myHistory, myHistoryPage, myHistoryPageSize])
+
+  const paginatedMyLeaves = useMemo(() => {
+    const start = (myLeavesPage - 1) * myLeavesPageSize
+    return myLeaveRequests.slice(start, start + myLeavesPageSize)
+  }, [myLeaveRequests, myLeavesPage, myLeavesPageSize])
 
   // Cumulative Audit Totals
   const totalActualCompanyHours = Math.round(monthlyAuditList.reduce((acc, c) => acc + c.actual_worked_hours, 0) * 10) / 10
@@ -434,6 +622,48 @@ export default function AttendanceClient({ profile }: AttendanceClientProps) {
           >
             <Plus size={15} style={{ color: '#059669' }} /> Request Leave
           </button>
+
+          {/* Live Test Biometric Face ID Scanner */}
+          <button
+            onClick={() => setTestScannerOpen(true)}
+            className="btn btn-outline"
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 6,
+              fontWeight: 600,
+              backgroundColor: '#F0FDF4',
+              borderColor: '#86EFAC',
+              color: '#15803D',
+            }}
+            title="Open live camera test to test facial recognition and verify proxy face mismatch"
+          >
+            <Scan size={15} style={{ color: '#16A34A' }} /> Test Face Scanner
+          </button>
+
+          {/* Biometric Face ID Management CTA */}
+          <button
+            onClick={() => {
+              if (hasFaceId) {
+                setBiometricHubOpen(true)
+              } else {
+                setFaceEnrollModalOpen(true)
+              }
+            }}
+            className="btn btn-outline"
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 6,
+              fontWeight: 600,
+              backgroundColor: '#FFFFFF',
+              borderColor: hasFaceId ? '#BBF7D0' : '#FDE68A',
+            }}
+            title={hasFaceId ? 'View Face ID status, test camera, or securely re-calibrate' : 'Enroll your Biometric Face ID for quick attendance punching'}
+          >
+            <ShieldCheck size={15} style={{ color: hasFaceId ? '#16A34A' : '#D97706' }} />
+            <span>{hasFaceId ? 'Biometric Face ID (Active)' : 'Set Up Face ID'}</span>
+          </button>
         </div>
       </div>
 
@@ -529,7 +759,13 @@ export default function AttendanceClient({ profile }: AttendanceClientProps) {
                   width: '100%',
                   padding: '16px 24px',
                   borderRadius: '12px',
-                  backgroundColor: isPunchedIn ? '#DC2626' : isPunchedOut ? '#475569' : '#16A34A',
+                  backgroundColor: !hasFaceId
+                    ? '#D97706'
+                    : isPunchedIn
+                    ? '#DC2626'
+                    : isPunchedOut
+                    ? '#475569'
+                    : '#16A34A',
                   color: '#FFFFFF',
                   border: 'none',
                   fontSize: '16px',
@@ -540,7 +776,9 @@ export default function AttendanceClient({ profile }: AttendanceClientProps) {
                   alignItems: 'center',
                   justifyContent: 'center',
                   gap: '10px',
-                  boxShadow: isPunchedIn
+                  boxShadow: !hasFaceId
+                    ? '0 4px 16px rgba(217, 119, 6, 0.4)'
+                    : isPunchedIn
                     ? '0 4px 16px rgba(220, 38, 38, 0.4)'
                     : isPunchedOut
                     ? 'none'
@@ -554,17 +792,122 @@ export default function AttendanceClient({ profile }: AttendanceClientProps) {
                   if (!isPunchedOut) e.currentTarget.style.transform = 'scale(1)'
                 }}
               >
-                {isPunchedOut ? <CheckCircle2 size={22} /> : <ShieldCheck size={22} />}
-                {isPunchedIn
+                {isPunchedOut ? (
+                  <CheckCircle2 size={22} />
+                ) : (
+                  <ShieldCheck size={22} />
+                )}
+                {!hasFaceId
+                  ? 'Register Face ID to Punch In'
+                  : isPunchedIn
                   ? 'Punch Out & Confirm'
                   : isPunchedOut
                   ? 'Day Completed (Punched Out)'
                   : 'Punch In (GPS + Face)'}
               </button>
               <div style={{ fontSize: '11px', color: '#94A3B8', textAlign: 'center' }}>
-                {isPunchedOut
+                {!hasFaceId
+                  ? 'Manual 10-second biometric registration is required before your first punch in'
+                  : isPunchedOut
                   ? 'Attendance successfully recorded for today'
                   : `Verified against ${office.name} (${office.radius_meters}m geofence perimeter)`}
+              </div>
+
+              {/* Biometric Status Pill & Action links */}
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '10px',
+                  marginTop: '4px',
+                  fontSize: '11.5px',
+                  flexWrap: 'wrap',
+                }}
+              >
+                {hasFaceId ? (
+                  <>
+                    <span
+                      style={{
+                        color: '#34D399',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '4px',
+                        fontWeight: 600,
+                      }}
+                    >
+                      <ShieldCheck size={13} /> Biometric Face ID Active
+                    </span>
+                    <span style={{ color: '#475569' }}>·</span>
+                    <button
+                      type="button"
+                      onClick={() => setTestScannerOpen(true)}
+                      style={{
+                        background: 'none',
+                        border: 'none',
+                        padding: 0,
+                        color: '#38BDF8',
+                        fontSize: '11.5px',
+                        fontWeight: 600,
+                        cursor: 'pointer',
+                        textDecoration: 'underline',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '3px',
+                      }}
+                    >
+                      <Scan size={12} /> Test Face Scanner
+                    </button>
+                    <span style={{ color: '#475569' }}>·</span>
+                    <button
+                      type="button"
+                      onClick={() => setBiometricHubOpen(true)}
+                      style={{
+                        background: 'none',
+                        border: 'none',
+                        padding: 0,
+                        color: '#CBD5E1',
+                        fontSize: '11.5px',
+                        fontWeight: 500,
+                        cursor: 'pointer',
+                        textDecoration: 'underline',
+                      }}
+                    >
+                      Manage / Re-calibrate
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <span
+                      style={{
+                        color: '#FBBF24',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '4px',
+                        fontWeight: 600,
+                      }}
+                    >
+                      <Sparkles size={13} /> Auto-enrolls on 1st punch
+                    </span>
+                    <span style={{ color: '#475569' }}>·</span>
+                    <button
+                      type="button"
+                      onClick={() => setFaceEnrollModalOpen(true)}
+                      style={{
+                        background: 'none',
+                        border: 'none',
+                        padding: 0,
+                        color: '#FBBF24',
+                        fontSize: '11.5px',
+                        fontWeight: 700,
+                        cursor: 'pointer',
+                        textDecoration: 'underline',
+                      }}
+                    >
+                      Enroll Now (3D Calibration)
+                    </button>
+                  </>
+                )}
               </div>
             </div>
 
@@ -787,8 +1130,8 @@ export default function AttendanceClient({ profile }: AttendanceClientProps) {
                     color: activeTab === 'EXCEPTIONS' ? '#FFFFFF' : 'var(--text-primary)',
                   }}
                 >
-                  <AlertTriangle size={15} /> Remote Exceptions
-                  {pendingExceptions.length > 0 && (
+                  <AlertTriangle size={15} /> Remote &amp; Flagged Punches ({pendingExceptions.length})
+                  {countExceptionsActionNeeded > 0 && (
                     <span
                       style={{
                         backgroundColor: '#DC2626',
@@ -798,8 +1141,9 @@ export default function AttendanceClient({ profile }: AttendanceClientProps) {
                         padding: '1px 6px',
                         borderRadius: '999px',
                       }}
+                      title={`${countExceptionsActionNeeded} punches need review or action`}
                     >
-                      {pendingExceptions.length}
+                      {countExceptionsActionNeeded}
                     </span>
                   )}
                 </button>
@@ -862,6 +1206,37 @@ export default function AttendanceClient({ profile }: AttendanceClientProps) {
               style={{ fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: 6 }}
             >
               <Clock size={15} /> My Attendance &amp; Timesheet
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setActiveTab('MY_LEAVES')}
+              className={activeTab === 'MY_LEAVES' ? 'btn btn-primary' : 'btn btn-outline'}
+              style={{
+                fontWeight: 600,
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 6,
+                backgroundColor: activeTab === 'MY_LEAVES' ? '#059669' : '#FFFFFF',
+                borderColor: activeTab === 'MY_LEAVES' ? '#059669' : 'var(--border)',
+                color: activeTab === 'MY_LEAVES' ? '#FFFFFF' : 'var(--text-primary)',
+              }}
+            >
+              <Calendar size={15} /> My Leaves &amp; Requests ({myLeaveRequests.length})
+              {myMonthlyStats.pendingLeaveCount > 0 && (
+                <span
+                  style={{
+                    backgroundColor: '#F59E0B',
+                    color: '#FFF',
+                    fontSize: '11px',
+                    fontWeight: 700,
+                    padding: '1px 6px',
+                    borderRadius: '999px',
+                  }}
+                >
+                  {myMonthlyStats.pendingLeaveCount} Pending
+                </span>
+              )}
             </button>
           </div>
 
@@ -977,7 +1352,7 @@ export default function AttendanceClient({ profile }: AttendanceClientProps) {
                         </td>
                       </tr>
                     ) : (
-                      filteredRoster.map((emp) => {
+                      paginatedRoster.map((emp) => {
                         const inTime = emp.today_log?.punch_in_at
                           ? new Date(emp.today_log.punch_in_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
                           : '-'
@@ -1116,6 +1491,15 @@ export default function AttendanceClient({ profile }: AttendanceClientProps) {
                   </tbody>
                 </table>
               </div>
+              <Pagination
+                currentPage={rosterPage}
+                totalItems={filteredRoster.length}
+                pageSize={rosterPageSize}
+                onPageChange={setRosterPage}
+                onPageSizeChange={setRosterPageSize}
+                pageSizeOptions={[10, 25, 50]}
+                itemLabel="staff members"
+              />
             </div>
           </div>
         )}
@@ -1287,7 +1671,7 @@ export default function AttendanceClient({ profile }: AttendanceClientProps) {
                         </td>
                       </tr>
                     ) : (
-                      monthlyAuditList.map((aud) => {
+                      paginatedAudit.map((aud) => {
                         const hasDeficit = aud.non_working_hours > 0
                         return (
                           <tr key={aud.employee_id}>
@@ -1380,6 +1764,16 @@ export default function AttendanceClient({ profile }: AttendanceClientProps) {
                   </tbody>
                 </table>
               </div>
+
+              <Pagination
+                currentPage={auditPage}
+                totalItems={monthlyAuditList.length}
+                pageSize={auditPageSize}
+                onPageChange={setAuditPage}
+                onPageSizeChange={setAuditPageSize}
+                pageSizeOptions={[10, 25, 50]}
+                itemLabel="employees"
+              />
             </div>
           </div>
         )}
@@ -1389,7 +1783,101 @@ export default function AttendanceClient({ profile }: AttendanceClientProps) {
         {/* ======================================================= */}
         {activeTab === 'EXCEPTIONS' && canManage && (
           <div>
-            {pendingExceptions.length === 0 ? (
+            {/* Filter Toolbar for Remote & Flagged Punches */}
+            <div
+              className="card"
+              style={{
+                padding: '12px 18px',
+                marginBottom: 16,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                flexWrap: 'wrap',
+                gap: 12,
+                backgroundColor: '#FFFFFF',
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                <button
+                  type="button"
+                  onClick={() => setExceptionsFilter('ALL')}
+                  style={{
+                    padding: '6px 14px',
+                    borderRadius: 8,
+                    fontSize: 12,
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                    border: '1px solid',
+                    borderColor: exceptionsFilter === 'ALL' ? '#D97706' : '#E2E8F0',
+                    backgroundColor: exceptionsFilter === 'ALL' ? '#FFFBEB' : '#FFFFFF',
+                    color: exceptionsFilter === 'ALL' ? '#B45309' : '#64748B',
+                  }}
+                >
+                  All Punches ({pendingExceptions.length})
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setExceptionsFilter('ACTION_NEEDED')}
+                  style={{
+                    padding: '6px 14px',
+                    borderRadius: 8,
+                    fontSize: 12,
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                    border: '1px solid',
+                    borderColor: exceptionsFilter === 'ACTION_NEEDED' ? '#DC2626' : '#E2E8F0',
+                    backgroundColor: exceptionsFilter === 'ACTION_NEEDED' ? '#FEF2F2' : '#FFFFFF',
+                    color: exceptionsFilter === 'ACTION_NEEDED' ? '#DC2626' : '#64748B',
+                  }}
+                >
+                  ⚡ Action Required ({countExceptionsActionNeeded})
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setExceptionsFilter('FLAGGED')}
+                  style={{
+                    padding: '6px 14px',
+                    borderRadius: 8,
+                    fontSize: 12,
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                    border: '1px solid',
+                    borderColor: exceptionsFilter === 'FLAGGED' ? '#DC2626' : '#E2E8F0',
+                    backgroundColor: exceptionsFilter === 'FLAGGED' ? '#FEE2E2' : '#FFFFFF',
+                    color: exceptionsFilter === 'FLAGGED' ? '#991B1B' : '#64748B',
+                  }}
+                >
+                  🚩 Flagged ({countExceptionsFlagged})
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setExceptionsFilter('APPROVED')}
+                  style={{
+                    padding: '6px 14px',
+                    borderRadius: 8,
+                    fontSize: 12,
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                    border: '1px solid',
+                    borderColor: exceptionsFilter === 'APPROVED' ? '#16A34A' : '#E2E8F0',
+                    backgroundColor: exceptionsFilter === 'APPROVED' ? '#DCFCE7' : '#FFFFFF',
+                    color: exceptionsFilter === 'APPROVED' ? '#15803D' : '#64748B',
+                  }}
+                >
+                  ✅ Approved Remote ({countExceptionsApproved})
+                </button>
+              </div>
+
+              <div style={{ fontSize: 12, color: '#64748B' }}>
+                Showing <strong>{filteredExceptions.length}</strong> recorded exceptions
+              </div>
+            </div>
+
+            {/* Exceptions Cards / Empty State */}
+            {filteredExceptions.length === 0 ? (
               <div
                 className="card"
                 style={{
@@ -1400,103 +1888,387 @@ export default function AttendanceClient({ profile }: AttendanceClientProps) {
               >
                 <CheckCircle2 size={40} color="#16A34A" style={{ margin: '0 auto 12px' }} />
                 <h3 style={{ fontSize: 16, fontWeight: 700, color: 'var(--text-primary)', margin: 0 }}>
-                  All Clear! No Pending Exceptions
+                  {pendingExceptions.length === 0
+                    ? 'All Clear! No Remote or Flagged Punches Recorded'
+                    : 'No punches match the selected filter'}
                 </h3>
                 <p style={{ fontSize: 13, color: 'var(--text-secondary)', marginTop: 4 }}>
-                  All punches recorded outside Jeddah HQ have been reviewed and approved.
+                  {pendingExceptions.length === 0
+                    ? 'All punches recorded outside Jeddah HQ have been reviewed and approved.'
+                    : 'Try switching filters to view other exceptions or approved punches.'}
                 </p>
               </div>
             ) : (
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: 12 }}>
-                {pendingExceptions.map((item) => {
-                  const isPunchInPending = item.punch_in_status === 'PENDING_REVIEW'
-                  const punchKind = isPunchInPending ? 'IN' : 'OUT'
-                  const reason = isPunchInPending ? item.punch_in_reason : item.punch_out_reason
-                  const explanation = isPunchInPending ? item.punch_in_explanation : item.punch_out_explanation
-                  const distance = isPunchInPending ? item.punch_in_distance_m : item.punch_out_distance_m
-                  const selfieUrl = isPunchInPending ? item.punch_in_selfie_url : item.punch_out_selfie_url
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: 14 }}>
+                {paginatedExceptions.map((item) => {
+                  const isFlagged = item.punch_in_status === 'FLAGGED' || item.punch_out_status === 'FLAGGED'
+                  const isPending =
+                    item.punch_in_status === 'PENDING_REVIEW' || item.punch_out_status === 'PENDING_REVIEW'
+
+                  const borderColor = isFlagged ? '#DC2626' : isPending ? '#D97706' : '#16A34A'
+
+                  const inDistance = item.punch_in_distance_m || 0
+                  const outDistance = item.punch_out_distance_m || 0
 
                   return (
                     <div
                       key={item.id}
                       className="card"
                       style={{
-                        padding: '16px 20px',
-                        borderLeft: '4px solid #D97706',
+                        padding: '18px 22px',
+                        borderLeft: `5px solid ${borderColor}`,
+                        backgroundColor: '#FFFFFF',
+                        borderRadius: 12,
+                        boxShadow: 'var(--shadow-sm)',
                         display: 'flex',
-                        flexWrap: 'wrap',
-                        alignItems: 'center',
-                        justifyContent: 'space-between',
-                        gap: 16,
+                        flexDirection: 'column',
+                        gap: 14,
                       }}
                     >
-                      <div style={{ display: 'flex', gap: 14, alignItems: 'center' }}>
-                        {selfieUrl && (
-                          <img
-                            src={selfieUrl}
-                            alt="Selfie proof"
+                      {/* Top Header: Employee Info, Date & Overall Status Badge */}
+                      <div
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          flexWrap: 'wrap',
+                          gap: 12,
+                          borderBottom: '1px solid #F1F5F9',
+                          paddingBottom: 10,
+                        }}
+                      >
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                          <div
                             style={{
-                              width: 56,
-                              height: 56,
-                              borderRadius: 10,
-                              objectFit: 'cover',
-                              border: '2px solid #FCD34D',
+                              width: 38,
+                              height: 38,
+                              borderRadius: '50%',
+                              backgroundColor: '#EFF6FF',
+                              color: '#2563EB',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              fontWeight: 700,
+                              fontSize: 14,
+                              overflow: 'hidden',
                             }}
-                          />
-                        )}
-                        <div>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                            <span style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-primary)' }}>
+                          >
+                            {item.employee_avatar ? (
+                              <img
+                                src={item.employee_avatar}
+                                alt={item.employee_name || 'Staff'}
+                                style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                              />
+                            ) : (
+                              (item.employee_name || 'S').charAt(0)
+                            )}
+                          </div>
+                          <div>
+                            <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-primary)' }}>
                               {item.employee_name || 'Staff Member'}
-                            </span>
+                            </div>
+                            <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
+                              {item.employee_role || 'AGENT'} • {item.employee_email || ''}
+                            </div>
+                          </div>
+                        </div>
+
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                          <span style={{ fontSize: 12, fontWeight: 600, color: '#64748B' }}>
+                            📅 {item.date}
+                          </span>
+
+                          {isFlagged ? (
                             <span
                               style={{
                                 fontSize: 11,
                                 fontWeight: 700,
-                                padding: '2px 8px',
-                                borderRadius: 4,
-                                backgroundColor: '#FEF3C7',
-                                color: '#B45309',
+                                padding: '3px 10px',
+                                borderRadius: 6,
+                                backgroundColor: '#FEE2E2',
+                                color: '#DC2626',
+                                border: '1px solid #FCA5A5',
                               }}
                             >
-                              Remote Punch {punchKind}
+                              🚩 FLAGGED PUNCH
                             </span>
-                          </div>
-                          <div style={{ fontSize: 13, color: 'var(--text-secondary)', marginTop: 3 }}>
-                            📍 <strong>{formatDistance(distance || 0)}</strong> from Jeddah HQ • Reason:{' '}
-                            <strong style={{ color: 'var(--text-primary)' }}>{reason || 'Field Work'}</strong>
-                          </div>
-                          {explanation && (
-                            <div style={{ fontSize: 12, color: '#475569', fontStyle: 'italic', marginTop: 3 }}>
-                              &ldquo;{explanation}&rdquo;
-                            </div>
+                          ) : isPending ? (
+                            <span
+                              style={{
+                                fontSize: 11,
+                                fontWeight: 700,
+                                padding: '3px 10px',
+                                borderRadius: 6,
+                                backgroundColor: '#FEF3C7',
+                                color: '#B45309',
+                                border: '1px solid #FCD34D',
+                              }}
+                            >
+                              ⏳ PENDING REVIEW
+                            </span>
+                          ) : (
+                            <span
+                              style={{
+                                fontSize: 11,
+                                fontWeight: 700,
+                                padding: '3px 10px',
+                                borderRadius: 6,
+                                backgroundColor: '#DCFCE7',
+                                color: '#16A34A',
+                                border: '1px solid #86EFAC',
+                              }}
+                            >
+                              ✅ APPROVED REMOTE
+                            </span>
                           )}
                         </div>
                       </div>
 
-                      <button
-                        onClick={() => {
-                          setSelectedException(item)
-                          setSelectedExceptionType(punchKind)
-                          setExceptionModalOpen(true)
-                        }}
-                        className="btn btn-primary"
+                      {/* Punch Details Row */}
+                      <div
                         style={{
-                          padding: '8px 16px',
-                          fontSize: 13,
-                          fontWeight: 600,
-                          display: 'inline-flex',
-                          alignItems: 'center',
-                          gap: 6,
-                          backgroundColor: '#D97706',
-                          borderColor: '#D97706',
+                          display: 'grid',
+                          gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
+                          gap: 14,
                         }}
                       >
-                        Inspect Punch Proof <ChevronRight size={14} />
-                      </button>
+                        {/* Punch In Details */}
+                        <div
+                          style={{
+                            padding: '12px 14px',
+                            borderRadius: 10,
+                            backgroundColor: '#F8FAFC',
+                            border: '1px solid #E2E8F0',
+                            display: 'flex',
+                            gap: 12,
+                          }}
+                        >
+                          {item.punch_in_selfie_url && (
+                            <img
+                              src={item.punch_in_selfie_url}
+                              alt="Punch In Selfie"
+                              style={{
+                                width: 56,
+                                height: 56,
+                                borderRadius: 8,
+                                objectFit: 'cover',
+                                border: '2px solid #CBD5E1',
+                                flexShrink: 0,
+                              }}
+                            />
+                          )}
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6 }}>
+                              <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-primary)' }}>
+                                Punch In ({item.punch_in_at ? new Date(item.punch_in_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'N/A'})
+                              </span>
+                              <span
+                                style={{
+                                  fontSize: 10,
+                                  fontWeight: 700,
+                                  padding: '1px 6px',
+                                  borderRadius: 4,
+                                  backgroundColor:
+                                    item.punch_in_status === 'FLAGGED'
+                                      ? '#FEE2E2'
+                                      : item.punch_in_status === 'APPROVED'
+                                      ? '#DCFCE7'
+                                      : '#FEF3C7',
+                                  color:
+                                    item.punch_in_status === 'FLAGGED'
+                                      ? '#DC2626'
+                                      : item.punch_in_status === 'APPROVED'
+                                      ? '#15803D'
+                                      : '#B45309',
+                                }}
+                              >
+                                {item.punch_in_status || 'PENDING'}
+                              </span>
+                            </div>
+
+                            <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 3 }}>
+                              📍 <strong>{formatDistance(inDistance)}</strong> from HQ • Reason:{' '}
+                              <strong>{item.punch_in_reason || 'Field Work'}</strong>
+                            </div>
+
+                            {item.punch_in_explanation && (
+                              <div style={{ fontSize: 11.5, color: '#475569', fontStyle: 'italic', marginTop: 2 }}>
+                                &ldquo;{item.punch_in_explanation}&rdquo;
+                              </div>
+                            )}
+
+                            {item.punch_in_face_match_score !== undefined && item.punch_in_face_match_score !== null && (
+                              <div style={{ fontSize: 11, color: '#16A34A', fontWeight: 600, marginTop: 3 }}>
+                                🛡️ Biometric Face Match: {item.punch_in_face_match_score}%
+                              </div>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Punch Out Details (if recorded) */}
+                        {item.punch_out_at && (
+                          <div
+                            style={{
+                              padding: '12px 14px',
+                              borderRadius: 10,
+                              backgroundColor: '#F8FAFC',
+                              border: '1px solid #E2E8F0',
+                              display: 'flex',
+                              gap: 12,
+                            }}
+                          >
+                            {item.punch_out_selfie_url && (
+                              <img
+                                src={item.punch_out_selfie_url}
+                                alt="Punch Out Selfie"
+                                style={{
+                                  width: 56,
+                                  height: 56,
+                                  borderRadius: 8,
+                                  objectFit: 'cover',
+                                  border: '2px solid #CBD5E1',
+                                  flexShrink: 0,
+                                }}
+                              />
+                            )}
+                            <div style={{ flex: 1, minWidth: 0 }}>
+                              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6 }}>
+                                <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-primary)' }}>
+                                  Punch Out ({new Date(item.punch_out_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })})
+                                </span>
+                                <span
+                                  style={{
+                                    fontSize: 10,
+                                    fontWeight: 700,
+                                    padding: '1px 6px',
+                                    borderRadius: 4,
+                                    backgroundColor:
+                                      item.punch_out_status === 'FLAGGED'
+                                        ? '#FEE2E2'
+                                        : item.punch_out_status === 'APPROVED'
+                                        ? '#DCFCE7'
+                                        : '#FEF3C7',
+                                    color:
+                                      item.punch_out_status === 'FLAGGED'
+                                        ? '#DC2626'
+                                        : item.punch_out_status === 'APPROVED'
+                                        ? '#15803D'
+                                        : '#B45309',
+                                  }}
+                                >
+                                  {item.punch_out_status || 'PENDING'}
+                                </span>
+                              </div>
+
+                              <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 3 }}>
+                                📍 <strong>{formatDistance(outDistance)}</strong> from HQ • Worked:{' '}
+                                <strong>{Math.floor(item.total_working_minutes / 60)}h {item.total_working_minutes % 60}m</strong>
+                              </div>
+
+                              {item.punch_out_reason && (
+                                <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 2 }}>
+                                  Reason: <strong>{item.punch_out_reason}</strong>
+                                </div>
+                              )}
+
+                              {item.punch_out_face_match_score !== undefined && item.punch_out_face_match_score !== null && (
+                                <div style={{ fontSize: 11, color: '#16A34A', fontWeight: 600, marginTop: 3 }}>
+                                  🛡️ Biometric Face Match: {item.punch_out_face_match_score}%
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Review Notes & Actions */}
+                      <div
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          flexWrap: 'wrap',
+                          gap: 10,
+                          paddingTop: 4,
+                        }}
+                      >
+                        <div>
+                          {item.review_notes ? (
+                            <div style={{ fontSize: 12, color: '#475569' }}>
+                              📝 <strong>Review Note:</strong> &ldquo;{item.review_notes}&rdquo;{' '}
+                              {item.reviewed_at && (
+                                <span style={{ color: '#94A3B8' }}>
+                                  ({new Date(item.reviewed_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })})
+                                </span>
+                              )}
+                            </div>
+                          ) : (
+                            <div style={{ fontSize: 12, color: '#94A3B8', fontStyle: 'italic' }}>
+                              No review notes recorded yet.
+                            </div>
+                          )}
+                        </div>
+
+                        <div style={{ display: 'flex', gap: 8 }}>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setSelectedException(item)
+                              setSelectedExceptionType('IN')
+                              setExceptionModalOpen(true)
+                            }}
+                            className="btn btn-outline"
+                            style={{
+                              padding: '6px 14px',
+                              fontSize: 12,
+                              fontWeight: 600,
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: 6,
+                            }}
+                          >
+                            Inspect Punch In Proof <ChevronRight size={13} />
+                          </button>
+
+                          {item.punch_out_at && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setSelectedException(item)
+                                setSelectedExceptionType('OUT')
+                                setExceptionModalOpen(true)
+                              }}
+                              className="btn btn-outline"
+                              style={{
+                                padding: '6px 14px',
+                                fontSize: 12,
+                                fontWeight: 600,
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: 6,
+                              }}
+                            >
+                              Inspect Punch Out Proof <ChevronRight size={13} />
+                            </button>
+                          )}
+                        </div>
+                      </div>
                     </div>
                   )
                 })}
+
+                {/* Pagination for Exceptions */}
+                <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+                  <Pagination
+                    currentPage={exceptionsPage}
+                    totalItems={filteredExceptions.length}
+                    pageSize={exceptionsPageSize}
+                    onPageChange={setExceptionsPage}
+                    onPageSizeChange={setExceptionsPageSize}
+                    pageSizeOptions={[10, 25, 50]}
+                    itemLabel="remote / flagged punches"
+                  />
+                </div>
               </div>
             )}
           </div>
@@ -1540,7 +2312,7 @@ export default function AttendanceClient({ profile }: AttendanceClientProps) {
                         </td>
                       </tr>
                     ) : (
-                      allLeaveRequests.map((req) => (
+                      paginatedLeaves.map((req) => (
                         <tr key={req.id}>
                           <td style={{ padding: '12px 14px', fontWeight: 600, color: 'var(--text-primary)' }}>
                             {req.employee_name || 'Staff Member'}
@@ -1620,6 +2392,16 @@ export default function AttendanceClient({ profile }: AttendanceClientProps) {
                   </tbody>
                 </table>
               </div>
+
+              <Pagination
+                currentPage={leavesPage}
+                totalItems={allLeaveRequests.length}
+                pageSize={leavesPageSize}
+                onPageChange={setLeavesPage}
+                onPageSizeChange={setLeavesPageSize}
+                pageSizeOptions={[10, 25, 50]}
+                itemLabel="leave requests"
+              />
             </div>
           </div>
         )}
@@ -1629,6 +2411,126 @@ export default function AttendanceClient({ profile }: AttendanceClientProps) {
         {/* ======================================================= */}
         {activeTab === 'MY_LOGS' && (
           <div>
+            {/* Personal Work Hours & Punctuality Summary Cards */}
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+                gap: '12px',
+                marginBottom: '18px',
+              }}
+            >
+              {/* Worked Hours */}
+              <div
+                className="card"
+                style={{
+                  padding: '16px',
+                  backgroundColor: '#FFFFFF',
+                  borderRadius: '12px',
+                  border: '1px solid #E2E8F0',
+                  boxShadow: 'var(--shadow-sm)',
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <span style={{ fontSize: '12px', fontWeight: 600, color: '#64748B' }}>Total Worked Hours</span>
+                  <Clock size={16} color="#2563EB" />
+                </div>
+                <div style={{ fontSize: '24px', fontWeight: 800, color: '#0F172A', marginTop: '6px' }}>
+                  {myMonthlyStats.totalWorkedHours} hrs
+                </div>
+                <div style={{ fontSize: '11.5px', color: '#16A34A', marginTop: '3px', fontWeight: 600 }}>
+                  🟢 Actual logged time on shift
+                </div>
+              </div>
+
+              {/* Late Arrivals */}
+              <div
+                className="card"
+                style={{
+                  padding: '16px',
+                  backgroundColor: '#FFFFFF',
+                  borderRadius: '12px',
+                  border: '1px solid #E2E8F0',
+                  boxShadow: 'var(--shadow-sm)',
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <span style={{ fontSize: '12px', fontWeight: 600, color: '#64748B' }}>Late Arrivals</span>
+                  <AlertTriangle size={16} color={myMonthlyStats.lateDaysCount > 0 ? '#D97706' : '#16A34A'} />
+                </div>
+                <div
+                  style={{
+                    fontSize: '24px',
+                    fontWeight: 800,
+                    color: myMonthlyStats.lateDaysCount > 0 ? '#D97706' : '#15803D',
+                    marginTop: '6px',
+                  }}
+                >
+                  {myMonthlyStats.lateDaysCount} {myMonthlyStats.lateDaysCount === 1 ? 'Day' : 'Days'} Late
+                </div>
+                <div style={{ fontSize: '11.5px', color: '#64748B', marginTop: '3px' }}>
+                  {myMonthlyStats.totalLateMinutes > 0
+                    ? `${myMonthlyStats.totalLateMinutes}m total past ${workPolicy.shift_start_time || '09:00'} (+${myMonthlyStats.graceMinutes}m grace)`
+                    : '✓ Perfect on-time record'}
+                </div>
+              </div>
+
+              {/* Non-Working Deficit Hours */}
+              <div
+                className="card"
+                style={{
+                  padding: '16px',
+                  backgroundColor: '#FFFFFF',
+                  borderRadius: '12px',
+                  border: '1px solid #E2E8F0',
+                  boxShadow: 'var(--shadow-sm)',
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <span style={{ fontSize: '12px', fontWeight: 600, color: '#64748B' }}>Not In Office (Deficit)</span>
+                  <TrendingDown size={16} color={Number(myMonthlyStats.deficitHours) > 0 ? '#DC2626' : '#16A34A'} />
+                </div>
+                <div
+                  style={{
+                    fontSize: '24px',
+                    fontWeight: 800,
+                    color: Number(myMonthlyStats.deficitHours) > 0 ? '#DC2626' : '#15803D',
+                    marginTop: '6px',
+                  }}
+                >
+                  {Number(myMonthlyStats.deficitHours) > 0 ? `-${myMonthlyStats.deficitHours} hrs` : '0.0 hrs'}
+                </div>
+                <div style={{ fontSize: '11.5px', color: '#64748B', marginTop: '3px' }}>
+                  {Number(myMonthlyStats.deficitHours) > 0
+                    ? `Short hours vs ${workPolicy.daily_expected_hours || 8}h/day standard`
+                    : `✓ Met expected ${workPolicy.daily_expected_hours || 8}h/day`}
+                </div>
+              </div>
+
+              {/* Approved Leaves */}
+              <div
+                className="card"
+                style={{
+                  padding: '16px',
+                  backgroundColor: '#FFFFFF',
+                  borderRadius: '12px',
+                  border: '1px solid #E2E8F0',
+                  boxShadow: 'var(--shadow-sm)',
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <span style={{ fontSize: '12px', fontWeight: 600, color: '#64748B' }}>Approved Leaves</span>
+                  <Calendar size={16} color="#0284C7" />
+                </div>
+                <div style={{ fontSize: '24px', fontWeight: 800, color: '#0284C7', marginTop: '6px' }}>
+                  {myMonthlyStats.approvedLeaveDays} Days
+                </div>
+                <div style={{ fontSize: '11.5px', color: '#64748B', marginTop: '3px' }}>
+                  {myMonthlyStats.approvedLeaveHours} hrs approved time off
+                </div>
+              </div>
+            </div>
+
             <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
               <div
                 style={{
@@ -1645,7 +2547,7 @@ export default function AttendanceClient({ profile }: AttendanceClientProps) {
                     My Monthly Attendance Register ({myHistory.length} Days)
                   </h3>
                   <p style={{ fontSize: 12, color: 'var(--text-secondary)', margin: '2px 0 0 0' }}>
-                    Past 60 days login history and work hours
+                    Past 60 days login history, shift adherence, and working hours
                   </p>
                 </div>
 
@@ -1665,7 +2567,7 @@ export default function AttendanceClient({ profile }: AttendanceClientProps) {
               </div>
 
               <div className="table-responsive-wrapper" style={{ overflowX: 'auto', width: '100%' }}>
-                <table className="table" style={{ width: '100%', minWidth: '700px', fontSize: '13px' }}>
+                <table className="table" style={{ width: '100%', minWidth: '820px', fontSize: '13px' }}>
                   <thead>
                     <tr>
                       <th style={{ padding: '10px 14px', color: 'var(--text-secondary)', fontSize: 11, textTransform: 'uppercase' }}>
@@ -1675,10 +2577,16 @@ export default function AttendanceClient({ profile }: AttendanceClientProps) {
                         Punch In (Login)
                       </th>
                       <th style={{ padding: '10px 14px', color: 'var(--text-secondary)', fontSize: 11, textTransform: 'uppercase' }}>
+                        Punctuality
+                      </th>
+                      <th style={{ padding: '10px 14px', color: 'var(--text-secondary)', fontSize: 11, textTransform: 'uppercase' }}>
                         Punch Out (Logout)
                       </th>
                       <th style={{ padding: '10px 14px', color: 'var(--text-secondary)', fontSize: 11, textTransform: 'uppercase' }}>
                         Total Duration
+                      </th>
+                      <th style={{ padding: '10px 14px', color: 'var(--text-secondary)', fontSize: 11, textTransform: 'uppercase' }}>
+                        Shift Deficit / Balance
                       </th>
                       <th style={{ padding: '10px 14px', color: 'var(--text-secondary)', fontSize: 11, textTransform: 'uppercase', textAlign: 'right' }}>
                         Verification Location
@@ -1688,12 +2596,12 @@ export default function AttendanceClient({ profile }: AttendanceClientProps) {
                   <tbody>
                     {myHistory.length === 0 ? (
                       <tr>
-                        <td colSpan={5} style={{ textAlign: 'center', padding: '40px 0', color: 'var(--text-secondary)' }}>
-                          No punches logged yet. Clock in today using the green button above!
+                        <td colSpan={7} style={{ textAlign: 'center', padding: '40px 0', color: 'var(--text-secondary)' }}>
+                          No punches logged yet. Clock in today using the button above!
                         </td>
                       </tr>
                     ) : (
-                      myHistory.map((item) => {
+                      paginatedMyHistory.map((item) => {
                         const inTime = item.punch_in_at
                           ? new Date(item.punch_in_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
                           : '--:--'
@@ -1703,6 +2611,64 @@ export default function AttendanceClient({ profile }: AttendanceClientProps) {
                         const hrs = (item.total_working_minutes / 60).toFixed(1)
                         const isHq = item.punch_in_status === 'APPROVED'
 
+                        // Punctuality check
+                        let punctualityBadge = <span style={{ color: '#94A3B8' }}>--</span>
+                        if (item.punch_in_at) {
+                          const inDate = new Date(item.punch_in_at)
+                          const inMin = inDate.getHours() * 60 + inDate.getMinutes()
+                          const isLate = inMin > myMonthlyStats.shiftStartCutoffMinutes
+                          const lateMins = isLate ? inMin - (myMonthlyStats.shiftHour * 60 + myMonthlyStats.shiftMinute) : 0
+
+                          punctualityBadge = isLate ? (
+                            <span
+                              style={{
+                                padding: '2px 8px',
+                                borderRadius: 4,
+                                fontSize: 11,
+                                fontWeight: 700,
+                                backgroundColor: '#FEF3C7',
+                                color: '#B45309',
+                              }}
+                            >
+                              🟡 Late (+{lateMins}m)
+                            </span>
+                          ) : (
+                            <span
+                              style={{
+                                padding: '2px 8px',
+                                borderRadius: 4,
+                                fontSize: 11,
+                                fontWeight: 700,
+                                backgroundColor: '#DCFCE7',
+                                color: '#15803D',
+                              }}
+                            >
+                              🟢 On-Time
+                            </span>
+                          )
+                        }
+
+                        // Shift Balance
+                        let shiftBalance = <span style={{ color: '#94A3B8' }}>--</span>
+                        if (item.punch_out_at) {
+                          const diff = item.total_working_minutes - myMonthlyStats.expectedMinutesPerDay
+                          shiftBalance = diff < 0 ? (
+                            <span style={{ fontSize: 12, fontWeight: 700, color: '#DC2626' }}>
+                              -{(Math.abs(diff) / 60).toFixed(1)}h Deficit
+                            </span>
+                          ) : (
+                            <span style={{ fontSize: 12, fontWeight: 700, color: '#16A34A' }}>
+                              +{(diff / 60).toFixed(1)}h Met Shift
+                            </span>
+                          )
+                        } else if (item.punch_in_at) {
+                          shiftBalance = (
+                            <span style={{ fontSize: 12, fontWeight: 700, color: '#2563EB' }}>
+                              🟢 Active Shift
+                            </span>
+                          )
+                        }
+
                         return (
                           <tr key={item.id}>
                             <td style={{ padding: '12px 14px', fontWeight: 600, color: 'var(--text-primary)' }}>
@@ -1711,11 +2677,17 @@ export default function AttendanceClient({ profile }: AttendanceClientProps) {
                             <td style={{ padding: '12px 14px', color: inTime !== '--:--' ? 'var(--text-primary)' : 'var(--text-tertiary)', fontWeight: inTime !== '--:--' ? 600 : 400 }}>
                               {inTime}
                             </td>
+                            <td style={{ padding: '12px 14px' }}>
+                              {punctualityBadge}
+                            </td>
                             <td style={{ padding: '12px 14px', color: outTime !== '--:--' ? 'var(--text-primary)' : 'var(--text-tertiary)', fontWeight: outTime !== '--:--' ? 600 : 400 }}>
                               {outTime}
                             </td>
                             <td style={{ padding: '12px 14px', fontWeight: 700, color: '#0284C7' }}>
                               {hrs} hrs ({item.total_working_minutes}m)
+                            </td>
+                            <td style={{ padding: '12px 14px' }}>
+                              {shiftBalance}
                             </td>
                             <td style={{ padding: '12px 14px', textAlign: 'right' }}>
                               <span
@@ -1738,6 +2710,281 @@ export default function AttendanceClient({ profile }: AttendanceClientProps) {
                   </tbody>
                 </table>
               </div>
+
+              <Pagination
+                currentPage={myHistoryPage}
+                totalItems={myHistory.length}
+                pageSize={myHistoryPageSize}
+                onPageChange={setMyHistoryPage}
+                onPageSizeChange={setMyHistoryPageSize}
+                pageSizeOptions={[10, 25, 50]}
+                itemLabel="punches logged"
+              />
+            </div>
+          </div>
+        )}
+
+        {/* ======================================================= */}
+        {/* TAB 6: MY LEAVE REQUESTS & BALANCE (FOR EMPLOYEES & ALL) */}
+        {/* ======================================================= */}
+        {activeTab === 'MY_LEAVES' && (
+          <div>
+            {/* Quota Cards */}
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))',
+                gap: '12px',
+                marginBottom: '18px',
+              }}
+            >
+              {/* Annual Paid Leave */}
+              <div
+                className="card"
+                style={{
+                  padding: '16px',
+                  backgroundColor: '#FFFFFF',
+                  borderRadius: '12px',
+                  border: '1px solid #E2E8F0',
+                  boxShadow: 'var(--shadow-sm)',
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <span style={{ fontSize: '12px', fontWeight: 600, color: '#0369A1' }}>Annual Paid Leave</span>
+                  <Calendar size={16} color="#0284C7" />
+                </div>
+                <div style={{ fontSize: '24px', fontWeight: 800, color: '#0284C7', marginTop: '6px' }}>
+                  {remainingAnnualLeave} / {leaveBalances.annual_leave_total} Days
+                </div>
+                <div style={{ fontSize: '11.5px', color: '#64748B', marginTop: '3px' }}>
+                  {leaveBalances.annual_leave_used} days taken this year
+                </div>
+              </div>
+
+              {/* Sick Leave */}
+              <div
+                className="card"
+                style={{
+                  padding: '16px',
+                  backgroundColor: '#FFFFFF',
+                  borderRadius: '12px',
+                  border: '1px solid #E2E8F0',
+                  boxShadow: 'var(--shadow-sm)',
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <span style={{ fontSize: '12px', fontWeight: 600, color: '#047857' }}>Sick Leave</span>
+                  <Award size={16} color="#059669" />
+                </div>
+                <div style={{ fontSize: '24px', fontWeight: 800, color: '#059669', marginTop: '6px' }}>
+                  {leaveBalances.sick_leave_total - leaveBalances.sick_leave_used} / {leaveBalances.sick_leave_total} Days
+                </div>
+                <div style={{ fontSize: '11.5px', color: '#64748B', marginTop: '3px' }}>
+                  {leaveBalances.sick_leave_used} days claimed
+                </div>
+              </div>
+
+              {/* Emergency Leave */}
+              <div
+                className="card"
+                style={{
+                  padding: '16px',
+                  backgroundColor: '#FFFFFF',
+                  borderRadius: '12px',
+                  border: '1px solid #E2E8F0',
+                  boxShadow: 'var(--shadow-sm)',
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <span style={{ fontSize: '12px', fontWeight: 600, color: '#B45309' }}>Emergency Leave</span>
+                  <AlertTriangle size={16} color="#D97706" />
+                </div>
+                <div style={{ fontSize: '24px', fontWeight: 800, color: '#D97706', marginTop: '6px' }}>
+                  {leaveBalances.emergency_leave_used} Days
+                </div>
+                <div style={{ fontSize: '11.5px', color: '#64748B', marginTop: '3px' }}>
+                  Emergency excused days used
+                </div>
+              </div>
+
+              {/* Unpaid Leave */}
+              <div
+                className="card"
+                style={{
+                  padding: '16px',
+                  backgroundColor: '#FFFFFF',
+                  borderRadius: '12px',
+                  border: '1px solid #E2E8F0',
+                  boxShadow: 'var(--shadow-sm)',
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <span style={{ fontSize: '12px', fontWeight: 600, color: '#475569' }}>Unpaid Leave</span>
+                  <Clock size={16} color="#64748B" />
+                </div>
+                <div style={{ fontSize: '24px', fontWeight: 800, color: '#475569', marginTop: '6px' }}>
+                  {leaveBalances.unpaid_leave_used} Days
+                </div>
+                <div style={{ fontSize: '11.5px', color: '#64748B', marginTop: '3px' }}>
+                  Unpaid absence days logged
+                </div>
+              </div>
+            </div>
+
+            {/* My Leave Applications & Approval History */}
+            <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+              <div
+                style={{
+                  padding: '16px 20px',
+                  borderBottom: '1px solid var(--border)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  backgroundColor: '#FFFFFF',
+                }}
+              >
+                <div>
+                  <h3 style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-primary)', margin: 0 }}>
+                    My Leave Applications &amp; History ({myLeaveRequests.length})
+                  </h3>
+                  <p style={{ fontSize: 12, color: 'var(--text-secondary)', margin: '2px 0 0 0' }}>
+                    Track all requested, approved, and pending time-off applications
+                  </p>
+                </div>
+
+                <button
+                  onClick={() => setLeaveModalOpen(true)}
+                  className="btn btn-primary btn-sm"
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 6,
+                    fontWeight: 700,
+                  }}
+                >
+                  <Plus size={15} /> Request Leave
+                </button>
+              </div>
+
+              <div className="table-responsive-wrapper" style={{ overflowX: 'auto', width: '100%' }}>
+                <table className="table" style={{ width: '100%', minWidth: '760px', fontSize: '13px' }}>
+                  <thead>
+                    <tr>
+                      <th style={{ padding: '10px 14px', color: 'var(--text-secondary)', fontSize: 11, textTransform: 'uppercase' }}>
+                        Leave Type
+                      </th>
+                      <th style={{ padding: '10px 14px', color: 'var(--text-secondary)', fontSize: 11, textTransform: 'uppercase' }}>
+                        Date Range &amp; Duration
+                      </th>
+                      <th style={{ padding: '10px 14px', color: 'var(--text-secondary)', fontSize: 11, textTransform: 'uppercase' }}>
+                        Reason / Purpose
+                      </th>
+                      <th style={{ padding: '10px 14px', color: 'var(--text-secondary)', fontSize: 11, textTransform: 'uppercase' }}>
+                        Requested On
+                      </th>
+                      <th style={{ padding: '10px 14px', color: 'var(--text-secondary)', fontSize: 11, textTransform: 'uppercase' }}>
+                        Approval Status
+                      </th>
+                      <th style={{ padding: '10px 14px', color: 'var(--text-secondary)', fontSize: 11, textTransform: 'uppercase', textAlign: 'right' }}>
+                        Management Feedback
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {myLeaveRequests.length === 0 ? (
+                      <tr>
+                        <td colSpan={6} style={{ textAlign: 'center', padding: '40px 0', color: 'var(--text-secondary)' }}>
+                          <Calendar size={32} style={{ color: '#94A3B8', margin: '0 auto 8px', display: 'block' }} />
+                          You have not submitted any leave applications yet.
+                          <div style={{ marginTop: '8px' }}>
+                            <button
+                              onClick={() => setLeaveModalOpen(true)}
+                              className="btn btn-outline btn-sm"
+                              style={{ fontSize: '12px' }}
+                            >
+                              Apply for Annual or Sick Leave
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ) : (
+                      paginatedMyLeaves.map((req) => (
+                        <tr key={req.id}>
+                          <td style={{ padding: '12px 14px' }}>
+                            <span
+                              style={{
+                                fontSize: 11,
+                                fontWeight: 700,
+                                padding: '3px 8px',
+                                borderRadius: 4,
+                                backgroundColor:
+                                  req.leave_type === 'ANNUAL'
+                                    ? '#E0F2FE'
+                                    : req.leave_type === 'SICK'
+                                    ? '#ECFDF5'
+                                    : req.leave_type === 'EMERGENCY'
+                                    ? '#FEF3C7'
+                                    : '#F1F5F9',
+                                color:
+                                  req.leave_type === 'ANNUAL'
+                                    ? '#0369A1'
+                                    : req.leave_type === 'SICK'
+                                    ? '#047857'
+                                    : req.leave_type === 'EMERGENCY'
+                                    ? '#B45309'
+                                    : '#475569',
+                              }}
+                            >
+                              {req.leave_type} LEAVE
+                            </span>
+                          </td>
+                          <td style={{ padding: '12px 14px', fontWeight: 600, color: 'var(--text-primary)' }}>
+                            {req.start_date} to {req.end_date} (<strong>{req.total_days} {req.total_days === 1 ? 'day' : 'days'}</strong>)
+                          </td>
+                          <td style={{ padding: '12px 14px', color: 'var(--text-secondary)', maxWidth: 220 }}>
+                            {req.reason || '-'}
+                          </td>
+                          <td style={{ padding: '12px 14px', color: 'var(--text-tertiary)', fontSize: 12 }}>
+                            {new Date(req.created_at).toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' })}
+                          </td>
+                          <td style={{ padding: '12px 14px' }}>
+                            <span
+                              style={{
+                                fontSize: 11,
+                                fontWeight: 700,
+                                padding: '3px 8px',
+                                borderRadius: 4,
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: 4,
+                                backgroundColor:
+                                  req.status === 'APPROVED' ? '#DCFCE7' : req.status === 'REJECTED' ? '#FEE2E2' : '#FEF3C7',
+                                color:
+                                  req.status === 'APPROVED' ? '#15803D' : req.status === 'REJECTED' ? '#B91C1C' : '#B45309',
+                              }}
+                            >
+                              {req.status === 'APPROVED' ? '🟢 APPROVED' : req.status === 'REJECTED' ? '🔴 REJECTED' : '🟡 PENDING APPROVAL'}
+                            </span>
+                          </td>
+                          <td style={{ padding: '12px 14px', textAlign: 'right', fontSize: 12, color: 'var(--text-secondary)' }}>
+                            {req.admin_notes || (req.status === 'APPROVED' ? 'Approved by Admin' : req.status === 'PENDING' ? 'Awaiting Review' : '-')}
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+
+              <Pagination
+                currentPage={myLeavesPage}
+                totalItems={myLeaveRequests.length}
+                pageSize={myLeavesPageSize}
+                onPageChange={setMyLeavesPage}
+                onPageSizeChange={setMyLeavesPageSize}
+                pageSizeOptions={[10, 25, 50]}
+                itemLabel="leave requests"
+              />
             </div>
           </div>
         )}
@@ -1804,6 +3051,59 @@ export default function AttendanceClient({ profile }: AttendanceClientProps) {
         employee={selectedEmployeeForDetail}
         adminId={userId}
       />
+
+      {/* Biometric Face ID Management Hub Modal */}
+      <BiometricManagementModal
+        isOpen={biometricHubOpen}
+        userId={userId}
+        userName={profile?.name || 'Employee'}
+        hasFaceId={hasFaceId}
+        enrolledAt={faceEnrolledAt}
+        snapshotUrl={faceSnapshotUrl}
+        onClose={() => setBiometricHubOpen(false)}
+        onOpenTest={() => {
+          setBiometricHubOpen(false)
+          setTestScannerOpen(true)
+        }}
+        onOpenEnrollment={() => {
+          setBiometricHubOpen(false)
+          setFaceEnrollModalOpen(true)
+        }}
+        onFaceIdReset={() => {
+          setHasFaceId(false)
+          setFaceEnrolledAt(null)
+          setFaceSnapshotUrl(null)
+          loadInitialData()
+        }}
+      />
+
+      {/* Dedicated Live Test Biometric Scanner Modal */}
+      <TestBiometricModal
+        isOpen={testScannerOpen}
+        userId={userId}
+        userName={profile?.name || 'Employee'}
+        onClose={() => setTestScannerOpen(false)}
+        onOpenEnrollment={() => {
+          setTestScannerOpen(false)
+          setFaceEnrollModalOpen(true)
+        }}
+      />
+
+      {/* Biometric Face ID Enrollment Modal */}
+      {faceEnrollModalOpen && (
+        <FaceEnrollmentModal
+          isOpen={faceEnrollModalOpen}
+          userId={userId}
+          userName={profile?.name || 'Employee'}
+          isReEnrollment={hasFaceId}
+          onClose={() => setFaceEnrollModalOpen(false)}
+          onSuccess={() => {
+            setHasFaceId(true)
+            setFaceEnrollModalOpen(false)
+            loadInitialData()
+          }}
+        />
+      )}
     </div>
   )
 }

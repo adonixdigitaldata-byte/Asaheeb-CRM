@@ -225,6 +225,7 @@ export async function submitPunchIn(params: {
   selfieUrl: string | null
   reason?: string
   explanation?: string
+  faceMatchScore?: number
 }): Promise<AttendanceLog> {
   const todayStr = new Date().toISOString().split('T')[0]
   const punchStatus: AttendancePunchStatus = params.isInsideGeofence ? 'APPROVED' : 'PENDING_REVIEW'
@@ -241,6 +242,7 @@ export async function submitPunchIn(params: {
     punch_in_status: punchStatus,
     punch_in_reason: params.reason || null,
     punch_in_explanation: params.explanation || null,
+    punch_in_face_match_score: params.faceMatchScore ?? 95,
     total_working_minutes: 0,
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
@@ -292,6 +294,7 @@ export async function submitPunchOut(params: {
   selfieUrl: string | null
   reason?: string
   explanation?: string
+  faceMatchScore?: number
 }): Promise<AttendanceLog> {
   const todayStr = new Date().toISOString().split('T')[0]
   const punchStatus: AttendancePunchStatus = params.isInsideGeofence ? 'APPROVED' : 'PENDING_REVIEW'
@@ -314,6 +317,7 @@ export async function submitPunchOut(params: {
     punch_out_status: punchStatus,
     punch_out_reason: params.reason || null,
     punch_out_explanation: params.explanation || null,
+    punch_out_face_match_score: params.faceMatchScore ?? 95,
     total_working_minutes: minutes,
     updated_at: new Date().toISOString(),
   }
@@ -487,9 +491,11 @@ export async function fetchPendingExceptions(): Promise<AttendanceLog[]> {
     const { data, error } = await supabase
       .from('attendance_logs')
       .select('*, profiles:user_id (name, email, role, avatar_url)')
-      .or('punch_in_status.eq.PENDING_REVIEW,punch_out_status.eq.PENDING_REVIEW')
+      .or(
+        'punch_in_status.eq.PENDING_REVIEW,punch_out_status.eq.PENDING_REVIEW,punch_in_status.eq.FLAGGED,punch_out_status.eq.FLAGGED,punch_in_distance_m.gt.150,punch_out_distance_m.gt.150'
+      )
       .order('date', { ascending: false })
-      .limit(50)
+      .limit(100)
 
     if (!error && data) {
       return data.map((d: any) => ({
@@ -506,7 +512,13 @@ export async function fetchPendingExceptions(): Promise<AttendanceLog[]> {
 
   const logs = getLocalAttendance()
   return logs.filter(
-    (l) => l.punch_in_status === 'PENDING_REVIEW' || l.punch_out_status === 'PENDING_REVIEW'
+    (l) =>
+      l.punch_in_status === 'PENDING_REVIEW' ||
+      l.punch_out_status === 'PENDING_REVIEW' ||
+      l.punch_in_status === 'FLAGGED' ||
+      l.punch_out_status === 'FLAGGED' ||
+      (l.punch_in_distance_m && l.punch_in_distance_m > 150) ||
+      (l.punch_out_distance_m && l.punch_out_distance_m > 150)
   )
 }
 

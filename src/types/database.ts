@@ -30,6 +30,9 @@ export interface Profile {
   payroll_pin?: string | null
   iqama_no?: string | null
   iqama_expiry_date?: string | null
+  face_descriptor?: number[] | null
+  face_enrolled_at?: string | null
+  face_enrollment_snapshot_url?: string | null
 }
 
 export interface LeadStage {
