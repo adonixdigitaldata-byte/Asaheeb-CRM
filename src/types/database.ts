@@ -573,3 +573,23 @@ export interface EmployeeCustomRecord {
   created_at: string
   updated_at: string
 }
+
+export interface MarketingPopup {
+  id: string
+  is_active: boolean
+  title_en: string
+  title_ar: string
+  subtitle_en?: string | null
+  subtitle_ar?: string | null
+  badge_en?: string | null
+  badge_ar?: string | null
+  image_url: string
+  target_url: string
+  cta_text_en?: string | null
+  cta_text_ar?: string | null
+  auto_dismiss_seconds?: number | null
+  sort_order: number
+  frequency: 'ONCE_PER_SESSION' | 'ONCE_PER_DAY' | 'ALWAYS' | string
+  created_at: string
+  updated_at: string
+}

@@ -5,11 +5,11 @@ import { useRouter } from 'next/navigation'
 import {
   Users,
   Trophy,
-  DollarSign,
   Clock,
   Plus,
   ArrowRight,
 } from 'lucide-react'
+import { SaudiRiyalIcon } from '@/components/SaudiRiyalIcon'
 import type { LeadStage, Profile } from '@/types/database'
 import { formatCurrency, formatTimeAgo, formatDate } from '@/lib/utils'
 
@@ -125,7 +125,7 @@ export default function DashboardClient({
             <div className="flex items-center justify-between" style={{ marginBottom: 8 }}>
               <span style={{ fontSize: 12, color: '#64748B', fontWeight: 600 }}>Conversion Rate</span>
               <span style={{ padding: 6, borderRadius: 6, background: '#FEF3C7', color: '#D97706' }}>
-                <DollarSign size={16} />
+                <SaudiRiyalIcon size={16} />
               </span>
             </div>
             <div style={{ fontSize: 24, fontWeight: 800, color: '#D97706' }}>

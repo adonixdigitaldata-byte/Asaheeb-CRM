@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import {
   X,
@@ -43,6 +43,7 @@ export default function EmployeeAttendanceDetailModal({
   const [leaveRequests, setLeaveRequests] = useState<LeaveRequest[]>([])
   const [loading, setLoading] = useState(true)
   const [selectedSelfie, setSelectedSelfie] = useState<{ url: string; title: string } | null>(null)
+  const scrollContainerRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     if (isOpen && employee) {
@@ -67,6 +68,28 @@ export default function EmployeeAttendanceDetailModal({
       setLoading(false)
     }
   }
+
+  // Lock background window / body scroll when modal is open
+  useEffect(() => {
+    if (isOpen) {
+      const origHtmlOverflow = document.documentElement.style.overflow
+      const origBodyOverflow = document.body.style.overflow
+      const origHtmlOverscroll = document.documentElement.style.overscrollBehavior
+      const origBodyOverscroll = document.body.style.overscrollBehavior
+
+      document.documentElement.style.overflow = 'hidden'
+      document.body.style.overflow = 'hidden'
+      document.documentElement.style.overscrollBehavior = 'none'
+      document.body.style.overscrollBehavior = 'none'
+
+      return () => {
+        document.documentElement.style.overflow = origHtmlOverflow
+        document.body.style.overflow = origBodyOverflow
+        document.documentElement.style.overscrollBehavior = origHtmlOverscroll
+        document.body.style.overscrollBehavior = origBodyOverscroll
+      }
+    }
+  }, [isOpen])
 
   // Listen for Escape key to close selfie lightbox
   useEffect(() => {
@@ -119,33 +142,68 @@ export default function EmployeeAttendanceDetailModal({
     document.body.removeChild(link)
   }
 
-  return (
-    <div className="modal-overlay" onClick={onClose} style={{ zIndex: 9999 }}>
+  function handleNonScrollableWheel(e: React.WheelEvent) {
+    if (scrollContainerRef.current) {
+      scrollContainerRef.current.scrollTop += e.deltaY
+    }
+  }
+
+  const modalContent = (
+    <div
+      className="modal-overlay"
+      onClick={onClose}
+      onWheel={(e) => e.stopPropagation()}
+      style={{
+        position: 'fixed',
+        inset: 0,
+        top: 0,
+        left: 0,
+        right: 0,
+        bottom: 0,
+        width: '100vw',
+        height: '100vh',
+        backgroundColor: 'rgba(15, 23, 42, 0.65)',
+        backdropFilter: 'blur(8px)',
+        WebkitBackdropFilter: 'blur(8px)',
+        zIndex: 99999,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: '20px',
+        boxSizing: 'border-box',
+        overflowY: 'auto',
+        overscrollBehavior: 'contain',
+      }}
+    >
       <div
         className="modal-box"
         style={{
-          maxWidth: '780px',
-          width: '95%',
-          maxHeight: '92vh',
+          maxWidth: '840px',
+          width: '100%',
+          maxHeight: '90vh',
           backgroundColor: '#FFFFFF',
           borderRadius: '16px',
-          boxShadow: '0 20px 40px -15px rgba(0,0,0,0.18)',
+          boxShadow: '0 25px 50px -12px rgba(0,0,0,0.25)',
           border: '1px solid #E2E8F0',
           display: 'flex',
           flexDirection: 'column',
           overflow: 'hidden',
+          zIndex: 100000,
+          position: 'relative',
         }}
         onClick={(e) => e.stopPropagation()}
       >
         {/* Modal Header */}
         <div
+          onWheel={handleNonScrollableWheel}
           style={{
-            padding: '20px 24px',
+            padding: '18px 24px',
             borderBottom: '1px solid #E2E8F0',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'space-between',
             backgroundColor: '#F8FAFC',
+            flexShrink: 0,
           }}
         >
           <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
@@ -226,9 +284,21 @@ export default function EmployeeAttendanceDetailModal({
         </div>
 
         {/* Modal Scrollable Body */}
-        <div style={{ padding: '24px', overflowY: 'auto', flex: 1, display: 'flex', flexDirection: 'column', gap: '20px' }}>
-          {/* Top Quick Stats Grid */}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))', gap: '14px' }}>
+        <div
+          ref={scrollContainerRef}
+          style={{
+            padding: '24px',
+            overflowY: 'auto',
+            maxHeight: 'calc(90vh - 140px)',
+            flex: '1 1 auto',
+            minHeight: 0,
+            overscrollBehavior: 'contain',
+            WebkitOverflowScrolling: 'touch',
+          }}
+        >
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+            {/* Top Quick Stats Grid */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))', gap: '14px' }}>
             {/* Today's Status */}
             <div
               style={{
@@ -713,30 +783,33 @@ export default function EmployeeAttendanceDetailModal({
             </div>
           </div>
         </div>
+      </div>
 
-        {/* Modal Footer */}
-        <div
+      {/* Modal Footer */}
+      <div
+        onWheel={handleNonScrollableWheel}
+        style={{
+          padding: '16px 24px',
+          borderTop: '1px solid #E2E8F0',
+          backgroundColor: '#F8FAFC',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'flex-end',
+          flexShrink: 0,
+        }}
+      >
+        <button
+          onClick={onClose}
+          className="btn btn-primary"
           style={{
-            padding: '16px 24px',
-            borderTop: '1px solid #E2E8F0',
-            backgroundColor: '#F8FAFC',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'flex-end',
+            padding: '8px 20px',
+            fontWeight: 600,
           }}
         >
-          <button
-            onClick={onClose}
-            className="btn btn-primary"
-            style={{
-              padding: '8px 20px',
-              fontWeight: 600,
-            }}
-          >
-            Done
-          </button>
-        </div>
+          Done
+        </button>
       </div>
+    </div>
 
       {/* Selfie Preview Lightbox Modal Mounted via Portal to document.body */}
       {selectedSelfie && typeof document !== 'undefined' && createPortal(
@@ -885,4 +958,10 @@ export default function EmployeeAttendanceDetailModal({
       )}
     </div>
   )
+
+  if (typeof document !== 'undefined') {
+    return createPortal(modalContent, document.body)
+  }
+
+  return modalContent
 }

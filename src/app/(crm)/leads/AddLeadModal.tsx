@@ -1,7 +1,8 @@
 'use client'
 
 import { useState } from 'react'
-import { X, Building, Calendar, Clock, DollarSign, Tag, Search, MapPin, Edit2 } from 'lucide-react'
+import { X, Building, Calendar, Clock, Tag, Search, MapPin, Edit2 } from 'lucide-react'
+import { SaudiRiyalIcon } from '@/components/SaudiRiyalIcon'
 import { CLIENT_CATEGORIES, BUDGET_TIERS, type LeadStage, type Project, type AdCampaign } from '@/types/database'
 import { PREDEFINED_CITIES } from '@/lib/cities'
 import ProjectSearchModal from '@/components/ProjectSearchModal'
@@ -382,7 +383,7 @@ export default function AddLeadModal({
               {/* Budget Tier */}
               <div className="form-group">
                 <label className="form-label flex items-center gap-1">
-                  <DollarSign size={13} style={{ color: '#10B981' }} />
+                  <SaudiRiyalIcon size={13} style={{ color: '#10B981' }} />
                   <span>Budget Tier</span>
                 </label>
                 <select

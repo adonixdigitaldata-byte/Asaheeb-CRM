@@ -9,13 +9,13 @@ import {
   PlusCircle,
   Eye,
   EyeOff,
-  DollarSign,
   Trash2,
   RefreshCw,
   Sparkles,
   ShieldCheck,
   CheckCircle2,
 } from 'lucide-react'
+import { SaudiRiyalIcon } from '@/components/SaudiRiyalIcon'
 import type { CmsActivity } from '@/types/database'
 
 interface Props {
@@ -61,7 +61,7 @@ function getActionMeta(actionType: string) {
       }
     case 'UPDATED_COMMISSION':
       return {
-        icon: DollarSign,
+        icon: SaudiRiyalIcon,
         label: 'Commission Changed',
         bg: '#F0FDF4',
         color: '#16A34A',
@@ -69,7 +69,7 @@ function getActionMeta(actionType: string) {
       }
     case 'COMMISSION_RECORDED':
       return {
-        icon: DollarSign,
+        icon: SaudiRiyalIcon,
         label: 'Unit Sale Recorded',
         bg: '#FAF5FF',
         color: '#7E22CE',

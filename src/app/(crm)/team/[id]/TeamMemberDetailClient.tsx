@@ -6,7 +6,7 @@ import { Profile, Lead, LeadStage, LeadFollowup, LeadActivity, EmployeeSalaryPro
 import { formatCurrencyAmount, getMonthName } from '@/lib/payroll-utils'
 import { formatTimeAgo } from '@/lib/utils'
 import {
-  ArrowLeft, Users, Phone, Mail, Calendar, DollarSign,
+  ArrowLeft, Users, Phone, Mail, Calendar,
   FileText, Clock, CheckCircle2, ChevronRight, ChevronLeft,
   Eye, Printer, Shield, Activity, AlertCircle, History, GitCommit,
   Laptop, Smartphone, CreditCard, Package, FolderArchive

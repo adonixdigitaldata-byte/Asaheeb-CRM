@@ -2,7 +2,8 @@
 
 import { useState, useMemo, useEffect, useRef } from 'react'
 import { createPortal } from 'react-dom'
-import { Search, X, Building, MapPin, DollarSign, Check, Plus, ArrowRight } from 'lucide-react'
+import { Search, X, Building, MapPin, Check, Plus, ArrowRight } from 'lucide-react'
+import { SaudiRiyalIcon } from '@/components/SaudiRiyalIcon'
 import type { Project } from '@/types/database'
 
 interface Props {
@@ -611,7 +612,7 @@ export default function ProjectSearchModal({
                         )}
                         {p.starting_price_en && (
                           <span style={{ display: 'flex', alignItems: 'center', gap: 3, color: '#16A34A', fontWeight: 600 }}>
-                            <DollarSign size={12} />
+                            <SaudiRiyalIcon size={12} />
                             <span>From {p.starting_price_en}</span>
                           </span>
                         )}

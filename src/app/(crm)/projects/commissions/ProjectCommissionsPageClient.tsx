@@ -4,7 +4,6 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react'
 import Link from 'next/link'
 import {
   ArrowLeft,
-  DollarSign,
   Building2,
   Award,
   TrendingUp,
@@ -27,6 +26,7 @@ import {
   CheckCircle2,
   Download
 } from 'lucide-react'
+import { SaudiRiyalIcon } from '@/components/SaudiRiyalIcon'
 import { createClient } from '@/lib/supabase/client'
 import type { Project, Profile, ProjectCommission } from '@/types/database'
 import ProjectCommissionsModal from '../ProjectCommissionsModal'
@@ -306,7 +306,7 @@ export default function ProjectCommissionsPageClient({ profile }: Props) {
                 justifyContent: 'center',
               }}
             >
-              <DollarSign size={20} />
+              <SaudiRiyalIcon size={20} />
             </div>
             <span>Project Commissions Performance Hub</span>
           </h1>
@@ -357,7 +357,7 @@ export default function ProjectCommissionsPageClient({ profile }: Props) {
                 Total Project Commission
               </span>
               <div style={{ width: '32px', height: '32px', borderRadius: '8px', backgroundColor: '#A7F3D0', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#065F46' }}>
-                <DollarSign size={17} />
+                <SaudiRiyalIcon size={17} />
               </div>
             </div>
             <div style={{ fontSize: '24px', fontWeight: 800, color: '#065F46', marginTop: '6px' }}>
@@ -838,7 +838,7 @@ export default function ProjectCommissionsPageClient({ profile }: Props) {
                                     }}
                                     title="Agreed brokerage commission payout rate"
                                   >
-                                    <DollarSign size={11} style={{ color: '#059669' }} />
+                                    <SaudiRiyalIcon size={11} style={{ color: '#059669' }} />
                                     <span>{p.expected_commission_en}</span>
                                   </div>
                                 ) : (
@@ -947,7 +947,7 @@ export default function ProjectCommissionsPageClient({ profile }: Props) {
                                   }}
                                   title="Open and record sales for this project"
                                 >
-                                  <DollarSign size={12} />
+                                  <SaudiRiyalIcon size={12} />
                                   <span>Sales ({item.unitsSold})</span>
                                 </button>
 
@@ -1055,7 +1055,7 @@ export default function ProjectCommissionsPageClient({ profile }: Props) {
                 <div style={{ fontSize: '15px', fontWeight: 700, color: '#0F172A' }}>No sales transactions found</div>
                 <div style={{ fontSize: '12.5px', marginTop: '4px' }}>
                   {commissions.length === 0
-                    ? 'No project unit sales have been recorded yet. Click "$ Sales" on any project in the Leaderboard tab to record a closed deal.'
+                    ? 'No project unit sales have been recorded yet. Click "Sales" on any project in the Leaderboard tab to record a closed deal.'
                     : 'Try adjusting your search query or project filter.'}
                 </div>
               </div>

@@ -6,7 +6,6 @@ import {
   Plus,
   Edit2,
   Trash2,
-  DollarSign,
   Calendar,
   User,
   Building,
@@ -17,6 +16,7 @@ import {
   Save,
   Clock
 } from 'lucide-react'
+import { SaudiRiyalIcon } from '@/components/SaudiRiyalIcon'
 import { createClient } from '@/lib/supabase/client'
 import type { Project, Profile, ProjectCommission } from '@/types/database'
 
@@ -282,7 +282,7 @@ export default function ProjectCommissionsModal({ project, profile, onClose }: P
                 color: '#34D399',
               }}
             >
-              <DollarSign size={22} />
+              <SaudiRiyalIcon size={22} />
             </div>
             <div>
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
@@ -691,7 +691,7 @@ export default function ProjectCommissionsModal({ project, profile, onClose }: P
                 color: '#64748B',
               }}
             >
-              <DollarSign size={36} style={{ color: '#94A3B8', margin: '0 auto 10px' }} />
+              <SaudiRiyalIcon size={36} style={{ color: '#94A3B8', margin: '0 auto 10px' }} />
               <div style={{ fontWeight: 700, fontSize: '14px', color: '#334155' }}>
                 No commission entries recorded yet
               </div>

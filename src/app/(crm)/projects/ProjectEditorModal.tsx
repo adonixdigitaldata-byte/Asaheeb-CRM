@@ -4,7 +4,6 @@ import React, { useState } from 'react'
 import {
   X,
   Building,
-  DollarSign,
   FileText,
   Video,
   FileDown,
@@ -27,6 +26,7 @@ import {
   Calendar,
   Percent,
 } from 'lucide-react'
+import { SaudiRiyalIcon } from '@/components/SaudiRiyalIcon'
 import type { Project, ProjectVideo, Landmark, Amenity, ProjectDiscountOffer } from '@/types/database'
 import ImageGalleryManager from '@/components/ImageGalleryManager'
 import CmsActivityTimeline from '@/components/CmsActivityTimeline'
@@ -517,7 +517,7 @@ export default function ProjectEditorModal({
             className={`btn btn-sm ${activeTab === 'specs' ? 'btn-primary' : 'btn-ghost'}`}
             style={{ fontSize: '12.5px', padding: '5px 12px' }}
           >
-            <DollarSign size={14} />
+            <SaudiRiyalIcon size={14} />
             <span>2. Pricing &amp; Specs</span>
           </button>
 
@@ -816,7 +816,7 @@ export default function ProjectEditorModal({
                   }}
                 >
                   <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
-                    <DollarSign size={16} style={{ color: '#15803D' }} />
+                    <SaudiRiyalIcon size={16} style={{ color: '#15803D' }} />
                     <span style={{ fontWeight: 700, fontSize: '13px', color: '#14532D' }}>
                       Agency &amp; Sales Commission Structure
                     </span>

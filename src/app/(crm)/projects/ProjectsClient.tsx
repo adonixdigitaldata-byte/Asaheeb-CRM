@@ -23,7 +23,6 @@ import {
   CheckCircle,
   Building2,
   Tag,
-  DollarSign,
   FolderOpen,
   Filter,
   X,
@@ -39,6 +38,7 @@ import {
   Flame,
   Clock,
 } from 'lucide-react'
+import { SaudiRiyalIcon } from '@/components/SaudiRiyalIcon'
 import { createClient } from '@/lib/supabase/client'
 import type { Project, Profile, ProjectCommission } from '@/types/database'
 import ProjectEditorModal from './ProjectEditorModal'
@@ -464,7 +464,7 @@ export default function ProjectsClient({ profile }: Props) {
                   Total Project Commission
                 </span>
                 <div style={{ width: '28px', height: '28px', borderRadius: '8px', backgroundColor: '#A7F3D0', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#065F46' }}>
-                  <DollarSign size={15} />
+                  <SaudiRiyalIcon size={15} />
                 </div>
               </div>
               <div style={{ fontSize: '22px', fontWeight: 800, color: '#065F46', marginTop: '6px' }}>
@@ -1097,7 +1097,7 @@ export default function ProjectsClient({ profile }: Props) {
                               }}
                               title="Brokerage commission / payout rate"
                             >
-                              <DollarSign size={12} style={{ color: '#059669', flexShrink: 0 }} />
+                              <SaudiRiyalIcon size={12} style={{ color: '#059669', flexShrink: 0 }} />
                               <span>{project.expected_commission_en}</span>
                             </div>
 
@@ -1248,7 +1248,7 @@ export default function ProjectsClient({ profile }: Props) {
                               }}
                               title="Configure Sold Layouts & Commission"
                             >
-                              <DollarSign size={11} />
+                              <SaudiRiyalIcon size={11} />
                               <span>Sales</span>
                             </button>
                           )}

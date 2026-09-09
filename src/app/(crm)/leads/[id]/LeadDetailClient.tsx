@@ -15,7 +15,6 @@ import {
   Plus,
   Activity,
   Building,
-  DollarSign,
   Send,
   Trash2,
   Edit2,
@@ -28,7 +27,9 @@ import {
   UserCheck,
   User,
   Search,
+  Sparkles,
 } from 'lucide-react'
+import { SaudiRiyalIcon } from '@/components/SaudiRiyalIcon'
 import {
   CLIENT_CATEGORIES,
   BUDGET_TIERS,
@@ -785,7 +786,7 @@ export default function LeadDetailClient({
                 </div>
 
                 <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10, gridColumn: '1 / -1' }}>
-                  <DollarSign size={16} style={{ color: '#10B981', marginTop: 2, flexShrink: 0 }} />
+                  <SaudiRiyalIcon size={16} style={{ color: '#10B981', marginTop: 2, flexShrink: 0 }} />
                   <div style={{ minWidth: 0 }}>
                     <div className="text-label" style={{ fontSize: 11 }}>BUDGET &amp; VALUE</div>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginTop: 2 }}>
@@ -984,7 +985,7 @@ export default function LeadDetailClient({
 
                   {lead.form_data.budget && (
                     <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                      <DollarSign size={16} style={{ color: '#10B981' }} />
+                      <SaudiRiyalIcon size={16} style={{ color: '#10B981' }} />
                       <div>
                         <div className="text-label" style={{ fontSize: 11 }}>BUDGET RANGE</div>
                         <div style={{ color: '#0F172A', fontWeight: 600, fontSize: 13 }}>

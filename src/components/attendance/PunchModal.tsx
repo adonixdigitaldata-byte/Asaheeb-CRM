@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import {
   X,
   MapPin,
@@ -13,6 +13,8 @@ import {
   Navigation,
   ShieldCheck,
   Building,
+  UserCheck,
+  Scan,
 } from 'lucide-react'
 import { CompanyLocation, EXCEPTION_REASONS, ExceptionReason } from '@/types/attendance'
 import {
@@ -22,11 +24,21 @@ import {
   Coordinates,
 } from '@/lib/geoUtils'
 import { submitPunchIn, submitPunchOut, uploadSelfieSnapshot } from '@/lib/attendanceService'
+import {
+  detectFace,
+  matchFaceWithProfile,
+  registerMediaTrack,
+  forceStopAllCameraTracks,
+  FaceDetectionResult,
+  FaceMatchResult,
+} from '@/lib/faceDetection'
 
 interface PunchModalProps {
   isOpen: boolean
   onClose: () => void
   userId: string
+  userName?: string
+  userAvatar?: string | null
   punchType: 'IN' | 'OUT'
   office: CompanyLocation
   onSuccess: () => void
@@ -36,6 +48,8 @@ export default function PunchModal({
   isOpen,
   onClose,
   userId,
+  userName = 'Employee',
+  userAvatar,
   punchType,
   office,
   onSuccess,
@@ -52,45 +66,137 @@ export default function PunchModal({
 
   // Camera & Face Verification
   const videoRef = useRef<HTMLVideoElement | null>(null)
-  const streamRef = useRef<MediaStream | null>(null)
+  const sessionCountRef = useRef<number>(0)
+  const isComponentOpenRef = useRef<boolean>(isOpen)
+  const detectionTimerRef = useRef<NodeJS.Timeout | null>(null)
+
   const [cameraStream, setCameraStream] = useState<MediaStream | null>(null)
   const [cameraError, setCameraError] = useState<string | null>(null)
   const [videoReady, setVideoReady] = useState<boolean>(false)
   const [selfieSnapshot, setSelfieSnapshot] = useState<string | null>(null)
   const [livenessPassed, setLivenessPassed] = useState<boolean>(false)
 
+  // Live Real-Time Face Detection State
+  const [faceResult, setFaceResult] = useState<FaceDetectionResult>({
+    detected: false,
+    status: 'NO_FACE',
+    message: 'Align face inside the biometric frame',
+    confidence: 0,
+  })
+
+  // Biometric Profile Match Result
+  const [faceMatch, setFaceMatch] = useState<FaceMatchResult | null>(null)
+
   // Loading / Error
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [submitError, setSubmitError] = useState<string | null>(null)
 
+  // Cleanup helper
+  const terminateAllCameraHardware = useCallback(() => {
+    sessionCountRef.current += 1
+
+    if (detectionTimerRef.current) {
+      clearInterval(detectionTimerRef.current)
+      detectionTimerRef.current = null
+    }
+
+    forceStopAllCameraTracks()
+
+    if (videoRef.current) {
+      try {
+        const srcObj = videoRef.current.srcObject as MediaStream | null
+        if (srcObj && srcObj.getTracks) {
+          srcObj.getTracks().forEach((track) => {
+            track.enabled = false
+            track.stop()
+          })
+        }
+        videoRef.current.srcObject = null
+        videoRef.current.pause()
+      } catch (e) {
+        console.warn('Video element cleanup:', e)
+      }
+    }
+
+    setCameraStream(null)
+    setVideoReady(false)
+    setFaceResult({
+      detected: false,
+      status: 'NO_FACE',
+      message: 'Camera stopped',
+      confidence: 0,
+    })
+  }, [])
+
+  // Sync isOpen prop
   useEffect(() => {
+    isComponentOpenRef.current = isOpen
     if (isOpen) {
       resetState()
       detectLocation()
+      // Preload BlazeFace ML Model
+      import('@/lib/faceDetection').then((m) => m.getBlazeFaceModel()).catch(() => {})
     } else {
-      stopCamera()
+      terminateAllCameraHardware()
     }
-  }, [isOpen])
+  }, [isOpen, terminateAllCameraHardware])
 
-  // Stop camera when modal unmounts
+  // Guaranteed unmount & pagehide cleanup
   useEffect(() => {
-    return () => {
-      stopCamera()
-    }
-  }, [])
+    const handleUnload = () => terminateAllCameraHardware()
+    window.addEventListener('beforeunload', handleUnload)
+    window.addEventListener('pagehide', handleUnload)
 
-  // Attach camera stream to video element when step or stream changes
+    return () => {
+      window.removeEventListener('beforeunload', handleUnload)
+      window.removeEventListener('pagehide', handleUnload)
+      terminateAllCameraHardware()
+    }
+  }, [terminateAllCameraHardware])
+
+  function handleCloseModal() {
+    isComponentOpenRef.current = false
+    terminateAllCameraHardware()
+    onClose()
+  }
+
+  // Attach camera stream to video element
   useEffect(() => {
     if (step === 'CAMERA' && cameraStream && videoRef.current) {
       const video = videoRef.current
       video.srcObject = cameraStream
       video.onloadeddata = () => {
-        video.play().then(() => {
-          setVideoReady(true)
-        }).catch((e) => console.warn('Autoplay error:', e))
+        video
+          .play()
+          .then(() => {
+            setVideoReady(true)
+          })
+          .catch((e) => console.warn('Autoplay error:', e))
       }
     }
   }, [cameraStream, step])
+
+  // Real-time Face Detection Loop on Active Video Stream
+  useEffect(() => {
+    if (step === 'CAMERA' && videoReady && !selfieSnapshot && videoRef.current) {
+      const interval = setInterval(async () => {
+        if (!videoRef.current || videoRef.current.readyState < 2) return
+        try {
+          const res = await detectFace(videoRef.current, { requireCentered: true })
+          setFaceResult(res)
+        } catch (e) {
+          // ignore detection errors
+        }
+      }, 130)
+
+      detectionTimerRef.current = interval
+
+      return () => {
+        clearInterval(interval)
+        detectionTimerRef.current = null
+      }
+    }
+  }, [step, videoReady, selfieSnapshot])
 
   function resetState() {
     setStep('GEO')
@@ -105,12 +211,24 @@ export default function PunchModal({
     setVideoReady(false)
     setCameraError(null)
     setSubmitError(null)
+    setFaceMatch(null)
+    setFaceResult({
+      detected: false,
+      status: 'NO_FACE',
+      message: 'Align face inside the biometric frame',
+      confidence: 0,
+    })
   }
 
   async function detectLocation() {
     setGeoError(null)
     try {
       const position = await getDeviceCoordinates()
+      if (!isComponentOpenRef.current) {
+        terminateAllCameraHardware()
+        return
+      }
+
       setCoords(position)
 
       const dist = calculateDistanceMeters(
@@ -130,13 +248,24 @@ export default function PunchModal({
         setStep('REASON')
       }
     } catch (err: any) {
-      setGeoError(err.message || 'GPS location error')
+      if (isComponentOpenRef.current) {
+        setGeoError(err.message || 'GPS location error')
+      }
     }
   }
 
   async function startCamera() {
     setCameraError(null)
     setVideoReady(false)
+    setFaceResult({
+      detected: false,
+      status: 'NO_FACE',
+      message: 'Initializing biometric camera...',
+      confidence: 0,
+    })
+
+    const currentSession = ++sessionCountRef.current
+
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
         video: {
@@ -146,63 +275,36 @@ export default function PunchModal({
         },
         audio: false,
       })
-      streamRef.current = stream
+
+      // Register every track in global set
+      stream.getTracks().forEach((track) => {
+        registerMediaTrack(track)
+      })
+
+      // If modal was closed or session cancelled while awaiting getUserMedia
+      if (!isComponentOpenRef.current || sessionCountRef.current !== currentSession) {
+        stream.getTracks().forEach((track) => {
+          track.enabled = false
+          track.stop()
+        })
+        return
+      }
+
       setCameraStream(stream)
+
       if (videoRef.current) {
         videoRef.current.srcObject = stream
-        videoRef.current.play().then(() => setVideoReady(true)).catch(() => {})
+        videoRef.current
+          .play()
+          .then(() => setVideoReady(true))
+          .catch(() => {})
       }
     } catch (err: any) {
       console.error('Camera error:', err)
-      setCameraError('Camera access required for identity verification. Please ensure camera permissions are allowed.')
+      setCameraError(
+        'Camera access is required for facial verification. Please ensure camera permissions are allowed in your browser.'
+      )
     }
-  }
-
-  function stopCamera() {
-    // 1. Stop all tracks in streamRef
-    if (streamRef.current) {
-      try {
-        streamRef.current.getTracks().forEach((track) => {
-          track.stop()
-          track.enabled = false
-        })
-      } catch (e) {
-        console.warn('Error stopping streamRef track:', e)
-      }
-      streamRef.current = null
-    }
-
-    // 2. Stop all tracks in cameraStream state
-    if (cameraStream) {
-      try {
-        cameraStream.getTracks().forEach((track) => {
-          track.stop()
-          track.enabled = false
-        })
-      } catch (e) {
-        console.warn('Error stopping cameraStream track:', e)
-      }
-      setCameraStream(null)
-    }
-
-    // 3. Stop tracks on video element and detach srcObject
-    if (videoRef.current) {
-      try {
-        const srcObj = videoRef.current.srcObject as MediaStream
-        if (srcObj && srcObj.getTracks) {
-          srcObj.getTracks().forEach((track) => {
-            track.stop()
-            track.enabled = false
-          })
-        }
-        videoRef.current.srcObject = null
-        videoRef.current.pause()
-      } catch (e) {
-        console.warn('Error clearing video srcObject:', e)
-      }
-    }
-
-    setVideoReady(false)
   }
 
   async function captureSelfie() {
@@ -225,66 +327,26 @@ export default function PunchModal({
     ctx.scale(-1, 1)
     ctx.drawImage(video, 0, 0, canvas.width, canvas.height)
 
-    // Strict Anti-Blank & Contrast Verification
+    // 1. Biometric Face Detection Validation
     try {
-      const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height)
-      const data = imgData.data
-      let totalLuminance = 0
-      let minLum = 255
-      let maxLum = 0
-      const sampleStep = 16
-      let samples = 0
+      const verification = await detectFace(canvas, { requireCentered: true })
 
-      for (let i = 0; i < data.length; i += sampleStep * 4) {
-        const lum = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2]
-        totalLuminance += lum
-        if (lum < minLum) minLum = lum
-        if (lum > maxLum) maxLum = lum
-        samples++
-      }
-
-      const avgBrightness = samples > 0 ? totalLuminance / samples : 0
-      const contrastRange = maxLum - minLum
-
-      // Rule 1: Pitch black / covered lens (brightness < 22)
-      if (avgBrightness < 22) {
-        setCameraError('Camera image was too dark or black. Please uncover your webcam and ensure your face is well-lit.')
+      if (!verification.detected) {
+        setCameraError(
+          `Biometric Scan: ${verification.message}. Please face the camera directly in the center.`
+        )
         return
-      }
-
-      // Rule 2: Blank / uniform solid screen (contrast range < 28)
-      if (contrastRange < 28) {
-        setCameraError('Camera feed appears blank or uniform. Please make sure your camera is uncovered and functional.')
-        return
-      }
-
-      // Rule 3: Texture / detail standard deviation
-      let varianceSum = 0
-      for (let i = 0; i < data.length; i += sampleStep * 4) {
-        const lum = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2]
-        varianceSum += Math.pow(lum - avgBrightness, 2)
-      }
-      const stdDev = Math.sqrt(varianceSum / samples)
-      if (stdDev < 14) {
-        setCameraError('Image lacks facial details or contrast. Please center yourself properly in front of the camera.')
-        return
-      }
-
-      // Rule 4: Native browser FaceDetector where available
-      if (typeof window !== 'undefined' && 'FaceDetector' in window) {
-        try {
-          const detector = new (window as any).FaceDetector({ fastMode: true, maxDetectedFaces: 2 })
-          const faces = await detector.detect(canvas)
-          if (faces && faces.length === 0) {
-            setCameraError('No face detected. Please position your face inside the oval frame.')
-            return
-          }
-        } catch (e) {
-          // Fall back gracefully
-        }
       }
     } catch (err) {
-      console.warn('Face detection check skipped:', err)
+      console.warn('Face detection error during capture:', err)
+    }
+
+    // 2. Facial Identity Match against Profile
+    try {
+      const match = await matchFaceWithProfile(canvas, userAvatar, userName)
+      setFaceMatch(match)
+    } catch (err) {
+      console.warn('Match face error:', err)
     }
 
     const dataUrl = canvas.toDataURL('image/jpeg', 0.88)
@@ -293,8 +355,8 @@ export default function PunchModal({
       return
     }
 
-    // Immediately stop camera and turn off hardware LED
-    stopCamera()
+    // Immediately stop live hardware camera stream & LED
+    terminateAllCameraHardware()
 
     setSelfieSnapshot(dataUrl)
     setLivenessPassed(true)
@@ -304,6 +366,7 @@ export default function PunchModal({
   function retakeSelfie() {
     setSelfieSnapshot(null)
     setLivenessPassed(false)
+    setFaceMatch(null)
     setVideoReady(false)
     startCamera()
   }
@@ -317,6 +380,9 @@ export default function PunchModal({
 
     setIsSubmitting(true)
     setSubmitError(null)
+
+    // Ensure camera is fully stopped
+    terminateAllCameraHardware()
 
     try {
       const selfieUrl = await uploadSelfieSnapshot(
@@ -353,8 +419,9 @@ export default function PunchModal({
 
       setStep('SUCCESS')
       setTimeout(() => {
+        terminateAllCameraHardware()
         onSuccess()
-        onClose()
+        handleCloseModal()
       }, 1600)
     } catch (err: any) {
       console.error(err)
@@ -366,7 +433,7 @@ export default function PunchModal({
   if (!isOpen) return null
 
   return (
-    <div className="modal-overlay" onClick={onClose} style={{ zIndex: 9999 }}>
+    <div className="modal-overlay" onClick={handleCloseModal} style={{ zIndex: 9999 }}>
       <div
         className="modal-box"
         style={{
@@ -417,7 +484,8 @@ export default function PunchModal({
           </div>
 
           <button
-            onClick={onClose}
+            onClick={handleCloseModal}
+            aria-label="Close modal"
             style={{
               padding: '6px',
               borderRadius: '8px',
@@ -628,33 +696,41 @@ export default function PunchModal({
           {/* STEP 3: CAMERA VERIFICATION */}
           {step === 'CAMERA' && (
             <div>
+              {/* Location Badge */}
               <div
                 style={{
                   display: 'flex',
                   alignItems: 'center',
-                  gap: '8px',
+                  justifyContent: 'space-between',
                   padding: '10px 14px',
                   borderRadius: '8px',
                   backgroundColor: isInside ? '#DCFCE7' : '#FEF3C7',
                   border: `1px solid ${isInside ? '#86EFAC' : '#FCD34D'}`,
-                  marginBottom: '16px',
+                  marginBottom: '14px',
                 }}
               >
-                {isInside ? (
-                  <>
-                    <Building size={16} color="#15803D" />
-                    <span style={{ fontSize: '13px', fontWeight: 600, color: '#15803D' }}>
-                      🟢 Inside {office.name} ({formatDistance(distanceMeters)} from center)
-                    </span>
-                  </>
-                ) : (
-                  <>
-                    <MapPin size={16} color="#B45309" />
-                    <span style={{ fontSize: '13px', fontWeight: 600, color: '#B45309' }}>
-                      🟡 Outside HQ ({formatDistance(distanceMeters)}) • {reason}
-                    </span>
-                  </>
-                )}
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  {isInside ? (
+                    <>
+                      <Building size={16} color="#15803D" />
+                      <span style={{ fontSize: '13px', fontWeight: 600, color: '#15803D' }}>
+                        🟢 Inside {office.name} ({formatDistance(distanceMeters)})
+                      </span>
+                    </>
+                  ) : (
+                    <>
+                      <MapPin size={16} color="#B45309" />
+                      <span style={{ fontSize: '13px', fontWeight: 600, color: '#B45309' }}>
+                        🟡 Outside HQ ({formatDistance(distanceMeters)}) • {reason}
+                      </span>
+                    </>
+                  )}
+                </div>
+
+                <div style={{ display: 'flex', alignItems: 'center', gap: '5px', fontSize: '12px', fontWeight: 600, color: '#475569' }}>
+                  <UserCheck size={14} color="#2563EB" />
+                  <span>{userName}</span>
+                </div>
               </div>
 
               {/* Camera Viewport */}
@@ -667,27 +743,37 @@ export default function PunchModal({
                   backgroundColor: '#0F172A',
                   borderRadius: '14px',
                   overflow: 'hidden',
-                  border: '2px solid #CBD5E1',
+                  border: `2px solid ${
+                    selfieSnapshot
+                      ? '#16A34A'
+                      : faceResult.detected
+                      ? '#22C55E'
+                      : '#CBD5E1'
+                  }`,
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
-                  margin: '0 auto 16px',
+                  margin: '0 auto 14px',
+                  transition: 'border-color 0.2s ease',
                 }}
               >
                 {cameraError ? (
                   <div style={{ textAlign: 'center', padding: '20px' }}>
-                    <AlertTriangle size={30} color="#EF4444" style={{ margin: '0 auto 8px' }} />
-                    <p style={{ fontSize: '12px', color: '#FCA5A5', lineHeight: 1.4 }}>{cameraError}</p>
+                    <AlertTriangle size={32} color="#EF4444" style={{ margin: '0 auto 8px' }} />
+                    <p style={{ fontSize: '12px', color: '#FCA5A5', lineHeight: 1.4, maxWidth: '280px', margin: '0 auto' }}>
+                      {cameraError}
+                    </p>
                     <button
                       onClick={startCamera}
                       style={{
-                        marginTop: '10px',
+                        marginTop: '12px',
                         padding: '6px 14px',
                         backgroundColor: '#334155',
                         color: '#FFF',
                         border: 'none',
                         borderRadius: '6px',
                         fontSize: '12px',
+                        fontWeight: 600,
                         cursor: 'pointer',
                       }}
                     >
@@ -704,9 +790,9 @@ export default function PunchModal({
                     <div
                       style={{
                         position: 'absolute',
-                        top: '10px',
-                        right: '10px',
-                        padding: '4px 10px',
+                        top: '12px',
+                        right: '12px',
+                        padding: '5px 12px',
                         backgroundColor: '#16A34A',
                         color: '#FFF',
                         fontSize: '11px',
@@ -714,10 +800,35 @@ export default function PunchModal({
                         borderRadius: '999px',
                         display: 'flex',
                         alignItems: 'center',
-                        gap: '4px',
+                        gap: '5px',
+                        boxShadow: '0 4px 12px rgba(22, 163, 74, 0.4)',
                       }}
                     >
-                      <ShieldCheck size={14} /> Identity Verified
+                      <ShieldCheck size={14} /> Biometric Facial Identity Verified
+                    </div>
+
+                    <div
+                      style={{
+                        position: 'absolute',
+                        bottom: '12px',
+                        left: '12px',
+                        right: '12px',
+                        padding: '6px 12px',
+                        backgroundColor: 'rgba(15, 23, 42, 0.88)',
+                        backdropFilter: 'blur(6px)',
+                        color: '#F8FAFC',
+                        fontSize: '11px',
+                        fontWeight: 600,
+                        borderRadius: '8px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                      }}
+                    >
+                      <span>{userName}</span>
+                      <span style={{ color: '#4ADE80' }}>
+                        {faceMatch ? faceMatch.message : 'Identity Authenticated'}
+                      </span>
                     </div>
                   </div>
                 ) : (
@@ -736,34 +847,69 @@ export default function PunchModal({
                       }}
                     />
 
-                    {/* Biometric Oval Guide */}
+                    {/* Biometric Oval Guide Overlay */}
                     <div
                       style={{
                         position: 'absolute',
-                        width: '60%',
-                        height: '75%',
+                        width: '62%',
+                        height: '78%',
                         borderRadius: '50%',
-                        border: '2px dashed #60A5FA',
-                        boxShadow: '0 0 0 9999px rgba(15, 23, 42, 0.4)',
+                        border: faceResult.detected
+                          ? '3px solid #22C55E'
+                          : '2px dashed rgba(245, 158, 11, 0.85)',
+                        boxShadow: faceResult.detected
+                          ? '0 0 22px rgba(34, 197, 94, 0.5), 0 0 0 9999px rgba(15, 23, 42, 0.45)'
+                          : '0 0 0 9999px rgba(15, 23, 42, 0.45)',
                         pointerEvents: 'none',
+                        transition: 'all 0.2s ease',
                       }}
-                    />
+                    >
+                      {/* Biometric Corner Brackets when face detected */}
+                      {faceResult.detected && (
+                        <>
+                          <div style={{ position: 'absolute', top: '-6px', left: '22%', width: '14px', height: '3px', backgroundColor: '#22C55E', borderRadius: '2px' }} />
+                          <div style={{ position: 'absolute', top: '-6px', right: '22%', width: '14px', height: '3px', backgroundColor: '#22C55E', borderRadius: '2px' }} />
+                          <div style={{ position: 'absolute', bottom: '-6px', left: '22%', width: '14px', height: '3px', backgroundColor: '#22C55E', borderRadius: '2px' }} />
+                          <div style={{ position: 'absolute', bottom: '-6px', right: '22%', width: '14px', height: '3px', backgroundColor: '#22C55E', borderRadius: '2px' }} />
+                        </>
+                      )}
+                    </div>
 
+                    {/* Live Dynamic Status Bar inside camera */}
                     <div
                       style={{
                         position: 'absolute',
                         bottom: '12px',
-                        padding: '4px 12px',
-                        backgroundColor: 'rgba(15, 23, 42, 0.8)',
+                        padding: '6px 14px',
+                        backgroundColor: faceResult.detected
+                          ? 'rgba(22, 101, 52, 0.92)'
+                          : 'rgba(15, 23, 42, 0.88)',
+                        backdropFilter: 'blur(6px)',
                         borderRadius: '999px',
                         fontSize: '11px',
-                        color: '#F1F5F9',
+                        fontWeight: 600,
+                        color: '#F8FAFC',
                         display: 'flex',
                         alignItems: 'center',
-                        gap: '5px',
+                        gap: '6px',
+                        border: `1px solid ${
+                          faceResult.detected ? '#4ADE80' : 'rgba(255, 255, 255, 0.15)'
+                        }`,
+                        boxShadow: '0 4px 10px rgba(0, 0, 0, 0.3)',
+                        transition: 'all 0.2s ease',
                       }}
                     >
-                      <Sparkles size={13} color="#60A5FA" /> Center face inside the oval
+                      {faceResult.detected ? (
+                        <>
+                          <CheckCircle2 size={13} color="#4ADE80" />
+                          <span>Face Detected ({faceResult.confidence}%) • Ready to Capture</span>
+                        </>
+                      ) : (
+                        <>
+                          <Scan size={13} color="#F59E0B" className="animate-pulse" />
+                          <span>{faceResult.message}</span>
+                        </>
+                      )}
                     </div>
                   </>
                 )}
@@ -772,12 +918,14 @@ export default function PunchModal({
               {submitError && (
                 <div
                   style={{
-                    padding: '8px 12px',
-                    borderRadius: '6px',
+                    padding: '10px 14px',
+                    borderRadius: '8px',
                     backgroundColor: '#FEE2E2',
+                    border: '1px solid #FCA5A5',
                     color: '#B91C1C',
                     fontSize: '12px',
-                    marginBottom: '12px',
+                    marginBottom: '14px',
+                    lineHeight: 1.4,
                   }}
                 >
                   {submitError}
@@ -786,34 +934,53 @@ export default function PunchModal({
 
               {/* Action Buttons */}
               {!selfieSnapshot ? (
-                <button
-                  type="button"
-                  onClick={captureSelfie}
-                  disabled={!cameraStream || !videoReady}
-                  className="btn btn-primary"
-                  style={{
-                    width: '100%',
-                    padding: '12px',
-                    fontSize: '14px',
-                    fontWeight: 700,
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    gap: '8px',
-                    opacity: !cameraStream || !videoReady ? 0.65 : 1,
-                    cursor: !cameraStream || !videoReady ? 'not-allowed' : 'pointer',
-                  }}
-                >
-                  {!videoReady ? (
-                    <>
-                      <Loader2 size={18} className="animate-spin" /> Preparing Live Camera...
-                    </>
-                  ) : (
-                    <>
-                      <Camera size={18} /> Capture Verification Photo
-                    </>
+                <div>
+                  <button
+                    type="button"
+                    onClick={captureSelfie}
+                    disabled={!cameraStream || !videoReady}
+                    className="btn btn-primary"
+                    style={{
+                      width: '100%',
+                      padding: '12px',
+                      fontSize: '14px',
+                      fontWeight: 700,
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: '8px',
+                      backgroundColor: faceResult.detected ? '#16A34A' : '#2563EB',
+                      borderColor: faceResult.detected ? '#16A34A' : '#2563EB',
+                      opacity: !cameraStream || !videoReady ? 0.65 : 1,
+                      cursor: !cameraStream || !videoReady ? 'not-allowed' : 'pointer',
+                      transition: 'all 0.2s ease',
+                    }}
+                  >
+                    {!videoReady ? (
+                      <>
+                        <Loader2 size={18} className="animate-spin" /> Initializing Camera...
+                      </>
+                    ) : (
+                      <>
+                        <Camera size={18} /> Capture Verification Photo
+                      </>
+                    )}
+                  </button>
+
+                  {!faceResult.detected && videoReady && (
+                    <p
+                      style={{
+                        fontSize: '11px',
+                        color: '#64748B',
+                        textAlign: 'center',
+                        marginTop: '8px',
+                        marginBottom: '0',
+                      }}
+                    >
+                      💡 Please position your face inside the oval frame to capture.
+                    </p>
                   )}
-                </button>
+                </div>
               ) : (
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: '10px' }}>
                   <button
@@ -821,13 +988,13 @@ export default function PunchModal({
                     disabled={isSubmitting}
                     className="btn btn-outline"
                     style={{
-                      padding: '10px',
+                      padding: '11px',
                       fontSize: '13px',
                       fontWeight: 600,
                       display: 'flex',
                       alignItems: 'center',
                       justifyContent: 'center',
-                      gap: '4px',
+                      gap: '5px',
                     }}
                   >
                     <RotateCcw size={15} /> Retake
@@ -838,7 +1005,7 @@ export default function PunchModal({
                     disabled={isSubmitting}
                     className="btn btn-primary"
                     style={{
-                      padding: '10px',
+                      padding: '11px',
                       fontSize: '14px',
                       fontWeight: 700,
                       backgroundColor: punchType === 'IN' ? '#16A34A' : '#DC2626',

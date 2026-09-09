@@ -17,6 +17,7 @@ import {
   Laptop,
   WalletCards,
   Clock,
+  Megaphone,
 } from 'lucide-react'
 import { logout } from '@/app/login/actions'
 import type { Profile } from '@/types/database'
@@ -58,6 +59,7 @@ export default function Sidebar({ profile, isOpen, onClose }: SidebarProps) {
       items: [
         { href: '/projects', label: 'Projects CMS', icon: Building2 },
         { href: '/blogs', label: 'Market Insights', icon: BookOpen },
+        // { href: '/marketing-popups', label: 'Marketing Pop-ups', icon: Megaphone },
         { href: '/newsletter', label: 'Subscribers', icon: Mail },
       ],
     },
@@ -86,6 +88,7 @@ export default function Sidebar({ profile, isOpen, onClose }: SidebarProps) {
       items: [
         { href: '/projects', label: 'Projects CMS', icon: Building2 },
         { href: '/blogs', label: 'Market Insights', icon: BookOpen },
+        // { href: '/marketing-popups', label: 'Marketing Pop-ups', icon: Megaphone },
         { href: '/newsletter', label: 'Subscribers', icon: Mail },
       ],
     },
@@ -112,6 +115,7 @@ export default function Sidebar({ profile, isOpen, onClose }: SidebarProps) {
       items: [
         { href: '/projects', label: 'Projects CMS', icon: Building2 },
         { href: '/blogs', label: 'Market Insights', icon: BookOpen },
+        // { href: '/marketing-popups', label: 'Marketing Pop-ups', icon: Megaphone },
         { href: '/newsletter', label: 'Subscribers', icon: Mail },
       ],
     },

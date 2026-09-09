@@ -14,7 +14,7 @@ import {
 } from '@/lib/payroll-utils'
 import PayslipDocument from '@/components/payroll/PayslipDocument'
 import {
-  Lock, Unlock, ShieldCheck, DollarSign, Calendar, Users, FileText,
+  Lock, Unlock, ShieldCheck, Calendar, Users, FileText,
   Plus, Edit3, Trash2, Printer, Eye, CheckCircle2, AlertCircle,
   Search, RefreshCw, ChevronRight, Settings, Building2, Briefcase, Landmark
 } from 'lucide-react'

@@ -228,12 +228,14 @@ export default function AttendanceClient({ profile }: AttendanceClientProps) {
   function handleOpenPunch() {
     if (!todayLog?.punch_in_at) {
       setPunchType('IN')
+      setPunchModalOpen(true)
     } else if (!todayLog?.punch_out_at) {
       setPunchType('OUT')
+      setPunchModalOpen(true)
     } else {
-      setPunchType('IN')
+      // Already punched in and punched out for today
+      return
     }
-    setPunchModalOpen(true)
   }
 
   async function handleLeaveApproval(requestId: string, status: 'APPROVED' | 'REJECTED') {
@@ -522,33 +524,47 @@ export default function AttendanceClient({ profile }: AttendanceClientProps) {
             <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
               <button
                 onClick={handleOpenPunch}
+                disabled={isPunchedOut}
                 style={{
                   width: '100%',
                   padding: '16px 24px',
                   borderRadius: '12px',
-                  backgroundColor: isPunchedIn ? '#DC2626' : '#16A34A',
+                  backgroundColor: isPunchedIn ? '#DC2626' : isPunchedOut ? '#475569' : '#16A34A',
                   color: '#FFFFFF',
                   border: 'none',
                   fontSize: '16px',
                   fontWeight: 700,
-                  cursor: 'pointer',
+                  cursor: isPunchedOut ? 'not-allowed' : 'pointer',
+                  opacity: isPunchedOut ? 0.8 : 1,
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
                   gap: '10px',
                   boxShadow: isPunchedIn
                     ? '0 4px 16px rgba(220, 38, 38, 0.4)'
+                    : isPunchedOut
+                    ? 'none'
                     : '0 4px 16px rgba(22, 163, 74, 0.4)',
                   transition: 'transform 0.1s ease',
                 }}
-                onMouseDown={(e) => (e.currentTarget.style.transform = 'scale(0.98)')}
-                onMouseUp={(e) => (e.currentTarget.style.transform = 'scale(1)')}
+                onMouseDown={(e) => {
+                  if (!isPunchedOut) e.currentTarget.style.transform = 'scale(0.98)'
+                }}
+                onMouseUp={(e) => {
+                  if (!isPunchedOut) e.currentTarget.style.transform = 'scale(1)'
+                }}
               >
-                <ShieldCheck size={22} />
-                {isPunchedIn ? 'Punch Out & Confirm' : 'Punch In (GPS + Face)'}
+                {isPunchedOut ? <CheckCircle2 size={22} /> : <ShieldCheck size={22} />}
+                {isPunchedIn
+                  ? 'Punch Out & Confirm'
+                  : isPunchedOut
+                  ? 'Day Completed (Punched Out)'
+                  : 'Punch In (GPS + Face)'}
               </button>
               <div style={{ fontSize: '11px', color: '#94A3B8', textAlign: 'center' }}>
-                Verified against {office.name} ({office.radius_meters}m geofence perimeter)
+                {isPunchedOut
+                  ? 'Attendance successfully recorded for today'
+                  : `Verified against ${office.name} (${office.radius_meters}m geofence perimeter)`}
               </div>
             </div>
 
@@ -1734,6 +1750,8 @@ export default function AttendanceClient({ profile }: AttendanceClientProps) {
         isOpen={punchModalOpen}
         onClose={() => setPunchModalOpen(false)}
         userId={userId}
+        userName={profile?.name || 'Employee'}
+        userAvatar={profile?.avatar_url || null}
         punchType={punchType}
         office={office}
         onSuccess={loadInitialData}
