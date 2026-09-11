@@ -254,12 +254,13 @@ begin
     return NEW;
   end if;
 
-  -- 1. Find the best available active sales agent:
+  -- 1. Find the best available active sales agent or sales manager:
+  -- Strictly filter for AGENT and SALES_MANAGER (case-insensitive)
   -- Prioritize agents with work_status = 'AVAILABLE', then least recently assigned lead timestamp, then lowest active leads
   select p.id into v_agent_id
   from profiles p
   where p.is_active = true
-    and p.role in ('AGENT', 'SALES_MANAGER')
+    and upper(p.role) in ('AGENT', 'SALES_MANAGER')
   order by
     case when upper(coalesce(p.work_status, 'AVAILABLE')) = 'AVAILABLE' then 0 else 1 end asc,
     (
@@ -276,19 +277,8 @@ begin
     ) asc
   limit 1;
 
-  -- Fallback: If no dedicated sales agents exist, pick from any active staff (e.g. ADMIN)
-  if v_agent_id is null then
-    select p.id into v_agent_id
-    from profiles p
-    where p.is_active = true
-    order by (
-      select coalesce(max(l.created_at), '1970-01-01'::timestamptz)
-      from leads l
-      where l.assigned_agent_id = p.id
-    ) asc
-    limit 1;
-  end if;
-
+  -- Only assign if a matching sales agent or sales manager was found.
+  -- Never fall back to technical staff (EMPLOYEE) or other non-sales profiles.
   if v_agent_id is not null then
     NEW.assigned_agent_id := v_agent_id;
   end if;
@@ -1457,7 +1447,45 @@ create policy "Allow admins to manage work policy"
     )
   );
 
+-- ============================================================
+-- OFFICIAL COMPANY HOLIDAYS TABLE
+-- ============================================================
+create table if not exists public.company_holidays (
+  id uuid primary key default gen_random_uuid(),
+  name text not null,
+  date date not null unique,
+  created_at timestamptz default now()
+);
 
+alter table public.company_holidays enable row level security;
 
+drop policy if exists "Allow authenticated to view holidays" on public.company_holidays;
+create policy "Allow authenticated to view holidays"
+  on public.company_holidays for select
+  to authenticated
+  using (true);
 
+drop policy if exists "Allow admins to manage holidays" on public.company_holidays;
+create policy "Allow admins to manage holidays"
+  on public.company_holidays for all
+  to authenticated
+  using (
+    exists (
+      select 1 from profiles
+      where profiles.id = auth.uid()
+      and profiles.role in ('ADMIN', 'SALES_MANAGER')
+    )
+  );
 
+-- Preload Standard Saudi Official Holidays
+insert into public.company_holidays (name, date) values
+  ('Saudi Founding Day', '2026-02-22'),
+  ('Eid Al-Fitr Holiday', '2026-03-20'),
+  ('Eid Al-Fitr Holiday', '2026-03-22'),
+  ('Eid Al-Fitr Holiday', '2026-03-23'),
+  ('Arafat Day', '2026-05-26'),
+  ('Eid Al-Adha Holiday', '2026-05-27'),
+  ('Eid Al-Adha Holiday', '2026-05-28'),
+  ('Eid Al-Adha Holiday', '2026-05-29'),
+  ('Saudi National Day', '2026-09-23')
+on conflict (date) do nothing;

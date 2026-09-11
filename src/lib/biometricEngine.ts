@@ -25,6 +25,178 @@ export interface BiometricMatchResult {
   status: 'VERIFIED' | 'MISMATCH' | 'NO_ENROLLMENT' | 'LOW_QUALITY'
 }
 
+export interface LivenessEvaluation {
+  isLive: boolean
+  isSpoofDetected: boolean
+  spoofReason?: string
+  blinkCount: number
+  isCurrentlyBlinking: boolean
+  ear: number
+  status: 'AWAITING_LIVENESS' | 'VERIFIED' | 'STATIC_SPOOF'
+  message: string
+}
+
+/**
+ * Tracks multi-frame physiological liveness across consecutive video frames
+ * Specifically prevents 2D presentation attacks (holding up a phone or printed photo)
+ */
+export class LivenessTracker {
+  private earHistory: { ear: number; time: number }[] = []
+  private minBlinkEAR = 1.0
+  private consecutiveFrames = 0
+  private blinkCount = 0
+  private isBlinkActive = false
+  private blinkStartTime = 0
+  private lastBlinkTime = 0
+  private passedLivePresence = false
+  private baselineEAR = 0.28 // Moving baseline open-eye EAR
+
+  public reset() {
+    this.earHistory = []
+    this.minBlinkEAR = 1.0
+    this.consecutiveFrames = 0
+    this.blinkCount = 0
+    this.isBlinkActive = false
+    this.blinkStartTime = 0
+    this.lastBlinkTime = 0
+    this.passedLivePresence = false
+    this.baselineEAR = 0.28
+  }
+
+  public update(detection: BiometricDetection): LivenessEvaluation {
+    if (!detection.detected || !detection.landmarks || !detection.liveness) {
+      this.consecutiveFrames = 0
+      this.earHistory = []
+      return {
+        isLive: this.passedLivePresence,
+        isSpoofDetected: false,
+        blinkCount: this.blinkCount,
+        isCurrentlyBlinking: false,
+        ear: 0.3,
+        status: this.passedLivePresence ? 'VERIFIED' : 'AWAITING_LIVENESS',
+        message: 'Align face in frame to verify identity & liveness',
+      }
+    }
+
+    const now = Date.now()
+    const ear = detection.liveness.ear
+    this.consecutiveFrames++
+
+    // Rolling window of recent 20 observations (~1.6 to 2.0 seconds)
+    this.earHistory.push({ ear, time: now })
+    if (this.earHistory.length > 20) {
+      this.earHistory.shift()
+    }
+
+    // Adaptive baseline open-eye EAR:
+    // Tracks the upper 35% of recent observations so detection adapts to users with glasses or varied eye morphology
+    if (this.earHistory.length >= 4) {
+      const sortedEars = [...this.earHistory.map((h) => h.ear)].sort((a, b) => b - a)
+      const topCount = Math.max(2, Math.floor(sortedEars.length * 0.35))
+      const topAvg = sortedEars.slice(0, topCount).reduce((a, b) => a + b, 0) / topCount
+      if (topAvg > 0.16) {
+        this.baselineEAR = topAvg
+      }
+    }
+
+    // 1. Biological Blink Detection (Tuned for glasses wearers & natural eyes)
+    // A blink drops EAR by >= 14% below baseline, or drops below 0.23, or absolute drop >= 0.035
+    const closeThreshold = Math.min(0.235, this.baselineEAR * 0.86)
+    const earDrop = this.baselineEAR - ear
+    const isCurrentlyBlinking = ear <= closeThreshold || earDrop >= 0.035 || ear <= 0.205
+
+    if (isCurrentlyBlinking) {
+      if (!this.isBlinkActive) {
+        this.isBlinkActive = true
+        this.blinkStartTime = now
+        this.minBlinkEAR = ear
+      } else {
+        if (ear < this.minBlinkEAR) {
+          this.minBlinkEAR = ear
+        }
+      }
+    } else if (this.isBlinkActive) {
+      // Eyelids recovering/opened: EAR returned back towards baseline
+      const openThreshold = Math.max(0.215, this.baselineEAR * 0.90)
+      const isEyeReopened = ear >= openThreshold || (ear - this.minBlinkEAR) >= 0.03
+
+      if (isEyeReopened) {
+        const blinkDuration = now - this.blinkStartTime
+        this.isBlinkActive = false
+        // Natural human blinks last between 50ms and 950ms
+        if (blinkDuration >= 50 && blinkDuration <= 950) {
+          this.blinkCount++
+          this.lastBlinkTime = now
+          this.passedLivePresence = true
+        }
+      }
+    }
+
+    // 2. Static 2D Screen / Phone Presentation Attack Detection
+    // A photo on a phone screen:
+    // - Has zero biological blinks (blinkCount === 0)
+    // - Has frozen, non-varying eye aperture (earStdDev < 0.0065 over 8+ frames)
+    // Even if a user holds, tilts, or shakes their phone, the 2D eyes on the screen never change aperture!
+    let isSpoofDetected = false
+    let spoofReason = ''
+
+    if (this.consecutiveFrames >= 8 && this.blinkCount === 0) {
+      const ears = this.earHistory.map((h) => h.ear)
+      const earMean = ears.reduce((acc, v) => acc + v, 0) / ears.length
+      const earVariance = ears.reduce((acc, v) => acc + Math.pow(v - earMean, 2), 0) / ears.length
+      const earStdDev = Math.sqrt(earVariance)
+
+      // If after 8+ frames (~0.7s) the eyes are statically locked with near-zero aperture variance:
+      if (earStdDev < 0.0065) {
+        isSpoofDetected = true
+        spoofReason = 'Static 2D image / phone screen detected'
+        this.passedLivePresence = false
+      }
+    }
+
+    if (isSpoofDetected) {
+      return {
+        isLive: false,
+        isSpoofDetected: true,
+        spoofReason,
+        blinkCount: 0,
+        isCurrentlyBlinking: false,
+        ear,
+        status: 'STATIC_SPOOF',
+        message: 'Static screen/photo detected — please blink naturally to verify live human',
+      }
+    }
+
+    if (this.passedLivePresence) {
+      return {
+        isLive: true,
+        isSpoofDetected: false,
+        blinkCount: this.blinkCount,
+        isCurrentlyBlinking,
+        ear,
+        status: 'VERIFIED',
+        message: 'Live 3D presence confirmed',
+      }
+    }
+
+    return {
+      isLive: false,
+      isSpoofDetected: false,
+      blinkCount: this.blinkCount,
+      isCurrentlyBlinking,
+      ear,
+      status: 'AWAITING_LIVENESS',
+      message: isCurrentlyBlinking
+        ? 'Blink detected — confirming presence...'
+        : 'Blink naturally or smile to confirm live presence',
+    }
+  }
+}
+
+export function createLivenessTracker(): LivenessTracker {
+  return new LivenessTracker()
+}
+
 let faceapiModule: any = null
 let modelsLoaded = false
 let modelsLoadingPromise: Promise<boolean> | null = null
@@ -188,7 +360,7 @@ export async function analyzeLiveFace(
     const leftEAR = computeEAR(leftEye)
     const rightEAR = computeEAR(rightEye)
     const avgEAR = (leftEAR + rightEAR) / 2
-    const isBlinking = avgEAR < 0.21
+    const isBlinking = avgEAR < 0.23
 
     // Head orientation estimate (nose tip relative to eye centers)
     let headTurn: 'CENTER' | 'LEFT' | 'RIGHT' = 'CENTER'
@@ -201,7 +373,7 @@ export async function analyzeLiveFace(
       else if (ratio < 0.65) headTurn = 'RIGHT'
     }
 
-    const isSmiling = expressions?.happy > 0.55
+    const isSmiling = expressions?.happy > 0.48
 
     return {
       detected: true,
@@ -211,7 +383,7 @@ export async function analyzeLiveFace(
       landmarks,
       descriptor,
       liveness: {
-        ear: Number(avgEAR.toFixed(2)),
+        ear: Number(avgEAR.toFixed(4)),
         isBlinking,
         headTurn,
         isSmiling,

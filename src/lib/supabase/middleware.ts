@@ -54,7 +54,9 @@ export async function updateSession(request: NextRequest) {
     pathname.startsWith('/reset-password') ||
     pathname.startsWith('/api/agents/invite')
 
-  const isApiWebhook = pathname.startsWith('/api/leads/webhook')
+  const isApiWebhook =
+    pathname.startsWith('/api/leads/webhook') ||
+    pathname.startsWith('/api/attendance')
 
   if (!user && !isAuthRoute && !isApiWebhook) {
     if (pathname.startsWith('/api/')) {

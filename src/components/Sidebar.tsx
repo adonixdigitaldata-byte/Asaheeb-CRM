@@ -47,7 +47,7 @@ export default function Sidebar({ profile, isOpen, onClose }: SidebarProps) {
       section: 'Staff & Assets',
       items: [
         { href: '/team', label: 'Team Directory', icon: UserCheck },
-        // { href: '/attendance', label: 'Attendance & Leaves', icon: Clock },
+        { href: '/attendance', label: 'Attendance & Leaves', icon: Clock },
         { href: '/assets', label: 'Company Assets', icon: Laptop },
         { href: '/payroll', label: 'Payroll & Compensation', icon: Banknote },
         { href: '/expenses', label: 'Expense Tracker', icon: WalletCards },
@@ -78,7 +78,7 @@ export default function Sidebar({ profile, isOpen, onClose }: SidebarProps) {
       section: 'Staff & Assets',
       items: [
         { href: '/team', label: 'Team Overview', icon: UserCheck },
-        // { href: '/attendance', label: 'Attendance & Leaves', icon: Clock },
+        { href: '/attendance', label: 'Attendance & Leaves', icon: Clock },
         { href: '/assets', label: 'Company Assets', icon: Laptop },
         { href: '/payslips', label: 'My Payslips', icon: Receipt },
       ],
@@ -105,7 +105,7 @@ export default function Sidebar({ profile, isOpen, onClose }: SidebarProps) {
     {
       section: 'Staff & Assets',
       items: [
-        // { href: '/attendance', label: 'Attendance & Leaves', icon: Clock },
+        { href: '/attendance', label: 'Attendance & Leaves', icon: Clock },
         { href: '/assets', label: 'Company Assets', icon: Laptop },
         { href: '/payslips', label: 'My Payslips', icon: Receipt },
       ],

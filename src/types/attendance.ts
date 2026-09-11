@@ -43,6 +43,7 @@ export interface AttendanceLog {
 
   // Work Duration & Review
   total_working_minutes: number
+  is_auto_closed?: boolean
   review_notes: string | null
   reviewed_by: string | null
   reviewed_at: string | null
@@ -128,6 +129,12 @@ export interface DayShiftTiming {
   hours: number // 8.0
 }
 
+export interface CompanyHoliday {
+  id: string
+  name: string
+  date: string // 'YYYY-MM-DD'
+}
+
 export interface CompanyWorkPolicy {
   id: string
   company_name: string
@@ -140,6 +147,7 @@ export interface CompanyWorkPolicy {
   default_sick_leave_quota: number // 30
   custom_day_hours?: Record<string, number> // e.g. { 'THURSDAY': 6.0, 'SATURDAY': 4.0 }
   custom_day_schedules?: Record<string, DayShiftTiming>
+  official_holidays?: CompanyHoliday[]
   updated_at?: string
 }
 
@@ -151,11 +159,17 @@ export interface MonthlyWorkHoursAudit {
   month: string // 'YYYY-MM'
   expected_working_days: number
   expected_total_hours: number
+  expected_to_date_hours: number
+  elapsed_working_days: number
   actual_worked_hours: number
   approved_leave_hours: number
-  non_working_hours: number // Shortfall hours (Lost/Deficit)
+  non_working_hours: number // Shortfall hours to-date (Lost/Deficit)
+  month_to_date_deficit: number
   overtime_hours: number
   attendance_adherence_percent: number
+  hourly_rate: number
+  estimated_pay_cut: number
+  currency: string
   days_present: number
   days_remote: number
   days_late: number

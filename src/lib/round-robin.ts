@@ -34,17 +34,14 @@ export async function getNextRoundRobinAgent(
       return null
     }
 
-    // 2. Filter for sales agents / managers first
-    let candidates = allProfiles.filter(
-      (p) => p.role === 'AGENT' || p.role === 'SALES_MANAGER'
-    )
-
-    // Fallback: If no dedicated sales agents exist, include ADMINs
-    if (candidates.length === 0) {
-      candidates = allProfiles.filter((p) => p.role === 'ADMIN' || p.role === 'EMPLOYEE')
-    }
+    // 2. Filter strictly for sales agents / sales managers
+    const candidates = allProfiles.filter((p) => {
+      const role = (p.role || '').toUpperCase()
+      return role === 'AGENT' || role === 'SALES_MANAGER'
+    })
 
     if (candidates.length === 0) {
+      console.warn('Round Robin: No active sales agents or sales managers found')
       return null
     }
 

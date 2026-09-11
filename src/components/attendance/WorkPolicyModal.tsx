@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { createPortal } from 'react-dom'
 import {
   X,
@@ -12,9 +12,11 @@ import {
   Sliders,
   Briefcase,
   Sparkles,
+  Plus,
+  Trash2,
 } from 'lucide-react'
-import { CompanyWorkPolicy } from '@/types/attendance'
-import { saveCompanyWorkPolicy } from '@/lib/attendanceService'
+import { CompanyWorkPolicy, CompanyHoliday } from '@/types/attendance'
+import { saveCompanyWorkPolicy, fetchOfficialHolidays, DEFAULT_OFFICIAL_HOLIDAYS } from '@/lib/attendanceService'
 
 interface WorkPolicyModalProps {
   isOpen: boolean
@@ -50,23 +52,82 @@ export default function WorkPolicyModal({
   const [sickQuota, setSickQuota] = useState<number>(currentPolicy.default_sick_leave_quota || 30)
 
   // Custom per-day hours & shift timings
-  const [customDayHours, setCustomDayHours] = useState<Record<string, number>>(
-    currentPolicy.custom_day_hours || {}
+  const [customDayHours, setCustomDayHours] = useState<Record<string, number>>({})
+  const [customDaySchedules, setCustomDaySchedules] = useState<Record<string, { startTime: string; endTime: string; hours: number }>>({})
+  const [enableCustomHours, setEnableCustomHours] = useState<boolean>(false)
+
+  // Official Company Holidays
+  const [officialHolidays, setOfficialHolidays] = useState<CompanyHoliday[]>(
+    currentPolicy.official_holidays || DEFAULT_OFFICIAL_HOLIDAYS
   )
-  const [customDaySchedules, setCustomDaySchedules] = useState<Record<string, { startTime: string; endTime: string; hours: number }>>(
-    currentPolicy.custom_day_schedules || {}
-  )
-  const [enableCustomHours, setEnableCustomHours] = useState<boolean>(
-    Boolean(
-      (currentPolicy.custom_day_hours && Object.keys(currentPolicy.custom_day_hours).length > 0) ||
-      (currentPolicy.custom_day_schedules && Object.keys(currentPolicy.custom_day_schedules).length > 0)
-    )
-  )
+  const [newHolidayName, setNewHolidayName] = useState('')
+  const [newHolidayDate, setNewHolidayDate] = useState('')
 
   const [isSaving, setIsSaving] = useState(false)
   const [savedSuccess, setSavedSuccess] = useState(false)
 
+  // Synchronize state whenever modal is opened or currentPolicy changes
+  useEffect(() => {
+    if (isOpen) {
+      setWorkDays(currentPolicy.work_days || ['SUNDAY', 'MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'SATURDAY'])
+      setDailyHours(currentPolicy.daily_expected_hours || 8.0)
+      setShiftStart(currentPolicy.shift_start_time?.slice(0, 5) || '09:00')
+      setShiftEnd(currentPolicy.shift_end_time?.slice(0, 5) || '17:00')
+      setGraceMins(currentPolicy.grace_period_mins ?? 15)
+      setAnnualQuota(currentPolicy.default_annual_leave_quota || 21)
+      setSickQuota(currentPolicy.default_sick_leave_quota || 30)
+
+      // Clean custom day hours (filter out internal properties)
+      const cleanCustomHours: Record<string, number> = {}
+      if (currentPolicy.custom_day_hours) {
+        Object.entries(currentPolicy.custom_day_hours).forEach(([k, v]) => {
+          if (!k.startsWith('_') && typeof v === 'number') {
+            cleanCustomHours[k] = v
+          }
+        })
+      }
+      setCustomDayHours(cleanCustomHours)
+
+      const schedules = currentPolicy.custom_day_schedules || {}
+      setCustomDaySchedules(schedules)
+      setEnableCustomHours(
+        Object.keys(cleanCustomHours).length > 0 || Object.keys(schedules).length > 0
+      )
+
+      if (currentPolicy.official_holidays && currentPolicy.official_holidays.length > 0) {
+        setOfficialHolidays(currentPolicy.official_holidays)
+      } else {
+        setOfficialHolidays(DEFAULT_OFFICIAL_HOLIDAYS)
+      }
+
+      // Fetch live holidays directly from database
+      fetchOfficialHolidays()
+        .then((dbHols) => {
+          if (dbHols && dbHols.length > 0) {
+            setOfficialHolidays(dbHols)
+          }
+        })
+        .catch(() => {})
+    }
+  }, [isOpen, currentPolicy])
+
   if (!isOpen) return null
+
+  function handleAddHoliday() {
+    if (!newHolidayName.trim() || !newHolidayDate) return
+    const newHol: CompanyHoliday = {
+      id: `hol-${Date.now()}`,
+      name: newHolidayName.trim(),
+      date: newHolidayDate,
+    }
+    setOfficialHolidays((prev) => [...prev, newHol].sort((a, b) => a.date.localeCompare(b.date)))
+    setNewHolidayName('')
+    setNewHolidayDate('')
+  }
+
+  function handleDeleteHoliday(id: string) {
+    setOfficialHolidays((prev) => prev.filter((h) => h.id !== id))
+  }
 
   function toggleDay(dayKey: string) {
     if (workDays.includes(dayKey)) {
@@ -171,6 +232,7 @@ export default function WorkPolicyModal({
         default_sick_leave_quota: Number(sickQuota),
         custom_day_hours: customPayload,
         custom_day_schedules: customSchedulesPayload,
+        official_holidays: officialHolidays,
       })
       onUpdated(updated)
       setSavedSuccess(true)
@@ -675,6 +737,128 @@ export default function WorkPolicyModal({
                   Saudi Standard: 30 days full pay
                 </div>
               </div>
+            </div>
+          </div>
+
+          {/* Official Company Holidays */}
+          <div
+            style={{
+              padding: '16px',
+              borderRadius: '12px',
+              backgroundColor: '#F8FAFC',
+              border: '1px solid #E2E8F0',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
+              <div style={{ fontSize: '13px', fontWeight: 700, color: '#0F172A', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <Calendar size={16} color="#4F46E5" /> Official Company Holidays ({officialHolidays.length})
+              </div>
+              <span style={{ fontSize: '11px', color: '#64748B' }}>
+                Excluded from expected working hours
+              </span>
+            </div>
+
+            {/* List of existing holidays */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', maxHeight: '180px', overflowY: 'auto', marginBottom: '12px', paddingRight: '4px' }}>
+              {officialHolidays.length === 0 ? (
+                <div style={{ fontSize: '12px', color: '#94A3B8', textAlign: 'center', padding: '12px' }}>
+                  No official holidays added yet.
+                </div>
+              ) : (
+                officialHolidays.map((hol) => (
+                  <div
+                    key={hol.id}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      padding: '8px 12px',
+                      borderRadius: '8px',
+                      backgroundColor: '#FFFFFF',
+                      border: '1px solid #E2E8F0',
+                      fontSize: '12px',
+                    }}
+                  >
+                    <div>
+                      <strong style={{ color: '#0F172A' }}>{hol.name}</strong>
+                      <span style={{ color: '#64748B', marginLeft: '8px', fontSize: '11px' }}>({hol.date})</span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => handleDeleteHoliday(hol.id)}
+                      style={{
+                        background: 'none',
+                        border: 'none',
+                        color: '#EF4444',
+                        cursor: 'pointer',
+                        padding: '4px',
+                        display: 'flex',
+                        alignItems: 'center',
+                      }}
+                      title="Remove Holiday"
+                    >
+                      <Trash2 size={14} />
+                    </button>
+                  </div>
+                ))
+              )}
+            </div>
+
+            {/* Add Holiday Form */}
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns: '1.5fr 1.2fr auto',
+                gap: '8px',
+                alignItems: 'center',
+                paddingTop: '10px',
+                borderTop: '1px dashed #CBD5E1',
+              }}
+            >
+              <input
+                type="text"
+                placeholder="Holiday Name (e.g. Saudi National Day)"
+                value={newHolidayName}
+                onChange={(e) => setNewHolidayName(e.target.value)}
+                style={{
+                  padding: '7px 10px',
+                  borderRadius: '6px',
+                  border: '1px solid #CBD5E1',
+                  fontSize: '12px',
+                  color: '#0F172A',
+                  backgroundColor: '#FFFFFF',
+                }}
+              />
+              <input
+                type="date"
+                value={newHolidayDate}
+                onChange={(e) => setNewHolidayDate(e.target.value)}
+                style={{
+                  padding: '6px 10px',
+                  borderRadius: '6px',
+                  border: '1px solid #CBD5E1',
+                  fontSize: '12px',
+                  color: '#0F172A',
+                  backgroundColor: '#FFFFFF',
+                }}
+              />
+              <button
+                type="button"
+                onClick={handleAddHoliday}
+                disabled={!newHolidayName.trim() || !newHolidayDate}
+                className="btn btn-primary"
+                style={{
+                  padding: '7px 12px',
+                  fontSize: '12px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '4px',
+                  cursor: !newHolidayName.trim() || !newHolidayDate ? 'not-allowed' : 'pointer',
+                  opacity: !newHolidayName.trim() || !newHolidayDate ? 0.6 : 1,
+                }}
+              >
+                <Plus size={14} /> Add
+              </button>
             </div>
           </div>
         </div>

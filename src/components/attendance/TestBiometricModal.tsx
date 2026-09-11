@@ -12,6 +12,7 @@ import {
   CheckCircle2,
   Users,
   Camera,
+  Eye,
 } from 'lucide-react'
 import {
   loadBiometricModels,
@@ -20,6 +21,9 @@ import {
   getEmployeeFaceEnrollment,
   BiometricDetection,
   BiometricMatchResult,
+  createLivenessTracker,
+  LivenessEvaluation,
+  LivenessTracker,
 } from '@/lib/biometricEngine'
 
 interface Props {
@@ -43,39 +47,63 @@ export default function TestBiometricModal({
   const [enrolledDescriptor, setEnrolledDescriptor] = useState<number[] | null>(null)
   const [enrolledAt, setEnrolledAt] = useState<string | null>(null)
   const [enrolledSnapshotUrl, setEnrolledSnapshotUrl] = useState<string | null>(null)
-  const [hasEnrolledFace, setHasEnrolledFace] = useState<boolean>(false)
+  const [hasEnrolledFace, setHasEnrolledFace] = useState<boolean>(true)
+  const [isCheckingEnrollment, setIsCheckingEnrollment] = useState<boolean>(true)
 
   // Real-time live match state
   const [detection, setDetection] = useState<BiometricDetection | null>(null)
   const [matchResult, setMatchResult] = useState<BiometricMatchResult | null>(null)
+  const [livenessResult, setLivenessResult] = useState<LivenessEvaluation | null>(null)
+
+  // Verification Latch for test feedback stability
+  const latchedVerifiedRef = useRef<{ match: BiometricMatchResult; expiresAt: number } | null>(null)
+  const [latchedMatch, setLatchedMatch] = useState<BiometricMatchResult | null>(null)
 
   const videoRef = useRef<HTMLVideoElement | null>(null)
   const animFrameRef = useRef<number | null>(null)
   const activeStreamRef = useRef<MediaStream | null>(null)
   const isScanningRef = useRef(false)
+  const enrolledDescriptorRef = useRef<number[] | null>(null)
+  const livenessTrackerRef = useRef<LivenessTracker>(createLivenessTracker())
 
   // 1. Load enrollment info & start camera
   useEffect(() => {
     if (!isOpen) return
 
     let isCancelled = false
+    setIsCheckingEnrollment(true)
+    livenessTrackerRef.current.reset()
+    latchedVerifiedRef.current = null
+    setLatchedMatch(null)
+    setLivenessResult(null)
+    setDetection(null)
+    setMatchResult(null)
 
     async function init() {
       setModelLoading(true)
 
-      // Load enrolled descriptor
+      // Load enrolled descriptor immediately
       if (userId) {
-        const res = await getEmployeeFaceEnrollment(userId)
-        if (res.descriptor && res.descriptor.length === 128) {
-          setEnrolledDescriptor(res.descriptor)
-          setEnrolledAt(res.enrolled_at)
-          setEnrolledSnapshotUrl(res.snapshot_url || null)
-          setHasEnrolledFace(true)
-        } else {
-          setEnrolledDescriptor(null)
-          setHasEnrolledFace(false)
+        try {
+          const res = await getEmployeeFaceEnrollment(userId)
+          if (!isCancelled) {
+            if (res.descriptor && res.descriptor.length === 128) {
+              enrolledDescriptorRef.current = res.descriptor
+              setEnrolledDescriptor(res.descriptor)
+              setEnrolledAt(res.enrolled_at)
+              setEnrolledSnapshotUrl(res.snapshot_url || null)
+              setHasEnrolledFace(true)
+            } else {
+              enrolledDescriptorRef.current = null
+              setEnrolledDescriptor(null)
+              setHasEnrolledFace(false)
+            }
+          }
+        } catch (e) {
+          console.warn('Enrollment load error:', e)
         }
       }
+      setIsCheckingEnrollment(false)
 
       const modelsReady = await loadBiometricModels()
       if (isCancelled) return
@@ -96,6 +124,20 @@ export default function TestBiometricModal({
     }
   }, [isOpen, userId])
 
+  // Attach camera stream to video element whenever stream updates
+  useEffect(() => {
+    if (cameraStream && videoRef.current) {
+      const video = videoRef.current
+      video.srcObject = cameraStream
+      video
+        .play()
+        .then(() => {
+          startLiveTesting()
+        })
+        .catch((err) => console.warn('Video play auto-start error:', err))
+    }
+  }, [cameraStream])
+
   function stopCamera() {
     if (animFrameRef.current) {
       cancelAnimationFrame(animFrameRef.current)
@@ -110,6 +152,9 @@ export default function TestBiometricModal({
     }
     setCameraStream(null)
     isScanningRef.current = false
+    latchedVerifiedRef.current = null
+    setLatchedMatch(null)
+    livenessTrackerRef.current.reset()
   }
 
   async function startCamera() {
@@ -128,45 +173,60 @@ export default function TestBiometricModal({
 
       activeStreamRef.current = stream
       setCameraStream(stream)
-
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream
-        await videoRef.current.play()
-        startLiveTesting()
-      }
     } catch (err: any) {
       console.error('Test camera error:', err)
       setCameraError('Camera access denied. Please allow camera permissions in your browser.')
     }
   }
 
-  // 2. Real-time test evaluation loop
+  // 2. Real-time test evaluation loop (85ms polling)
   function startLiveTesting() {
+    if (isScanningRef.current) return
+    isScanningRef.current = true
     let lastScan = 0
 
     async function evaluate() {
-      if (!videoRef.current || isScanningRef.current) {
+      if (!videoRef.current || !isScanningRef.current) {
         animFrameRef.current = requestAnimationFrame(evaluate)
         return
       }
 
       const now = Date.now()
-      // Evaluate every ~140ms for responsive ~7 FPS live matching
-      if (now - lastScan >= 140) {
+      // Evaluate every ~85ms for responsive real-time matching and accurate blink capture
+      if (now - lastScan >= 85) {
         lastScan = now
         try {
           const scan = await analyzeLiveFace(videoRef.current, { requireCentered: false })
           setDetection(scan)
 
+          // Run Anti-Spoofing & Liveness Tracker
+          const liveCheck = livenessTrackerRef.current.update(scan)
+          setLivenessResult(liveCheck)
+
+          // Read latest enrolled descriptor directly from ref to avoid stale closures
+          const activeDescriptor = enrolledDescriptorRef.current || enrolledDescriptor
+
           if (scan.detected && scan.descriptor) {
-            if (enrolledDescriptor && enrolledDescriptor.length === 128) {
-              const res = verifyFaceBiometrics(scan.descriptor, enrolledDescriptor, userName)
+            if (activeDescriptor && activeDescriptor.length === 128) {
+              const res = verifyFaceBiometrics(scan.descriptor, activeDescriptor, userName)
               setMatchResult(res)
+
+              if (res.isMatch && liveCheck.isLive && !liveCheck.isSpoofDetected) {
+                latchedVerifiedRef.current = { match: res, expiresAt: Date.now() + 5000 }
+                setLatchedMatch(res)
+              }
             } else {
               setMatchResult(null)
             }
           } else {
-            setMatchResult(null)
+            if (!latchedVerifiedRef.current || latchedVerifiedRef.current.expiresAt <= Date.now()) {
+              setMatchResult(null)
+            }
+          }
+
+          if (liveCheck.isSpoofDetected) {
+            latchedVerifiedRef.current = null
+            setLatchedMatch(null)
           }
         } catch (e) {
           console.warn('Test evaluation frame error:', e)
@@ -181,8 +241,17 @@ export default function TestBiometricModal({
 
   if (!isOpen) return null
 
-  const isMatched = matchResult?.isMatch ?? false
-  const hasResult = Boolean(matchResult)
+  const isLatched = Boolean(
+    latchedMatch &&
+    latchedVerifiedRef.current &&
+    latchedVerifiedRef.current.expiresAt > Date.now()
+  )
+  const isSpoof = livenessResult?.isSpoofDetected ?? false
+  const activeMatchResult = (isLatched && !isSpoof) ? (latchedMatch || matchResult) : matchResult
+  const isMatched = activeMatchResult?.isMatch ?? false
+  const hasResult = Boolean(activeMatchResult)
+  const isLive = (livenessResult?.isLive ?? false) || (isLatched && !isSpoof)
+  const isFullyVerified = isMatched && isLive && !isSpoof
 
   return (
     <div
@@ -259,7 +328,7 @@ export default function TestBiometricModal({
 
         {/* Content Body */}
         <div style={{ padding: '20px 22px' }}>
-          {!hasEnrolledFace ? (
+          {!isCheckingEnrollment && !hasEnrolledFace ? (
             <div style={{ textAlign: 'center', padding: '24px 10px' }}>
               <div
                 style={{
@@ -317,8 +386,12 @@ export default function TestBiometricModal({
                   border: `3px solid ${
                     !detection?.detected
                       ? '#475569'
-                      : isMatched
+                      : isSpoof
+                      ? '#EF4444'
+                      : isFullyVerified
                       ? '#10B981'
+                      : isMatched && !isLive
+                      ? '#F59E0B'
                       : '#EF4444'
                   }`,
                   transition: 'border-color 0.2s ease',
@@ -349,12 +422,20 @@ export default function TestBiometricModal({
                     border: `2.5px solid ${
                       !detection?.detected
                         ? 'rgba(255, 255, 255, 0.4)'
-                        : isMatched
+                        : isSpoof
+                        ? '#EF4444'
+                        : isFullyVerified
                         ? '#10B981'
+                        : isMatched && !isLive
+                        ? '#F59E0B'
                         : '#EF4444'
                     }`,
-                    boxShadow: isMatched
+                    boxShadow: isFullyVerified
                       ? '0 0 24px rgba(16, 185, 129, 0.5), 0 0 0 9999px rgba(0, 0, 0, 0.45)'
+                      : isSpoof
+                      ? '0 0 24px rgba(239, 68, 68, 0.6), 0 0 0 9999px rgba(0, 0, 0, 0.45)'
+                      : isMatched && !isLive
+                      ? '0 0 24px rgba(245, 158, 11, 0.5), 0 0 0 9999px rgba(0, 0, 0, 0.45)'
                       : hasResult && !isMatched
                       ? '0 0 24px rgba(239, 68, 68, 0.5), 0 0 0 9999px rgba(0, 0, 0, 0.45)'
                       : '0 0 0 9999px rgba(0, 0, 0, 0.5)',
@@ -363,7 +444,7 @@ export default function TestBiometricModal({
                   }}
                 />
 
-                {/* Live Real-Time Match Score HUD */}
+                {/* Live Real-Time Match & Liveness Score HUD */}
                 <div
                   style={{
                     position: 'absolute',
@@ -373,7 +454,8 @@ export default function TestBiometricModal({
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'space-between',
-                    gap: '10px',
+                    gap: '8px',
+                    flexWrap: 'wrap',
                   }}
                 >
                   <div
@@ -394,30 +476,60 @@ export default function TestBiometricModal({
                     <span>Registered: {userName}</span>
                   </div>
 
-                  {matchResult && (
-                    <div
-                      style={{
-                        padding: '5px 12px',
-                        borderRadius: '999px',
-                        backgroundColor: isMatched ? '#16A34A' : '#DC2626',
-                        color: '#FFFFFF',
-                        fontSize: '11.5px',
-                        fontWeight: 800,
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '6px',
-                        boxShadow: '0 4px 12px rgba(0, 0, 0, 0.3)',
-                      }}
-                    >
-                      {isMatched ? (
-                        <>
-                          <CheckCircle2 size={14} /> {matchResult?.similarityScore ?? 0}% Match (Verified)
-                        </>
-                      ) : (
-                        <>
-                          <AlertTriangle size={14} /> {matchResult?.similarityScore ?? 0}% Match (Mismatch)
-                        </>
-                      )}
+                  {detection?.detected && (
+                    <div style={{ display: 'flex', gap: '6px' }}>
+                      {/* Anti-spoofing alert or Match badge */}
+                      {isSpoof ? (
+                        <div
+                          style={{
+                            padding: '5px 12px',
+                            borderRadius: '999px',
+                            backgroundColor: '#DC2626',
+                            color: '#FFFFFF',
+                            fontSize: '11.5px',
+                            fontWeight: 800,
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '6px',
+                            boxShadow: '0 4px 12px rgba(220, 38, 38, 0.4)',
+                          }}
+                        >
+                          <AlertTriangle size={14} /> Static Phone/Photo Spoof
+                        </div>
+                      ) : activeMatchResult ? (
+                        <div
+                          style={{
+                            padding: '5px 12px',
+                            borderRadius: '999px',
+                            backgroundColor: isFullyVerified
+                              ? '#16A34A'
+                              : isMatched
+                              ? '#D97706'
+                              : '#DC2626',
+                            color: '#FFFFFF',
+                            fontSize: '11.5px',
+                            fontWeight: 800,
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '6px',
+                            boxShadow: '0 4px 12px rgba(0, 0, 0, 0.3)',
+                          }}
+                        >
+                          {isFullyVerified ? (
+                            <>
+                              <CheckCircle2 size={14} /> {activeMatchResult?.similarityScore ?? 0}% Match (Verified &amp; Live)
+                            </>
+                          ) : isMatched ? (
+                            <>
+                              <Eye size={14} /> {activeMatchResult?.similarityScore ?? 0}% Match (Blink to verify)
+                            </>
+                          ) : (
+                            <>
+                              <AlertTriangle size={14} /> {activeMatchResult?.similarityScore ?? 0}% Match (Mismatch)
+                            </>
+                          )}
+                        </div>
+                      ) : null}
                     </div>
                   )}
                 </div>
@@ -447,11 +559,25 @@ export default function TestBiometricModal({
                         <Scan size={14} color="#FBBF24" className="animate-pulse" />
                         <span>Position face in the frame...</span>
                       </>
-                    ) : isMatched ? (
+                    ) : isSpoof ? (
+                      <>
+                        <AlertTriangle size={15} color="#F87171" />
+                        <span style={{ color: '#FCA5A5' }}>
+                          ⚠️ Static Screen / Photo Detected (Proxy Rejected — Live Presence Required)
+                        </span>
+                      </>
+                    ) : isFullyVerified ? (
                       <>
                         <CheckCircle2 size={15} color="#34D399" />
                         <span style={{ color: '#A7F3D0' }}>
-                          ✓ Identity Match Verified: Attendance Allowed
+                          ✓ Identity &amp; Live 3D Presence Verified: Attendance Allowed
+                        </span>
+                      </>
+                    ) : isMatched && !isLive ? (
+                      <>
+                        <Eye size={15} color="#FBBF24" className="animate-pulse" />
+                        <span style={{ color: '#FDE68A' }}>
+                          👁️ Identity Matched! Please blink naturally to confirm live presence
                         </span>
                       </>
                     ) : (
@@ -464,9 +590,9 @@ export default function TestBiometricModal({
                     )}
                   </div>
 
-                  {detection?.detected && matchResult && (
+                  {detection?.detected && (activeMatchResult || matchResult) && !isSpoof && (
                     <span style={{ fontSize: '10.5px', color: '#94A3B8' }}>
-                      Dist: {matchResult.euclideanDistance}
+                      Dist: {(activeMatchResult || matchResult)?.euclideanDistance}
                     </span>
                   )}
                 </div>

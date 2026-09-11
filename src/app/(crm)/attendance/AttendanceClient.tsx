@@ -27,6 +27,12 @@ import {
   Activity,
   Award,
   Scan,
+  Banknote,
+  Edit3,
+  AlertCircle,
+  Check,
+  X,
+  Trash2,
 } from 'lucide-react'
 import {
   CompanyLocation,
@@ -50,6 +56,15 @@ import {
   fetchCompanyWorkPolicy,
   DEFAULT_WORK_POLICY,
   fetchMonthlyWorkHoursAudit,
+  regularizeAttendanceLog,
+  calculateExpectedHoursInMonth,
+  fetchUserSalaryProfile,
+  parseRegularizationRequestNotes,
+  quickApproveRegularization,
+  rejectRegularizationRequest,
+  deleteAttendanceLog,
+  formatTo24HourTime,
+  formatDisplayTime,
 } from '@/lib/attendanceService'
 import { formatDistance } from '@/lib/geoUtils'
 import PunchModal from '@/components/attendance/PunchModal'
@@ -58,11 +73,12 @@ import LeaveRequestModal from '@/components/attendance/LeaveRequestModal'
 import ExceptionReviewModal from '@/components/attendance/ExceptionReviewModal'
 import EmployeeAttendanceDetailModal from '@/components/attendance/EmployeeAttendanceDetailModal'
 import WorkPolicyModal from '@/components/attendance/WorkPolicyModal'
+import RegularizeAttendanceModal from '@/components/attendance/RegularizeAttendanceModal'
 import FaceEnrollmentModal from '@/components/attendance/FaceEnrollmentModal'
 import BiometricManagementModal from '@/components/attendance/BiometricManagementModal'
 import TestBiometricModal from '@/components/attendance/TestBiometricModal'
 import Pagination from '@/components/Pagination'
-import { getEmployeeFaceEnrollment } from '@/lib/biometricEngine'
+import { getEmployeeFaceEnrollment, loadBiometricModels } from '@/lib/biometricEngine'
 import type { Profile } from '@/types/database'
 
 interface AttendanceClientProps {
@@ -77,7 +93,7 @@ export default function AttendanceClient({ profile }: AttendanceClientProps) {
   const userId = profile?.id || 'guest-user'
 
   // Tab State
-  type TabType = 'ROSTER' | 'EXCEPTIONS' | 'LEAVES' | 'HOURS_AUDIT' | 'MY_LOGS' | 'MY_LEAVES'
+  type TabType = 'ROSTER' | 'EXCEPTIONS' | 'REGULARIZATIONS' | 'LEAVES' | 'HOURS_AUDIT' | 'MY_LOGS' | 'MY_LEAVES'
   const [activeTab, setActiveTab] = useState<TabType>(canManage ? 'ROSTER' : 'MY_LOGS')
 
   // Core Data States
@@ -115,7 +131,15 @@ export default function AttendanceClient({ profile }: AttendanceClientProps) {
   const [monthlyAuditList, setMonthlyAuditList] = useState<MonthlyWorkHoursAudit[]>([])
   const [auditExpectedDays, setAuditExpectedDays] = useState<number>(22)
   const [auditExpectedHours, setAuditExpectedHours] = useState<number>(176)
+  const [auditExpectedToDateHours, setAuditExpectedToDateHours] = useState<number>(80)
+  const [auditElapsedDays, setAuditElapsedDays] = useState<number>(10)
   const [auditLoading, setAuditLoading] = useState(false)
+  const [mySalary, setMySalary] = useState<{ base_salary: number; currency: string } | null>(null)
+
+  // Regularization Modal State
+  const [regularizeModalOpen, setRegularizeModalOpen] = useState(false)
+  const [regularizeLog, setRegularizeLog] = useState<AttendanceLog | null>(null)
+  const [regularizeEmployeeName, setRegularizeEmployeeName] = useState('')
 
   // Live Clock & Active Duration
   const [currentTime, setCurrentTime] = useState<string>('')
@@ -146,7 +170,10 @@ export default function AttendanceClient({ profile }: AttendanceClientProps) {
   // Filters & Search
   const [searchQuery, setSearchQuery] = useState('')
   const [rosterFilter, setRosterFilter] = useState<'ALL' | 'HQ' | 'REMOTE' | 'LEAVE' | 'ABSENT'>('ALL')
-  const [exceptionsFilter, setExceptionsFilter] = useState<'ALL' | 'ACTION_NEEDED' | 'FLAGGED' | 'APPROVED'>('ALL')
+  const [exceptionsFilter, setExceptionsFilter] = useState<'ALL' | 'ACTION_NEEDED' | 'FLAGGED' | 'APPROVED'>('ACTION_NEEDED')
+  const [regularizationsFilter, setRegularizationsFilter] = useState<'ALL' | 'PENDING' | 'APPROVED' | 'REJECTED'>('PENDING')
+  const [regularizeFeedbackMsg, setRegularizeFeedbackMsg] = useState<{ id: string; type: 'success' | 'error'; message: string } | null>(null)
+  const [isProcessingRegularizeId, setIsProcessingRegularizeId] = useState<string | null>(null)
 
   // Pagination states for all tables
   const [rosterPage, setRosterPage] = useState(1)
@@ -154,6 +181,9 @@ export default function AttendanceClient({ profile }: AttendanceClientProps) {
 
   const [exceptionsPage, setExceptionsPage] = useState(1)
   const [exceptionsPageSize, setExceptionsPageSize] = useState(10)
+
+  const [regularizationsPage, setRegularizationsPage] = useState(1)
+  const [regularizationsPageSize, setRegularizationsPageSize] = useState(10)
 
   const [auditPage, setAuditPage] = useState(1)
   const [auditPageSize, setAuditPageSize] = useState(10)
@@ -167,6 +197,11 @@ export default function AttendanceClient({ profile }: AttendanceClientProps) {
   const [myLeavesPage, setMyLeavesPage] = useState(1)
   const [myLeavesPageSize, setMyLeavesPageSize] = useState(10)
 
+  const todayDateStr = useMemo(() => new Date().toISOString().split('T')[0], [])
+  const todayHoliday = useMemo(() => {
+    return (workPolicy.official_holidays || []).find((h) => h.date === todayDateStr)
+  }, [workPolicy.official_holidays, todayDateStr])
+
   // Reset pagination on filter or query change
   useEffect(() => {
     setRosterPage(1)
@@ -177,12 +212,18 @@ export default function AttendanceClient({ profile }: AttendanceClientProps) {
   }, [exceptionsFilter])
 
   useEffect(() => {
+    setRegularizationsPage(1)
+  }, [regularizationsFilter])
+
+  useEffect(() => {
     setAuditPage(1)
   }, [selectedAuditMonth])
 
   // Initial Load
   useEffect(() => {
     loadInitialData()
+    // Preload neural biometric models into browser memory / cache
+    loadBiometricModels().catch(() => {})
     const timer = setInterval(() => {
       const now = new Date()
       setCurrentTime(
@@ -220,14 +261,38 @@ export default function AttendanceClient({ profile }: AttendanceClientProps) {
     }
   }, [selectedAuditMonth, activeTab, canManage])
 
-  // Personal Monthly Work Hours, Punctuality & Leave Statistics
+  // Personal Monthly Work Hours, Punctuality, Deficit & Pay Cut Statistics
   const myMonthlyStats = useMemo(() => {
     let totalWorkedMinutes = 0
+    let currentMonthWorkedMinutes = 0
     let lateDaysCount = 0
     let totalLateMinutes = 0
-    let deficitMinutes = 0
     let overtimeMinutes = 0
-    const expectedMinutesPerDay = (workPolicy.daily_expected_hours || 8) * 60
+
+    const now = new Date()
+    const currentYear = now.getFullYear()
+    const currentMonth = now.getMonth() + 1
+    const currentDay = now.getDate()
+    const currentMonthStr = `${currentYear}-${currentMonth.toString().padStart(2, '0')}`
+    const todayDateStr = now.toISOString().split('T')[0]
+
+    // Calculate Month-to-Date (MTD) elapsed expected hours (never includes future days!)
+    const {
+      count: totalExpectedDays,
+      totalHours: totalExpectedHours,
+      elapsedCount: mtdExpectedDays,
+      elapsedHours: mtdExpectedHours,
+    } = calculateExpectedHoursInMonth(
+      currentYear,
+      currentMonth,
+      workPolicy.work_days,
+      workPolicy.daily_expected_hours,
+      workPolicy.custom_day_hours,
+      workPolicy.official_holidays,
+      currentDay
+    )
+
+    const defaultDayHours = workPolicy.daily_expected_hours || 8
     const [shiftH, shiftM] = (workPolicy.shift_start_time || '09:00').split(':').map(Number)
     const shiftHour = isNaN(shiftH) ? 9 : shiftH
     const shiftMinute = isNaN(shiftM) ? 0 : shiftM
@@ -235,8 +300,37 @@ export default function AttendanceClient({ profile }: AttendanceClientProps) {
     const shiftStartCutoffMinutes = shiftHour * 60 + shiftMinute + graceMinutes
 
     for (const log of myHistory) {
-      const worked = log.total_working_minutes || 0
+      // Determine expected hours configured for this specific day
+      let dayExpectedHours = defaultDayHours
+      if (log.date) {
+        const d = new Date(log.date + 'T00:00:00')
+        const dayName = d.toLocaleDateString('en-US', { weekday: 'long' })
+        if (workPolicy.custom_day_hours && workPolicy.custom_day_hours[dayName] !== undefined) {
+          dayExpectedHours = workPolicy.custom_day_hours[dayName]
+        }
+      }
+      const dayExpectedMinutes = dayExpectedHours * 60
+
+      let worked = log.total_working_minutes || 0
+      // Fallback for unclosed shifts
+      if (log.punch_in_at && !log.punch_out_at) {
+        if (log.date < todayDateStr) {
+          // If employee forgot to punch out on past date, calculate duration up to 17:00 EOD
+          const inDate = new Date(log.punch_in_at)
+          const inMinutes = inDate.getHours() * 60 + inDate.getMinutes()
+          const endMinutes = 17 * 60
+          worked = Math.max(0, endMinutes - inMinutes)
+        } else if (log.date === todayDateStr && worked === 0) {
+          worked = Math.max(1, Math.round((Date.now() - new Date(log.punch_in_at).getTime()) / (1000 * 60)))
+        }
+      }
+
       totalWorkedMinutes += worked
+
+      const isCurrentMonth = log.date && log.date.startsWith(currentMonthStr)
+      if (isCurrentMonth) {
+        currentMonthWorkedMinutes += worked
+      }
 
       // Calculate punctuality from punch_in_at
       if (log.punch_in_at) {
@@ -248,47 +342,100 @@ export default function AttendanceClient({ profile }: AttendanceClientProps) {
         }
       }
 
-      // Calculate daily deficit / short hours
-      if (log.punch_out_at) {
-        const diff = worked - expectedMinutesPerDay
-        if (diff < 0) {
-          deficitMinutes += Math.abs(diff)
-        } else {
-          overtimeMinutes += diff
-        }
+      // Daily flexible workday: If employee worked their configured hours (e.g. 1pm - 9pm = 8.0h),
+      // duration covers expected time -> 0 deficit!
+      if (worked > dayExpectedMinutes) {
+        overtimeMinutes += (worked - dayExpectedMinutes)
       }
     }
 
     const totalWorkedHours = (totalWorkedMinutes / 60).toFixed(1)
-    const deficitHours = (deficitMinutes / 60).toFixed(1)
+    const currentMonthWorkedHours = currentMonthWorkedMinutes / 60
     const overtimeHours = (overtimeMinutes / 60).toFixed(1)
 
-    // Approved leave hours for this user
-    const approvedLeaveDays = myLeaveRequests
-      .filter((r) => r.status === 'APPROVED')
-      .reduce((acc, r) => acc + r.total_days, 0)
-    const approvedLeaveHours = (approvedLeaveDays * (workPolicy.daily_expected_hours || 8)).toFixed(1)
+    // Approved leave hours for this user in current month up to today (strictly elapsed days!)
+    let mtdApprovedLeaveDays = 0
+    let mtdApprovedLeaveHours = 0
+    let totalApprovedLeaveDaysInMonth = 0
+
+    const holidays = (workPolicy.official_holidays || []).map((h: any) => typeof h === 'string' ? h : h.date)
+    const policyWorkDays = workPolicy.work_days || ['SUNDAY', 'MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'SATURDAY']
+    const approvedLeaves = myLeaveRequests.filter((r) => r.status === 'APPROVED')
+
+    for (let day = 1; day <= currentDay; day++) {
+      const dateStr = `${currentYear}-${currentMonth.toString().padStart(2, '0')}-${day.toString().padStart(2, '0')}`
+      const d = new Date(dateStr + 'T00:00:00')
+      const dayName = d.toLocaleDateString('en-US', { weekday: 'long' }).toUpperCase()
+      const isWorkDay = policyWorkDays.includes(dayName) && !holidays.includes(dateStr)
+
+      if (isWorkDay) {
+        const isCovered = approvedLeaves.some((r) => r.start_date <= dateStr && r.end_date >= dateStr)
+        if (isCovered) {
+          mtdApprovedLeaveDays++
+          let dayH = defaultDayHours
+          if (workPolicy.custom_day_hours && workPolicy.custom_day_hours[dayName] !== undefined) {
+            dayH = workPolicy.custom_day_hours[dayName]
+          }
+          mtdApprovedLeaveHours += dayH
+        }
+      }
+    }
+
+    for (const r of approvedLeaves) {
+      if ((r.start_date && r.start_date.startsWith(currentMonthStr)) || (r.end_date && r.end_date.startsWith(currentMonthStr))) {
+        totalApprovedLeaveDaysInMonth += r.total_days || 0
+      }
+    }
+
+    // Deficit strictly for Month-To-Date (elapsed days only, no future deficit!)
+    const mtdDeficitHours = Math.max(
+      0,
+      Math.round((mtdExpectedHours - currentMonthWorkedHours - mtdApprovedLeaveHours) * 10) / 10
+    )
+
+    // Pay cut calculation strictly based on employee's real base salary (no random fallback!)
+    const hasSalaryProfile = Boolean(mySalary && mySalary.base_salary > 0)
+    const baseSalary = hasSalaryProfile ? mySalary!.base_salary : 0
+    const hourlyRate = (baseSalary > 0 && totalExpectedHours > 0)
+      ? Math.round((baseSalary / totalExpectedHours) * 100) / 100
+      : 0
+    const estimatedPayCut = (hourlyRate > 0 && mtdDeficitHours > 0)
+      ? Math.round(mtdDeficitHours * hourlyRate)
+      : 0
+    const currency = mySalary?.currency || 'SAR'
 
     const pendingLeaveCount = myLeaveRequests.filter((r) => r.status === 'PENDING').length
 
     return {
       totalWorkedHours,
       totalWorkedMinutes,
+      currentMonthWorkedHours: currentMonthWorkedHours.toFixed(1),
       lateDaysCount,
       totalLateMinutes,
-      deficitHours,
-      deficitMinutes,
+      deficitHours: mtdDeficitHours.toFixed(1),
+      mtdDeficitHours,
+      mtdExpectedHours,
+      mtdExpectedDays,
+      totalExpectedHours,
+      totalExpectedDays,
+      hasSalaryProfile,
+      baseSalary,
+      hourlyRate,
+      estimatedPayCut,
+      currency,
       overtimeHours,
-      approvedLeaveDays,
-      approvedLeaveHours,
+      approvedLeaveDays: mtdApprovedLeaveDays,
+      approvedLeaveHours: mtdApprovedLeaveHours.toFixed(1),
+      totalApprovedLeaveDaysInMonth,
       pendingLeaveCount,
       shiftStartCutoffMinutes,
       shiftHour,
       shiftMinute,
       graceMinutes,
-      expectedMinutesPerDay,
+      expectedMinutesPerDay: defaultDayHours * 60,
+      defaultDayHours,
     }
-  }, [myHistory, workPolicy, myLeaveRequests])
+  }, [myHistory, workPolicy, myLeaveRequests, mySalary])
 
   async function loadInitialData() {
     try {
@@ -302,6 +449,7 @@ export default function AttendanceClient({ profile }: AttendanceClientProps) {
           setFaceEnrolledAt(res.enrolled_at || null)
           setFaceSnapshotUrl(res.snapshot_url || null)
         })
+        fetchUserSalaryProfile(userId).then(setMySalary)
       }
 
       const tLog = await fetchTodayAttendance(userId)
@@ -341,10 +489,133 @@ export default function AttendanceClient({ profile }: AttendanceClientProps) {
       setMonthlyAuditList(res.auditList)
       setAuditExpectedDays(res.expectedWorkingDays)
       setAuditExpectedHours(res.expectedHoursPerEmployee)
+      setAuditExpectedToDateHours(res.expectedToDateHours)
+      setAuditElapsedDays(res.elapsedWorkingDays)
     } catch (e) {
       console.error(e)
     } finally {
       setAuditLoading(false)
+    }
+  }
+
+  function handleOpenRegularize(log?: AttendanceLog | null, empName?: string) {
+    setRegularizeLog(log || null)
+    setRegularizeEmployeeName(empName || '')
+    setRegularizeModalOpen(true)
+  }
+
+  async function handleQuickApproveRegularization(log: AttendanceLog) {
+    if (!log) return
+    setIsProcessingRegularizeId(log.id)
+    try {
+      const res = await quickApproveRegularization(log, userId)
+      if (res) {
+        setRegularizeFeedbackMsg({
+          id: log.id,
+          type: 'success',
+          message: `Approved shift regularization for ${log.employee_name || 'employee'}!`,
+        })
+        // Optimistically update pendingExceptions so UI transitions immediately
+        setPendingExceptions((prev) =>
+          prev.map((item) =>
+            item.id === log.id
+              ? {
+                  ...item,
+                  ...res,
+                  punch_in_status: 'APPROVED',
+                  punch_out_status: 'APPROVED',
+                  review_notes: res.review_notes || 'Regularized by Admin',
+                }
+              : item
+          )
+        )
+      }
+      await loadInitialData()
+    } catch (e) {
+      console.error('Error approving regularization:', e)
+      setRegularizeFeedbackMsg({
+        id: log.id,
+        type: 'error',
+        message: 'Could not complete approval. Please check your connection and try again.',
+      })
+    } finally {
+      setIsProcessingRegularizeId(null)
+      setTimeout(() => setRegularizeFeedbackMsg(null), 4000)
+    }
+  }
+
+  async function handleRejectRegularization(log: AttendanceLog) {
+    const defaultReason = 'Requested hours not verified'
+    const promptReason = window.prompt(
+      'Enter reason for rejecting regularization request (or Cancel to abort):',
+      defaultReason
+    )
+    if (promptReason === null) return // user cancelled
+    setIsProcessingRegularizeId(log.id)
+    try {
+      const ok = await rejectRegularizationRequest(log.id, promptReason, userId, log.user_id, log.date)
+      if (ok) {
+        setRegularizeFeedbackMsg({
+          id: log.id,
+          type: 'success',
+          message: `Regularization request rejected for ${log.employee_name || 'employee'}.`,
+        })
+        setPendingExceptions((prev) =>
+          prev.map((item) =>
+            item.id === log.id
+              ? {
+                  ...item,
+                  punch_in_status: 'FLAGGED',
+                  punch_out_status: 'FLAGGED',
+                  review_notes: `REJECTED REGULARIZATION: ${promptReason}`,
+                }
+              : item
+          )
+        )
+      }
+      await loadInitialData()
+    } catch (e) {
+      console.error('Error rejecting regularization:', e)
+    } finally {
+      setIsProcessingRegularizeId(null)
+      setTimeout(() => setRegularizeFeedbackMsg(null), 4000)
+    }
+  }
+
+  async function handleAdminDeleteRecord(log: AttendanceLog, isDedicatedReq: boolean = false) {
+    const confirmDelete = window.confirm(
+      `Are you sure you want to permanently delete this ${isDedicatedReq ? 'regularization request' : 'attendance log / punch'} for ${log.employee_name || 'this employee'} on ${log.date}? This action cannot be undone.`
+    )
+    if (!confirmDelete) return
+
+    setIsProcessingRegularizeId(log.id)
+    try {
+      const ok = await deleteAttendanceLog({
+        logId: log.id,
+        userId: log.user_id,
+        date: log.date,
+        isDedicatedRequest: isDedicatedReq,
+      })
+
+      if (ok) {
+        setRegularizeFeedbackMsg({
+          id: log.id,
+          type: 'success',
+          message: `Record successfully deleted for ${log.employee_name || 'employee'}.`,
+        })
+        setPendingExceptions((prev) => prev.filter((item) => item.id !== log.id))
+      }
+      await loadInitialData()
+    } catch (e) {
+      console.error('Error deleting record:', e)
+      setRegularizeFeedbackMsg({
+        id: log.id,
+        type: 'error',
+        message: 'Could not delete record. Please check server logs and try again.',
+      })
+    } finally {
+      setIsProcessingRegularizeId(null)
+      setTimeout(() => setRegularizeFeedbackMsg(null), 4000)
     }
   }
 
@@ -447,9 +718,23 @@ export default function AttendanceClient({ profile }: AttendanceClientProps) {
     return true
   })
 
-  // Filtered Exceptions
-  const filteredExceptions = useMemo(() => {
+  // ==========================================
+  // SEPARATE LIST 1: PUNCH APPROVALS (REMOTE / GEOFENCE / FLAGGED)
+  // ==========================================
+  const punchApprovalList = useMemo(() => {
     return pendingExceptions.filter((item) => {
+      const parsed = parseRegularizationRequestNotes(item.review_notes)
+      const hasRegNote =
+        item.review_notes &&
+        (item.review_notes.includes('REGULARIZATION') ||
+          item.review_notes.includes('Regularized:') ||
+          item.review_notes.includes('REJECTED REGULARIZATION'))
+      return !parsed.isRegularization && !hasRegNote
+    })
+  }, [pendingExceptions])
+
+  const filteredPunchApprovals = useMemo(() => {
+    return punchApprovalList.filter((item) => {
       const isFlagged = item.punch_in_status === 'FLAGGED' || item.punch_out_status === 'FLAGGED'
       const isPending =
         item.punch_in_status === 'PENDING_REVIEW' || item.punch_out_status === 'PENDING_REVIEW'
@@ -461,21 +746,88 @@ export default function AttendanceClient({ profile }: AttendanceClientProps) {
       if (exceptionsFilter === 'APPROVED') return isApproved
       return true
     })
-  }, [pendingExceptions, exceptionsFilter])
+  }, [punchApprovalList, exceptionsFilter])
 
-  const countExceptionsActionNeeded = pendingExceptions.filter(
-    (e) =>
-      e.punch_in_status === 'FLAGGED' ||
-      e.punch_in_status === 'PENDING_REVIEW' ||
-      e.punch_out_status === 'FLAGGED' ||
-      e.punch_out_status === 'PENDING_REVIEW'
-  ).length
-  const countExceptionsFlagged = pendingExceptions.filter(
-    (e) => e.punch_in_status === 'FLAGGED' || e.punch_out_status === 'FLAGGED'
-  ).length
-  const countExceptionsApproved = pendingExceptions.filter(
-    (e) => e.punch_in_status === 'APPROVED' && (!e.punch_out_status || e.punch_out_status === 'APPROVED')
-  ).length
+  const countPunchActionNeeded = useMemo(() => {
+    return punchApprovalList.filter(
+      (e) =>
+        e.punch_in_status === 'FLAGGED' ||
+        e.punch_in_status === 'PENDING_REVIEW' ||
+        e.punch_out_status === 'FLAGGED' ||
+        e.punch_out_status === 'PENDING_REVIEW'
+    ).length
+  }, [punchApprovalList])
+
+  const countPunchFlagged = useMemo(() => {
+    return punchApprovalList.filter(
+      (e) => e.punch_in_status === 'FLAGGED' || e.punch_out_status === 'FLAGGED'
+    ).length
+  }, [punchApprovalList])
+
+  const countPunchApproved = useMemo(() => {
+    return punchApprovalList.filter(
+      (e) => e.punch_in_status === 'APPROVED' && (!e.punch_out_status || e.punch_out_status === 'APPROVED')
+    ).length
+  }, [punchApprovalList])
+
+  // ==========================================
+  // SEPARATE LIST 2: SHIFT REGULARIZATION REQUESTS
+  // ==========================================
+  const allRegularizations = useMemo(() => {
+    return pendingExceptions.filter((item) => {
+      const parsed = parseRegularizationRequestNotes(item.review_notes)
+      const hasRegNote =
+        item.review_notes &&
+        (item.review_notes.includes('REGULARIZATION') ||
+          item.review_notes.includes('Regularized:') ||
+          item.review_notes.includes('REJECTED REGULARIZATION'))
+      return parsed.isRegularization || hasRegNote
+    })
+  }, [pendingExceptions])
+
+  const filteredRegularizations = useMemo(() => {
+    return allRegularizations.filter((item) => {
+      const isApproved =
+        item.punch_in_status === 'APPROVED' &&
+        (item.punch_out_status === 'APPROVED' || !item.punch_out_status) &&
+        item.review_notes?.includes('Regularized:')
+      const isRejected =
+        item.punch_in_status === 'FLAGGED' || item.review_notes?.includes('REJECTED REGULARIZATION')
+      const isPending = !isApproved && !isRejected
+
+      if (regularizationsFilter === 'PENDING') return isPending
+      if (regularizationsFilter === 'APPROVED') return isApproved
+      if (regularizationsFilter === 'REJECTED') return isRejected
+      return true
+    })
+  }, [allRegularizations, regularizationsFilter])
+
+  const countRegPending = useMemo(() => {
+    return allRegularizations.filter((e) => {
+      const isApproved =
+        e.punch_in_status === 'APPROVED' &&
+        (e.punch_out_status === 'APPROVED' || !e.punch_out_status) &&
+        e.review_notes?.includes('Regularized:')
+      const isRejected =
+        e.punch_in_status === 'FLAGGED' || e.review_notes?.includes('REJECTED REGULARIZATION')
+      return !isApproved && !isRejected
+    }).length
+  }, [allRegularizations])
+
+  const countRegApproved = useMemo(() => {
+    return allRegularizations.filter(
+      (e) =>
+        e.punch_in_status === 'APPROVED' &&
+        (e.punch_out_status === 'APPROVED' || !e.punch_out_status) &&
+        e.review_notes?.includes('Regularized:')
+    ).length
+  }, [allRegularizations])
+
+  const countRegRejected = useMemo(() => {
+    return allRegularizations.filter(
+      (e) => e.punch_in_status === 'FLAGGED' || e.review_notes?.includes('REJECTED REGULARIZATION')
+    ).length
+  }, [allRegularizations])
 
   // Sliced paginated arrays for clean page navigation
   const paginatedRoster = useMemo(() => {
@@ -483,10 +835,15 @@ export default function AttendanceClient({ profile }: AttendanceClientProps) {
     return filteredRoster.slice(start, start + rosterPageSize)
   }, [filteredRoster, rosterPage, rosterPageSize])
 
-  const paginatedExceptions = useMemo(() => {
+  const paginatedPunchApprovals = useMemo(() => {
     const start = (exceptionsPage - 1) * exceptionsPageSize
-    return filteredExceptions.slice(start, start + exceptionsPageSize)
-  }, [filteredExceptions, exceptionsPage, exceptionsPageSize])
+    return filteredPunchApprovals.slice(start, start + exceptionsPageSize)
+  }, [filteredPunchApprovals, exceptionsPage, exceptionsPageSize])
+
+  const paginatedRegularizations = useMemo(() => {
+    const start = (regularizationsPage - 1) * regularizationsPageSize
+    return filteredRegularizations.slice(start, start + regularizationsPageSize)
+  }, [filteredRegularizations, regularizationsPage, regularizationsPageSize])
 
   const paginatedAudit = useMemo(() => {
     const start = (auditPage - 1) * auditPageSize
@@ -510,8 +867,9 @@ export default function AttendanceClient({ profile }: AttendanceClientProps) {
 
   // Cumulative Audit Totals
   const totalActualCompanyHours = Math.round(monthlyAuditList.reduce((acc, c) => acc + c.actual_worked_hours, 0) * 10) / 10
-  const totalCompanyNonWorkingHours = Math.round(monthlyAuditList.reduce((acc, c) => acc + c.non_working_hours, 0) * 10) / 10
+  const totalCompanyNonWorkingHours = Math.round(monthlyAuditList.reduce((acc, c) => acc + (c.month_to_date_deficit ?? c.non_working_hours), 0) * 10) / 10
   const totalCompanyLeaveHours = Math.round(monthlyAuditList.reduce((acc, c) => acc + c.approved_leave_hours, 0) * 10) / 10
+  const totalCompanyPayCuts = Math.round(monthlyAuditList.reduce((acc, c) => acc + (c.estimated_pay_cut || 0), 0))
   const averageCompanyAdherence = monthlyAuditList.length > 0
     ? Math.round(monthlyAuditList.reduce((acc, c) => acc + c.attendance_adherence_percent, 0) / monthlyAuditList.length)
     : 100
@@ -683,6 +1041,31 @@ export default function AttendanceClient({ profile }: AttendanceClientProps) {
             boxShadow: 'var(--shadow-md)',
           }}
         >
+          {todayHoliday && (
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '12px',
+                padding: '12px 16px',
+                marginBottom: '20px',
+                borderRadius: 'var(--radius-md)',
+                background: 'linear-gradient(90deg, rgba(245, 158, 11, 0.25) 0%, rgba(217, 119, 6, 0.15) 100%)',
+                border: '1px solid rgba(251, 191, 36, 0.4)',
+                color: '#FDE68A',
+              }}
+            >
+              <span style={{ fontSize: '22px' }}>🎉</span>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontWeight: 700, fontSize: '14px', color: '#FEF08A' }}>
+                  Official Company Holiday: {todayHoliday.name}
+                </div>
+                <div style={{ fontSize: '12px', color: '#FDE68A', opacity: 0.9, marginTop: '2px' }}>
+                  Standard business hours and punch expectations are waived today. Zero absence or deficit hours will be logged.
+                </div>
+              </div>
+            </div>
+          )}
           <div
             style={{
               display: 'grid',
@@ -1130,8 +1513,8 @@ export default function AttendanceClient({ profile }: AttendanceClientProps) {
                     color: activeTab === 'EXCEPTIONS' ? '#FFFFFF' : 'var(--text-primary)',
                   }}
                 >
-                  <AlertTriangle size={15} /> Remote &amp; Flagged Punches ({pendingExceptions.length})
-                  {countExceptionsActionNeeded > 0 && (
+                  <AlertTriangle size={15} /> Punch Approvals ({punchApprovalList.length})
+                  {countPunchActionNeeded > 0 && (
                     <span
                       style={{
                         backgroundColor: '#DC2626',
@@ -1141,9 +1524,44 @@ export default function AttendanceClient({ profile }: AttendanceClientProps) {
                         padding: '1px 6px',
                         borderRadius: '999px',
                       }}
-                      title={`${countExceptionsActionNeeded} punches need review or action`}
+                      title={`${countPunchActionNeeded} remote punches need review`}
                     >
-                      {countExceptionsActionNeeded}
+                      {countPunchActionNeeded}
+                    </span>
+                  )}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('REGULARIZATIONS')}
+                  className={activeTab === 'REGULARIZATIONS' ? 'btn btn-primary' : 'btn btn-outline'}
+                  style={{
+                    fontWeight: 600,
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 6,
+                    backgroundColor: activeTab === 'REGULARIZATIONS' ? '#7C3AED' : '#FFFFFF',
+                    borderColor: activeTab === 'REGULARIZATIONS' ? '#7C3AED' : 'var(--border)',
+                    color: activeTab === 'REGULARIZATIONS' ? '#FFFFFF' : 'var(--text-primary)',
+                  }}
+                >
+                  <FileSpreadsheet size={15} /> Regularization Requests ({allRegularizations.length})
+                  {countRegPending > 0 && (
+                    <span
+                      style={{
+                        backgroundColor: '#F59E0B',
+                        color: '#FFF',
+                        fontSize: '11px',
+                        fontWeight: 700,
+                        padding: '1px 6px',
+                        borderRadius: '999px',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: 2,
+                      }}
+                      title={`${countRegPending} shift regularizations pending approval`}
+                    >
+                      ⏳ {countRegPending}
                     </span>
                   )}
                 </button>
@@ -1366,7 +1784,9 @@ export default function AttendanceClient({ profile }: AttendanceClientProps) {
                           PRESENT_HQ: { bg: '#DCFCE7', text: '#15803D', label: '🟢 In Office (HQ)' },
                           PRESENT_REMOTE: { bg: '#FEF08A', text: '#854D0E', label: '🟡 Remote / Field' },
                           ON_LEAVE: { bg: '#E0F2FE', text: '#0369A1', label: '🔵 On Leave' },
-                          NOT_PUNCHED: { bg: '#F1F5F9', text: '#475569', label: '⚪ Not Punched' },
+                          NOT_PUNCHED: todayHoliday
+                            ? { bg: '#FEF3C7', text: '#B45309', label: `🎉 Holiday (${todayHoliday.name})` }
+                            : { bg: '#F1F5F9', text: '#475569', label: '⚪ Not Punched' },
                         }[emp.live_status]
 
                         return (
@@ -1582,8 +2002,8 @@ export default function AttendanceClient({ profile }: AttendanceClientProps) {
                 <div style={{ fontSize: '24px', fontWeight: 800, color: '#0F172A', marginTop: 4 }}>
                   {auditExpectedHours}h <span style={{ fontSize: 13, fontWeight: 500, color: '#64748B' }}>/ staff</span>
                 </div>
-                <div style={{ fontSize: '11px', color: '#64748B', marginTop: 2 }}>
-                  {auditExpectedDays} Working Days ({workPolicy.work_days.length} days/week)
+                <div style={{ fontSize: '11px', color: '#2563EB', marginTop: 2, fontWeight: 600 }}>
+                  Expected to Date: {auditExpectedToDateHours}h ({auditElapsedDays} days elapsed)
                 </div>
               </div>
 
@@ -1610,13 +2030,33 @@ export default function AttendanceClient({ profile }: AttendanceClientProps) {
                 }}
               >
                 <div style={{ fontSize: '12px', fontWeight: 600, color: '#B45309', display: 'flex', alignItems: 'center', gap: 4 }}>
-                  <TrendingDown size={14} /> Cumulative Non-Working Hours
+                  <TrendingDown size={14} /> Cumulative Deficit to Date
                 </div>
                 <div style={{ fontSize: '24px', fontWeight: 800, color: '#D97706', marginTop: 4 }}>
-                  {totalCompanyNonWorkingHours}h
+                  {totalCompanyNonWorkingHours > 0 ? `-${totalCompanyNonWorkingHours}h` : '0.0h'}
                 </div>
                 <div style={{ fontSize: '11px', color: '#B45309', marginTop: 2 }}>
-                  Total shortfall / deficit hours across company
+                  Month-to-Date shortfall across company
+                </div>
+              </div>
+
+              {/* Total Company Estimated Pay Cuts */}
+              <div
+                className="card"
+                style={{
+                  padding: '16px',
+                  backgroundColor: totalCompanyPayCuts > 0 ? '#FEF2F2' : '#FFFFFF',
+                  borderColor: totalCompanyPayCuts > 0 ? '#FECACA' : 'var(--border)',
+                }}
+              >
+                <div style={{ fontSize: '12px', fontWeight: 600, color: totalCompanyPayCuts > 0 ? '#991B1B' : '#15803D', display: 'flex', alignItems: 'center', gap: 4 }}>
+                  <Banknote size={14} /> Total Estimated Pay Cuts
+                </div>
+                <div style={{ fontSize: '24px', fontWeight: 800, color: totalCompanyPayCuts > 0 ? '#DC2626' : '#15803D', marginTop: 4 }}>
+                  {totalCompanyPayCuts > 0 ? `-${totalCompanyPayCuts.toLocaleString()} SAR` : '0 SAR'}
+                </div>
+                <div style={{ fontSize: '11px', color: '#64748B', marginTop: 2 }}>
+                  Based on salary profile hourly rates
                 </div>
               </div>
 
@@ -1637,42 +2077,49 @@ export default function AttendanceClient({ profile }: AttendanceClientProps) {
             {/* Detailed Monthly Audit Table */}
             <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
               <div className="table-responsive-wrapper" style={{ overflowX: 'auto', width: '100%' }}>
-                <table className="table" style={{ width: '100%', minWidth: '950px', fontSize: '13px' }}>
+                <table className="table" style={{ width: '100%', minWidth: '100%', fontSize: '12.5px', tableLayout: 'auto' }}>
                   <thead>
                     <tr>
-                      <th style={{ width: '22%', padding: '10px 14px', fontSize: 11, textTransform: 'uppercase', color: 'var(--text-secondary)' }}>
+                      <th style={{ padding: '10px 12px', fontSize: 11, textTransform: 'uppercase', color: 'var(--text-secondary)' }}>
                         Staff Member
                       </th>
-                      <th style={{ width: '12%', padding: '10px 14px', fontSize: 11, textTransform: 'uppercase', color: 'var(--text-secondary)' }}>
+                      <th style={{ padding: '10px 10px', fontSize: 11, textTransform: 'uppercase', color: 'var(--text-secondary)' }}>
                         Expected Hours
                       </th>
-                      <th style={{ width: '12%', padding: '10px 14px', fontSize: 11, textTransform: 'uppercase', color: 'var(--text-secondary)' }}>
+                      <th style={{ padding: '10px 10px', fontSize: 11, textTransform: 'uppercase', color: 'var(--text-secondary)' }}>
                         Actual Worked
                       </th>
-                      <th style={{ width: '12%', padding: '10px 14px', fontSize: 11, textTransform: 'uppercase', color: 'var(--text-secondary)' }}>
+                      <th style={{ padding: '10px 10px', fontSize: 11, textTransform: 'uppercase', color: 'var(--text-secondary)' }}>
                         Approved Leave
                       </th>
-                      <th style={{ width: '16%', padding: '10px 14px', fontSize: 11, textTransform: 'uppercase', color: 'var(--text-secondary)' }}>
-                        Non-Working (Deficit)
+                      <th style={{ padding: '10px 10px', fontSize: 11, textTransform: 'uppercase', color: 'var(--text-secondary)' }}>
+                        Deficit to Date
                       </th>
-                      <th style={{ width: '10%', padding: '10px 14px', fontSize: 11, textTransform: 'uppercase', color: 'var(--text-secondary)' }}>
+                      <th style={{ padding: '10px 10px', fontSize: 11, textTransform: 'uppercase', color: 'var(--text-secondary)' }}>
+                        Est. Pay Cut
+                      </th>
+                      <th style={{ padding: '10px 10px', fontSize: 11, textTransform: 'uppercase', color: 'var(--text-secondary)' }}>
                         Late Days
                       </th>
-                      <th style={{ width: '16%', padding: '10px 14px', fontSize: 11, textTransform: 'uppercase', color: 'var(--text-secondary)', textAlign: 'right' }}>
-                        Compliance / Adherence
+                      <th style={{ padding: '10px 10px', fontSize: 11, textTransform: 'uppercase', color: 'var(--text-secondary)' }}>
+                        Adherence
+                      </th>
+                      <th style={{ padding: '10px 12px', fontSize: 11, textTransform: 'uppercase', color: 'var(--text-secondary)', textAlign: 'right' }}>
+                        Actions
                       </th>
                     </tr>
                   </thead>
                   <tbody>
                     {monthlyAuditList.length === 0 ? (
                       <tr>
-                        <td colSpan={7} style={{ textAlign: 'center', padding: '40px 0', color: 'var(--text-secondary)' }}>
+                        <td colSpan={9} style={{ textAlign: 'center', padding: '40px 0', color: 'var(--text-secondary)' }}>
                           No attendance records found for the selected month ({selectedAuditMonth}).
                         </td>
                       </tr>
                     ) : (
                       paginatedAudit.map((aud) => {
-                        const hasDeficit = aud.non_working_hours > 0
+                        const mtdDeficit = aud.month_to_date_deficit ?? aud.non_working_hours
+                        const hasDeficit = mtdDeficit > 0
                         return (
                           <tr key={aud.employee_id}>
                             {/* Employee */}
@@ -1684,8 +2131,13 @@ export default function AttendanceClient({ profile }: AttendanceClientProps) {
                             </td>
 
                             {/* Expected */}
-                            <td style={{ padding: '12px 14px', fontWeight: 600, color: 'var(--text-primary)' }}>
-                              {aud.expected_total_hours}h
+                            <td style={{ padding: '12px 14px' }}>
+                              <div style={{ fontWeight: 700, color: 'var(--text-primary)' }}>
+                                {aud.expected_to_date_hours ?? aud.expected_total_hours}h
+                              </div>
+                              <div style={{ fontSize: 11, color: 'var(--text-secondary)' }}>
+                                To date ({aud.expected_total_hours}h full mo)
+                              </div>
                             </td>
 
                             {/* Actual Worked */}
@@ -1714,7 +2166,7 @@ export default function AttendanceClient({ profile }: AttendanceClientProps) {
                                     gap: 4,
                                   }}
                                 >
-                                  <TrendingDown size={12} /> -{aud.non_working_hours}h Deficit
+                                  <TrendingDown size={12} /> -{mtdDeficit}h MTD
                                 </span>
                               ) : (
                                 <span
@@ -1735,18 +2187,47 @@ export default function AttendanceClient({ profile }: AttendanceClientProps) {
                               )}
                             </td>
 
+                            {/* Estimated Pay Cut */}
+                            <td style={{ padding: '12px 14px' }}>
+                              {(aud.estimated_pay_cut || 0) > 0 ? (
+                                <span
+                                  style={{
+                                    padding: '3px 8px',
+                                    borderRadius: 6,
+                                    fontSize: 12,
+                                    fontWeight: 700,
+                                    backgroundColor: '#FEE2E2',
+                                    color: '#DC2626',
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: 4,
+                                  }}
+                                >
+                                  <Banknote size={12} /> -{(aud.estimated_pay_cut || 0).toLocaleString()} {aud.currency || 'SAR'}
+                                </span>
+                              ) : (aud.hourly_rate === 0 && hasDeficit) ? (
+                                <span style={{ fontSize: 11, color: '#D97706', fontWeight: 600 }}>
+                                  ⚠️ Salary Not Set
+                                </span>
+                              ) : (
+                                <span style={{ fontSize: 12, fontWeight: 600, color: '#16A34A' }}>
+                                  0 {aud.currency || 'SAR'}
+                                </span>
+                              )}
+                            </td>
+
                             {/* Late Days */}
                             <td style={{ padding: '12px 14px', color: aud.days_late > 0 ? '#DC2626' : 'var(--text-tertiary)', fontWeight: aud.days_late > 0 ? 600 : 400 }}>
                               {aud.days_late > 0 ? `${aud.days_late} Days Late` : 'None'}
                             </td>
 
                             {/* Adherence Rate */}
-                            <td style={{ padding: '12px 14px', textAlign: 'right' }}>
-                              <div style={{ display: 'inline-flex', flexDirection: 'column', alignItems: 'flex-end', gap: 3 }}>
+                            <td style={{ padding: '12px 14px' }}>
+                              <div style={{ display: 'inline-flex', flexDirection: 'column', alignItems: 'flex-start', gap: 3 }}>
                                 <span style={{ fontWeight: 700, color: aud.attendance_adherence_percent >= 90 ? '#16A34A' : '#D97706' }}>
                                   {aud.attendance_adherence_percent}%
                                 </span>
-                                <div style={{ width: 80, height: 4, backgroundColor: '#E2E8F0', borderRadius: 999, overflow: 'hidden' }}>
+                                <div style={{ width: 70, height: 4, backgroundColor: '#E2E8F0', borderRadius: 999, overflow: 'hidden' }}>
                                   <div
                                     style={{
                                       width: `${aud.attendance_adherence_percent}%`,
@@ -1755,6 +2236,65 @@ export default function AttendanceClient({ profile }: AttendanceClientProps) {
                                     }}
                                   />
                                 </div>
+                              </div>
+                            </td>
+
+                            {/* Actions */}
+                            <td style={{ padding: '12px 14px', textAlign: 'right' }}>
+                              <div style={{ display: 'inline-flex', gap: 6, justifyContent: 'flex-end' }}>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    const matchingEmp = adminRoster.find((r) => r.profile_id === aud.employee_id) || {
+                                      profile_id: aud.employee_id,
+                                      name: aud.employee_name,
+                                      email: aud.employee_email,
+                                      role: aud.employee_role,
+                                      avatar_url: null,
+                                      status: 'HQ',
+                                      punch_in_at: null,
+                                      punch_out_at: null,
+                                      total_working_minutes: 0,
+                                      punch_in_distance_m: null,
+                                      punch_out_distance_m: null,
+                                      punch_in_photo_url: null,
+                                      punch_out_photo_url: null,
+                                    }
+                                    setSelectedEmployeeForDetail(matchingEmp as RosterEmployee)
+                                    setDetailModalOpen(true)
+                                  }}
+                                  className="btn btn-outline"
+                                  style={{
+                                    padding: '4px 10px',
+                                    fontSize: '11.5px',
+                                    fontWeight: 600,
+                                    color: '#2563EB',
+                                    borderColor: '#BFDBFE',
+                                    backgroundColor: '#EFF6FF',
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: 4,
+                                  }}
+                                  title="Inspect full monthly logs, timesheets, and face verification for this employee"
+                                >
+                                  <Eye size={12} /> View Full Logs
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleOpenRegularize(null, aud.employee_name)}
+                                  className="btn btn-outline"
+                                  style={{
+                                    padding: '4px 10px',
+                                    fontSize: '11.5px',
+                                    fontWeight: 600,
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: 4,
+                                  }}
+                                  title="Adjust or regularize shifts for this staff member"
+                                >
+                                  <Edit3 size={12} /> Adjust
+                                </button>
                               </div>
                             </td>
                           </tr>
@@ -1779,7 +2319,7 @@ export default function AttendanceClient({ profile }: AttendanceClientProps) {
         )}
 
         {/* ======================================================= */}
-        {/* TAB 3: EXCEPTIONS REVIEW QUEUE */}
+        {/* TAB 2: PUNCH APPROVALS & GEOFENCE EXCEPTIONS (REMOTE/FLAGGED ONLY) */}
         {/* ======================================================= */}
         {activeTab === 'EXCEPTIONS' && canManage && (
           <div>
@@ -1813,7 +2353,7 @@ export default function AttendanceClient({ profile }: AttendanceClientProps) {
                     color: exceptionsFilter === 'ALL' ? '#B45309' : '#64748B',
                   }}
                 >
-                  All Punches ({pendingExceptions.length})
+                  All Punches ({punchApprovalList.length})
                 </button>
 
                 <button
@@ -1831,7 +2371,7 @@ export default function AttendanceClient({ profile }: AttendanceClientProps) {
                     color: exceptionsFilter === 'ACTION_NEEDED' ? '#DC2626' : '#64748B',
                   }}
                 >
-                  ⚡ Action Required ({countExceptionsActionNeeded})
+                  ⚡ Action Required ({countPunchActionNeeded})
                 </button>
 
                 <button
@@ -1849,7 +2389,7 @@ export default function AttendanceClient({ profile }: AttendanceClientProps) {
                     color: exceptionsFilter === 'FLAGGED' ? '#991B1B' : '#64748B',
                   }}
                 >
-                  🚩 Flagged ({countExceptionsFlagged})
+                  🚩 Flagged ({countPunchFlagged})
                 </button>
 
                 <button
@@ -1867,17 +2407,17 @@ export default function AttendanceClient({ profile }: AttendanceClientProps) {
                     color: exceptionsFilter === 'APPROVED' ? '#15803D' : '#64748B',
                   }}
                 >
-                  ✅ Approved Remote ({countExceptionsApproved})
+                  ✅ Approved Remote ({countPunchApproved})
                 </button>
               </div>
 
               <div style={{ fontSize: 12, color: '#64748B' }}>
-                Showing <strong>{filteredExceptions.length}</strong> recorded exceptions
+                Showing <strong>{filteredPunchApprovals.length}</strong> remote / flagged punches
               </div>
             </div>
 
             {/* Exceptions Cards / Empty State */}
-            {filteredExceptions.length === 0 ? (
+            {filteredPunchApprovals.length === 0 ? (
               <div
                 className="card"
                 style={{
@@ -1888,25 +2428,24 @@ export default function AttendanceClient({ profile }: AttendanceClientProps) {
               >
                 <CheckCircle2 size={40} color="#16A34A" style={{ margin: '0 auto 12px' }} />
                 <h3 style={{ fontSize: 16, fontWeight: 700, color: 'var(--text-primary)', margin: 0 }}>
-                  {pendingExceptions.length === 0
+                  {punchApprovalList.length === 0
                     ? 'All Clear! No Remote or Flagged Punches Recorded'
                     : 'No punches match the selected filter'}
                 </h3>
                 <p style={{ fontSize: 13, color: 'var(--text-secondary)', marginTop: 4 }}>
-                  {pendingExceptions.length === 0
+                  {punchApprovalList.length === 0
                     ? 'All punches recorded outside Jeddah HQ have been reviewed and approved.'
                     : 'Try switching filters to view other exceptions or approved punches.'}
                 </p>
               </div>
             ) : (
               <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: 14 }}>
-                {paginatedExceptions.map((item) => {
+                {paginatedPunchApprovals.map((item) => {
                   const isFlagged = item.punch_in_status === 'FLAGGED' || item.punch_out_status === 'FLAGGED'
                   const isPending =
                     item.punch_in_status === 'PENDING_REVIEW' || item.punch_out_status === 'PENDING_REVIEW'
 
                   const borderColor = isFlagged ? '#DC2626' : isPending ? '#D97706' : '#16A34A'
-
                   const inDistance = item.punch_in_distance_m || 0
                   const outDistance = item.punch_out_distance_m || 0
 
@@ -1925,7 +2464,7 @@ export default function AttendanceClient({ profile }: AttendanceClientProps) {
                         gap: 14,
                       }}
                     >
-                      {/* Top Header: Employee Info, Date & Overall Status Badge */}
+                      {/* Top Header: Employee Info, Date & Status Badge */}
                       <div
                         style={{
                           display: 'flex',
@@ -2181,7 +2720,7 @@ export default function AttendanceClient({ profile }: AttendanceClientProps) {
                         )}
                       </div>
 
-                      {/* Review Notes & Actions */}
+                      {/* Review Notes & Inspect Actions */}
                       <div
                         style={{
                           display: 'flex',
@@ -2209,7 +2748,7 @@ export default function AttendanceClient({ profile }: AttendanceClientProps) {
                           )}
                         </div>
 
-                        <div style={{ display: 'flex', gap: 8 }}>
+                        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                           <button
                             type="button"
                             onClick={() => {
@@ -2251,22 +2790,563 @@ export default function AttendanceClient({ profile }: AttendanceClientProps) {
                               Inspect Punch Out Proof <ChevronRight size={13} />
                             </button>
                           )}
+
+                          <button
+                            type="button"
+                            onClick={() => handleAdminDeleteRecord(item, false)}
+                            disabled={isProcessingRegularizeId === item.id}
+                            className="btn btn-outline"
+                            style={{
+                              padding: '6px 12px',
+                              fontSize: 12,
+                              fontWeight: 600,
+                              borderColor: '#FCA5A5',
+                              color: '#DC2626',
+                              backgroundColor: '#FEF2F2',
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: 6,
+                            }}
+                            title="Delete this punch log record permanently"
+                          >
+                            <Trash2 size={13} /> Delete Punch
+                          </button>
                         </div>
                       </div>
                     </div>
                   )
                 })}
 
-                {/* Pagination for Exceptions */}
+                {/* Pagination for Punch Approvals */}
                 <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
                   <Pagination
                     currentPage={exceptionsPage}
-                    totalItems={filteredExceptions.length}
+                    totalItems={filteredPunchApprovals.length}
                     pageSize={exceptionsPageSize}
                     onPageChange={setExceptionsPage}
                     onPageSizeChange={setExceptionsPageSize}
                     pageSizeOptions={[10, 25, 50]}
                     itemLabel="remote / flagged punches"
+                  />
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ======================================================= */}
+        {/* TAB 3: SHIFT REGULARIZATION REQUESTS (DEDICATED QUEUE) */}
+        {/* ======================================================= */}
+        {activeTab === 'REGULARIZATIONS' && canManage && (
+          <div>
+            {/* Feedback Banner */}
+            {regularizeFeedbackMsg && (
+              <div
+                style={{
+                  padding: '12px 18px',
+                  marginBottom: 16,
+                  borderRadius: 10,
+                  backgroundColor: regularizeFeedbackMsg.type === 'success' ? '#F0FDF4' : '#FEF2F2',
+                  border: `1px solid ${regularizeFeedbackMsg.type === 'success' ? '#86EFAC' : '#FCA5A5'}`,
+                  color: regularizeFeedbackMsg.type === 'success' ? '#15803D' : '#991B1B',
+                  fontWeight: 600,
+                  fontSize: 13,
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 8,
+                  boxShadow: 'var(--shadow-sm)',
+                }}
+              >
+                <span>{regularizeFeedbackMsg.type === 'success' ? '✅' : '⚠️'}</span>
+                <span>{regularizeFeedbackMsg.message}</span>
+              </div>
+            )}
+
+            {/* Filter Toolbar for Regularization Requests */}
+            <div
+              className="card"
+              style={{
+                padding: '12px 18px',
+                marginBottom: 16,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                flexWrap: 'wrap',
+                gap: 12,
+                backgroundColor: '#FFFFFF',
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                <button
+                  type="button"
+                  onClick={() => setRegularizationsFilter('PENDING')}
+                  style={{
+                    padding: '6px 14px',
+                    borderRadius: 8,
+                    fontSize: 12,
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                    border: '1px solid',
+                    borderColor: regularizationsFilter === 'PENDING' ? '#7C3AED' : '#E2E8F0',
+                    backgroundColor: regularizationsFilter === 'PENDING' ? '#F5F3FF' : '#FFFFFF',
+                    color: regularizationsFilter === 'PENDING' ? '#6D28D9' : '#64748B',
+                  }}
+                >
+                  ⏳ Pending Review ({countRegPending})
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setRegularizationsFilter('ALL')}
+                  style={{
+                    padding: '6px 14px',
+                    borderRadius: 8,
+                    fontSize: 12,
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                    border: '1px solid',
+                    borderColor: regularizationsFilter === 'ALL' ? '#7C3AED' : '#E2E8F0',
+                    backgroundColor: regularizationsFilter === 'ALL' ? '#F5F3FF' : '#FFFFFF',
+                    color: regularizationsFilter === 'ALL' ? '#6D28D9' : '#64748B',
+                  }}
+                >
+                  All Requests ({allRegularizations.length})
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setRegularizationsFilter('APPROVED')}
+                  style={{
+                    padding: '6px 14px',
+                    borderRadius: 8,
+                    fontSize: 12,
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                    border: '1px solid',
+                    borderColor: regularizationsFilter === 'APPROVED' ? '#16A34A' : '#E2E8F0',
+                    backgroundColor: regularizationsFilter === 'APPROVED' ? '#DCFCE7' : '#FFFFFF',
+                    color: regularizationsFilter === 'APPROVED' ? '#15803D' : '#64748B',
+                  }}
+                >
+                  ✅ Approved &amp; Regularized ({countRegApproved})
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setRegularizationsFilter('REJECTED')}
+                  style={{
+                    padding: '6px 14px',
+                    borderRadius: 8,
+                    fontSize: 12,
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                    border: '1px solid',
+                    borderColor: regularizationsFilter === 'REJECTED' ? '#DC2626' : '#E2E8F0',
+                    backgroundColor: regularizationsFilter === 'REJECTED' ? '#FEE2E2' : '#FFFFFF',
+                    color: regularizationsFilter === 'REJECTED' ? '#991B1B' : '#64748B',
+                  }}
+                >
+                  ❌ Rejected ({countRegRejected})
+                </button>
+              </div>
+
+              <div style={{ fontSize: 12, color: '#64748B' }}>
+                Showing <strong>{filteredRegularizations.length}</strong> shift regularization requests
+              </div>
+            </div>
+
+            {/* Regularization Cards / Empty State */}
+            {filteredRegularizations.length === 0 ? (
+              <div
+                className="card"
+                style={{
+                  textAlign: 'center',
+                  padding: '50px 20px',
+                  backgroundColor: '#FFFFFF',
+                }}
+              >
+                <CheckCircle2 size={40} color="#16A34A" style={{ margin: '0 auto 12px' }} />
+                <h3 style={{ fontSize: 16, fontWeight: 700, color: 'var(--text-primary)', margin: 0 }}>
+                  {allRegularizations.length === 0
+                    ? 'All Clear! No Shift Regularization Requests'
+                    : 'No requests match the selected filter'}
+                </h3>
+                <p style={{ fontSize: 13, color: 'var(--text-secondary)', marginTop: 4 }}>
+                  {allRegularizations.length === 0
+                    ? 'Employees have not submitted any pending shift regularizations.'
+                    : 'Try switching filters to view approved or rejected requests.'}
+                </p>
+              </div>
+            ) : (
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: 14 }}>
+                {paginatedRegularizations.map((item) => {
+                  const regDetails = parseRegularizationRequestNotes(item.review_notes)
+                  const isApproved =
+                    item.punch_in_status === 'APPROVED' &&
+                    (item.punch_out_status === 'APPROVED' || !item.punch_out_status) &&
+                    Boolean(item.review_notes?.includes('Regularized:'))
+                  const isRejected =
+                    item.punch_in_status === 'FLAGGED' || Boolean(item.review_notes?.includes('REJECTED REGULARIZATION'))
+                  const isPending = !isApproved && !isRejected
+
+                  const borderColor = isApproved ? '#16A34A' : isRejected ? '#DC2626' : '#7C3AED'
+
+                  return (
+                    <div
+                      key={item.id}
+                      className="card"
+                      style={{
+                        padding: '20px 24px',
+                        borderLeft: `5px solid ${borderColor}`,
+                        backgroundColor: '#FFFFFF',
+                        borderRadius: 12,
+                        boxShadow: 'var(--shadow-sm)',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: 16,
+                      }}
+                    >
+                      {/* Header: Employee Info & Status */}
+                      <div
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          flexWrap: 'wrap',
+                          gap: 12,
+                          borderBottom: '1px solid #F1F5F9',
+                          paddingBottom: 14,
+                        }}
+                      >
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                          <div
+                            style={{
+                              width: 42,
+                              height: 42,
+                              borderRadius: '50%',
+                              background: 'linear-gradient(135deg, #7C3AED 0%, #9333EA 100%)',
+                              color: '#FFF',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              fontWeight: 700,
+                              fontSize: 15,
+                              flexShrink: 0,
+                            }}
+                          >
+                            {(item.employee_name || 'E').charAt(0)}
+                          </div>
+                          <div>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                              <span style={{ fontWeight: 700, fontSize: 15, color: 'var(--text-primary)' }}>
+                                {item.employee_name || 'Employee'}
+                              </span>
+                              <span
+                                style={{
+                                  fontSize: 11,
+                                  fontWeight: 600,
+                                  padding: '2px 8px',
+                                  borderRadius: 4,
+                                  backgroundColor: '#F3E8FF',
+                                  color: '#7C3AED',
+                                }}
+                              >
+                                {item.employee_role || 'AGENT'}
+                              </span>
+                              {item.employee_email && (
+                                <span style={{ fontSize: 12, color: '#64748B' }}>
+                                  {item.employee_email}
+                                </span>
+                              )}
+                            </div>
+                            <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 3, display: 'flex', alignItems: 'center', gap: 6 }}>
+                              <Calendar size={13} color="#64748B" />
+                              <span>Shift Date: <strong>{item.date}</strong></span>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Status Badge */}
+                        <div>
+                          {isApproved ? (
+                            <span
+                              style={{
+                                fontSize: 11,
+                                fontWeight: 700,
+                                padding: '4px 12px',
+                                borderRadius: 6,
+                                backgroundColor: '#DCFCE7',
+                                color: '#16A34A',
+                                border: '1px solid #86EFAC',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: 4,
+                              }}
+                            >
+                              <Check size={13} /> APPROVED &amp; REGULARIZED
+                            </span>
+                          ) : isRejected ? (
+                            <span
+                              style={{
+                                fontSize: 11,
+                                fontWeight: 700,
+                                padding: '4px 12px',
+                                borderRadius: 6,
+                                backgroundColor: '#FEE2E2',
+                                color: '#DC2626',
+                                border: '1px solid #FCA5A5',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: 4,
+                              }}
+                            >
+                              <X size={13} /> REJECTED
+                            </span>
+                          ) : (
+                            <span
+                              style={{
+                                fontSize: 11,
+                                fontWeight: 700,
+                                padding: '4px 12px',
+                                borderRadius: 6,
+                                backgroundColor: '#FEF3C7',
+                                color: '#B45309',
+                                border: '1px solid #FCD34D',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: 4,
+                              }}
+                            >
+                              <Clock size={13} /> PENDING REVIEW
+                            </span>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Requested Shift Adjustment Details Box */}
+                      <div
+                        style={{
+                          padding: '16px 20px',
+                          borderRadius: 10,
+                          backgroundColor: '#FAF5FF',
+                          border: '1px solid #E9D5FF',
+                          display: 'flex',
+                          flexDirection: 'column',
+                          gap: 12,
+                        }}
+                      >
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                            <Clock size={17} color="#7C3AED" />
+                            <span style={{ fontSize: 13.5, fontWeight: 700, color: '#581C87' }}>
+                              Requested Shift Adjustment:
+                            </span>
+                          </div>
+                          <div style={{ fontSize: 13, fontWeight: 700, color: '#6D28D9' }}>
+                            Requested:{' '}
+                            <span style={{ color: '#15803D' }}>
+                              {regDetails.requestedIn ||
+                                (item.punch_in_at
+                                  ? formatDisplayTime(item.punch_in_at)
+                                  : '09:00 AM')}
+                            </span>{' '}
+                            ➔{' '}
+                            <span style={{ color: '#15803D' }}>
+                              {regDetails.requestedOut ||
+                                (item.punch_out_at
+                                  ? formatDisplayTime(item.punch_out_at)
+                                  : '05:00 PM')}
+                            </span>
+                            {regDetails.requestedDurationHours && (
+                              <span style={{ marginLeft: 8, color: '#581C87', backgroundColor: '#F3E8FF', padding: '2px 8px', borderRadius: 4 }}>
+                                Duration: {regDetails.requestedDurationHours}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+
+                        {regDetails.reason && (
+                          <div
+                            style={{
+                              fontSize: 13,
+                              color: '#4C1D95',
+                              backgroundColor: '#FFFFFF',
+                              padding: '10px 14px',
+                              borderRadius: 8,
+                              border: '1px solid #F3E8FF',
+                            }}
+                          >
+                            <strong>Employee Reason:</strong> &ldquo;{regDetails.reason}&rdquo;
+                          </div>
+                        )}
+
+                        <div
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'space-between',
+                            fontSize: 12,
+                            color: '#6B7280',
+                            flexWrap: 'wrap',
+                            gap: 8,
+                            paddingTop: 6,
+                            borderTop: '1px dashed #E9D5FF',
+                          }}
+                        >
+                          <span>
+                            Raw Recorded Punches:{' '}
+                            <strong>
+                              In: {item.punch_in_at ? formatDisplayTime(item.punch_in_at) : 'None'}
+                            </strong>{' '}
+                            |{' '}
+                            <strong>
+                              Out: {item.punch_out_at ? formatDisplayTime(item.punch_out_at) : 'None'}
+                            </strong>
+                          </span>
+                          <span>
+                            Standard Workday Policy: <strong>{workPolicy.daily_expected_hours}h</strong>
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Footer Actions / Review Notes */}
+                      <div
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          flexWrap: 'wrap',
+                          gap: 12,
+                        }}
+                      >
+                        <div style={{ flex: 1, minWidth: 200 }}>
+                          {item.review_notes && (
+                            <div style={{ fontSize: 12, color: '#475569' }}>
+                              📝 <strong>Audit Notes:</strong> &ldquo;{item.review_notes}&rdquo;{' '}
+                              {item.reviewed_at && (
+                                <span style={{ color: '#94A3B8' }}>
+                                  ({new Date(item.reviewed_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })})
+                                </span>
+                              )}
+                            </div>
+                          )}
+                        </div>
+
+                        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                          {isPending && (
+                            <>
+                              <button
+                                type="button"
+                                onClick={() => handleQuickApproveRegularization(item)}
+                                disabled={isProcessingRegularizeId === item.id}
+                                className="btn btn-primary"
+                                style={{
+                                  padding: '7px 16px',
+                                  fontSize: 12.5,
+                                  fontWeight: 600,
+                                  backgroundColor: '#16A34A',
+                                  borderColor: '#16A34A',
+                                  color: '#FFFFFF',
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: 6,
+                                }}
+                                title="1-click approve requested shift regularization"
+                              >
+                                <Check size={14} /> {isProcessingRegularizeId === item.id ? 'Approving...' : 'Quick Approve'}
+                              </button>
+
+                              <button
+                                type="button"
+                                onClick={() => handleOpenRegularize(item, item.employee_name)}
+                                className="btn btn-outline"
+                                style={{
+                                  padding: '7px 16px',
+                                  fontSize: 12.5,
+                                  fontWeight: 600,
+                                  backgroundColor: '#FFFFFF',
+                                  borderColor: '#7C3AED',
+                                  color: '#7C3AED',
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: 6,
+                                }}
+                                title="Review and adjust times before confirming"
+                              >
+                                <Edit3 size={14} /> Review &amp; Adjust
+                              </button>
+
+                              <button
+                                type="button"
+                                onClick={() => handleRejectRegularization(item)}
+                                disabled={isProcessingRegularizeId === item.id}
+                                className="btn btn-outline"
+                                style={{
+                                  padding: '7px 14px',
+                                  fontSize: 12.5,
+                                  fontWeight: 600,
+                                  backgroundColor: '#FFFFFF',
+                                  borderColor: '#DC2626',
+                                  color: '#DC2626',
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: 4,
+                                }}
+                                title="Decline this regularization request"
+                              >
+                                <X size={14} /> Reject
+                              </button>
+                            </>
+                          )}
+
+                          {isApproved && (
+                            <span style={{ fontSize: 12.5, color: '#16A34A', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                              <Check size={14} /> Shift regularized &amp; updated in timesheets
+                            </span>
+                          )}
+
+                          {isRejected && (
+                            <span style={{ fontSize: 12.5, color: '#DC2626', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                              <X size={14} /> Request declined
+                            </span>
+                          )}
+
+                          <button
+                            type="button"
+                            onClick={() => handleAdminDeleteRecord(item, true)}
+                            disabled={isProcessingRegularizeId === item.id}
+                            className="btn btn-outline"
+                            style={{
+                              padding: '7px 12px',
+                              fontSize: 12.5,
+                              fontWeight: 600,
+                              backgroundColor: '#FEF2F2',
+                              borderColor: '#FCA5A5',
+                              color: '#DC2626',
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: 4,
+                            }}
+                            title="Delete this regularization request permanently"
+                          >
+                            <Trash2 size={14} /> Delete Request
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  )
+                })}
+
+                {/* Pagination for Regularizations */}
+                <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+                  <Pagination
+                    currentPage={regularizationsPage}
+                    totalItems={filteredRegularizations.length}
+                    pageSize={regularizationsPageSize}
+                    onPageChange={setRegularizationsPage}
+                    onPageSizeChange={setRegularizationsPageSize}
+                    pageSizeOptions={[10, 25, 50]}
+                    itemLabel="regularization requests"
                   />
                 </div>
               </div>
@@ -2475,19 +3555,21 @@ export default function AttendanceClient({ profile }: AttendanceClientProps) {
                 </div>
               </div>
 
-              {/* Non-Working Deficit Hours */}
+              {/* Non-Working Deficit Hours & Pay Cut */}
               <div
                 className="card"
                 style={{
                   padding: '16px',
-                  backgroundColor: '#FFFFFF',
+                  backgroundColor: Number(myMonthlyStats.deficitHours) > 0 ? '#FEF2F2' : '#FFFFFF',
                   borderRadius: '12px',
-                  border: '1px solid #E2E8F0',
+                  border: Number(myMonthlyStats.deficitHours) > 0 ? '1px solid #FECACA' : '1px solid #E2E8F0',
                   boxShadow: 'var(--shadow-sm)',
                 }}
               >
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                  <span style={{ fontSize: '12px', fontWeight: 600, color: '#64748B' }}>Not In Office (Deficit)</span>
+                  <span style={{ fontSize: '12px', fontWeight: 600, color: Number(myMonthlyStats.deficitHours) > 0 ? '#991B1B' : '#64748B' }}>
+                    Not In Office (MTD Deficit)
+                  </span>
                   <TrendingDown size={16} color={Number(myMonthlyStats.deficitHours) > 0 ? '#DC2626' : '#16A34A'} />
                 </div>
                 <div
@@ -2500,10 +3582,25 @@ export default function AttendanceClient({ profile }: AttendanceClientProps) {
                 >
                   {Number(myMonthlyStats.deficitHours) > 0 ? `-${myMonthlyStats.deficitHours} hrs` : '0.0 hrs'}
                 </div>
-                <div style={{ fontSize: '11.5px', color: '#64748B', marginTop: '3px' }}>
-                  {Number(myMonthlyStats.deficitHours) > 0
-                    ? `Short hours vs ${workPolicy.daily_expected_hours || 8}h/day standard`
-                    : `✓ Met expected ${workPolicy.daily_expected_hours || 8}h/day`}
+                <div style={{ fontSize: '11.5px', marginTop: '4px', fontWeight: 600 }}>
+                  {Number(myMonthlyStats.deficitHours) > 0 ? (
+                    myMonthlyStats.hasSalaryProfile ? (
+                      <span style={{ color: '#DC2626', display: 'flex', alignItems: 'center', gap: 4 }}>
+                        <Banknote size={13} /> Est. Pay Cut: -{myMonthlyStats.estimatedPayCut.toLocaleString()} {myMonthlyStats.currency}
+                      </span>
+                    ) : (
+                      <span style={{ color: '#D97706', display: 'flex', alignItems: 'center', gap: 4 }}>
+                        <AlertCircle size={13} /> Pay Cut: Salary Profile Not Configured
+                      </span>
+                    )
+                  ) : (
+                    <span style={{ color: '#16A34A' }}>
+                      ✓ 0 SAR Pay Cut • Shift Target Met to Date
+                    </span>
+                  )}
+                </div>
+                <div style={{ fontSize: '11px', color: '#64748B', marginTop: '3px' }}>
+                  Expected MTD: {myMonthlyStats.mtdExpectedHours}h ({myMonthlyStats.mtdExpectedDays} working days passed)
                 </div>
               </div>
 
@@ -2526,7 +3623,12 @@ export default function AttendanceClient({ profile }: AttendanceClientProps) {
                   {myMonthlyStats.approvedLeaveDays} Days
                 </div>
                 <div style={{ fontSize: '11.5px', color: '#64748B', marginTop: '3px' }}>
-                  {myMonthlyStats.approvedLeaveHours} hrs approved time off
+                  {myMonthlyStats.approvedLeaveHours} hrs MTD approved time off
+                  {myMonthlyStats.totalApprovedLeaveDaysInMonth > myMonthlyStats.approvedLeaveDays && (
+                    <span style={{ display: 'block', fontSize: '10.5px', color: '#94A3B8', marginTop: '1px' }}>
+                      ({myMonthlyStats.totalApprovedLeaveDaysInMonth} days approved for full month)
+                    </span>
+                  )}
                 </div>
               </div>
             </div>
@@ -2586,7 +3688,7 @@ export default function AttendanceClient({ profile }: AttendanceClientProps) {
                         Total Duration
                       </th>
                       <th style={{ padding: '10px 14px', color: 'var(--text-secondary)', fontSize: 11, textTransform: 'uppercase' }}>
-                        Shift Deficit / Balance
+                        Shift Balance &amp; Regularization
                       </th>
                       <th style={{ padding: '10px 14px', color: 'var(--text-secondary)', fontSize: 11, textTransform: 'uppercase', textAlign: 'right' }}>
                         Verification Location
@@ -2602,13 +3704,18 @@ export default function AttendanceClient({ profile }: AttendanceClientProps) {
                       </tr>
                     ) : (
                       paginatedMyHistory.map((item) => {
-                        const inTime = item.punch_in_at
-                          ? new Date(item.punch_in_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-                          : '--:--'
-                        const outTime = item.punch_out_at
-                          ? new Date(item.punch_out_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-                          : '--:--'
-                        const hrs = (item.total_working_minutes / 60).toFixed(1)
+                        const inTime = formatDisplayTime(item.punch_in_at)
+                        const outTime = formatDisplayTime(item.punch_out_at)
+                        const isUnclosedPast = !item.punch_out_at && item.date < new Date().toISOString().split('T')[0]
+                        const isAutoClosed = Boolean(item.is_auto_closed) || isUnclosedPast
+                        let workingMinutes = item.total_working_minutes || 0
+                        if (isUnclosedPast && workingMinutes === 0 && item.punch_in_at) {
+                          const inDate = new Date(item.punch_in_at)
+                          const inMin = inDate.getHours() * 60 + inDate.getMinutes()
+                          const endMin = 17 * 60
+                          workingMinutes = Math.max(0, endMin - inMin)
+                        }
+                        const hrs = (workingMinutes / 60).toFixed(1)
                         const isHq = item.punch_in_status === 'APPROVED'
 
                         // Punctuality check
@@ -2648,23 +3755,268 @@ export default function AttendanceClient({ profile }: AttendanceClientProps) {
                           )
                         }
 
-                        // Shift Balance
+                        // Determine expected hours configured for this specific day
+                        let dayExpectedH = workPolicy.daily_expected_hours || 8
+                        if (item.date) {
+                          const d = new Date(item.date + 'T00:00:00')
+                          const dayName = d.toLocaleDateString('en-US', { weekday: 'long' })
+                          if (workPolicy.custom_day_hours && workPolicy.custom_day_hours[dayName] !== undefined) {
+                            dayExpectedH = workPolicy.custom_day_hours[dayName]
+                          }
+                        }
+                        const dayExpectedM = dayExpectedH * 60
+                        const diff = workingMinutes - dayExpectedM
+                        const deficitH = (Math.abs(diff) / 60).toFixed(1)
+
+                        // Regularization Request details & status
+                        const regDetails = parseRegularizationRequestNotes(item.review_notes)
+                        const isRegApproved =
+                          (item.punch_in_status === 'APPROVED' || item.punch_out_status === 'APPROVED') &&
+                          Boolean(item.review_notes?.includes('Regularized:'))
+                        const isRegRejected =
+                          Boolean(item.review_notes?.includes('REJECTED REGULARIZATION')) ||
+                          Boolean(item.review_notes?.includes('REJECTED'))
+                        const isRegPending =
+                          !isRegApproved &&
+                          !isRegRejected &&
+                          (item.punch_out_status === 'PENDING_REVIEW' ||
+                            item.punch_in_status === 'PENDING_REVIEW' ||
+                            regDetails.isRegularization)
+
+                        // Shift Balance & Regularize Options
                         let shiftBalance = <span style={{ color: '#94A3B8' }}>--</span>
-                        if (item.punch_out_at) {
-                          const diff = item.total_working_minutes - myMonthlyStats.expectedMinutesPerDay
+                        if (isRegPending) {
+                          shiftBalance = (
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: 6, minWidth: '220px' }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                                {isAutoClosed && (
+                                  <span
+                                    style={{
+                                      fontSize: 10.5,
+                                      fontWeight: 700,
+                                      padding: '1px 6px',
+                                      borderRadius: 4,
+                                      backgroundColor: '#FEF3C7',
+                                      color: '#B45309',
+                                    }}
+                                  >
+                                    ⚠️ Auto-Closed
+                                  </span>
+                                )}
+                                {diff < 0 ? (
+                                  <span style={{ fontSize: 11, fontWeight: 700, color: '#DC2626' }}>
+                                    -{deficitH}h Deficit ({hrs}h / {dayExpectedH}h)
+                                  </span>
+                                ) : (
+                                  <span style={{ fontSize: 11, fontWeight: 700, color: '#16A34A' }}>
+                                    ✓ Recorded {hrs}h
+                                  </span>
+                                )}
+                              </div>
+
+                              <div
+                                style={{
+                                  padding: '8px 10px',
+                                  borderRadius: 8,
+                                  backgroundColor: '#FAF5FF',
+                                  border: '1px solid #E9D5FF',
+                                  display: 'flex',
+                                  flexDirection: 'column',
+                                  gap: 4,
+                                  fontSize: 11.5,
+                                }}
+                              >
+                                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6 }}>
+                                  <span style={{ fontWeight: 700, color: '#7C3AED', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                                    <Clock size={12} /> Pending Review (1 active)
+                                  </span>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleOpenRegularize(item, canManage ? '' : (profile?.name || ''))}
+                                    style={{
+                                      fontSize: 11,
+                                      fontWeight: 700,
+                                      color: '#2563EB',
+                                      background: 'none',
+                                      border: 'none',
+                                      cursor: 'pointer',
+                                      textDecoration: 'underline',
+                                      padding: 0,
+                                    }}
+                                  >
+                                    Edit Submitted Request
+                                  </button>
+                                </div>
+                                <div style={{ color: '#581C87', fontWeight: 600 }}>
+                                  Submitted:{' '}
+                                  <strong style={{ color: '#15803D' }}>{regDetails.requestedIn || inTime}</strong> ➔{' '}
+                                  <strong style={{ color: '#15803D' }}>{regDetails.requestedOut || outTime}</strong>
+                                  {regDetails.requestedDurationHours && (
+                                    <span style={{ marginLeft: 6, color: '#7C3AED', fontWeight: 700 }}>
+                                      ({regDetails.requestedDurationHours})
+                                    </span>
+                                  )}
+                                </div>
+                                {regDetails.reason && (
+                                  <div style={{ color: '#6B7280', fontSize: 11, fontStyle: 'italic', wordBreak: 'break-word' }}>
+                                    Reason: &ldquo;{regDetails.reason}&rdquo;
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          )
+                        } else if (isRegApproved) {
+                          shiftBalance = (
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                              <span style={{ fontSize: 11.5, fontWeight: 700, color: '#16A34A' }}>
+                                ✓ Met Shift ({hrs}h / {dayExpectedH}h)
+                              </span>
+                              <span
+                                style={{
+                                  fontSize: 11,
+                                  fontWeight: 700,
+                                  padding: '2px 8px',
+                                  borderRadius: 4,
+                                  backgroundColor: '#DCFCE7',
+                                  color: '#15803D',
+                                  border: '1px solid #86EFAC',
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: 4,
+                                  width: 'fit-content',
+                                }}
+                              >
+                                <Check size={12} /> Regularized &amp; Approved
+                              </span>
+                            </div>
+                          )
+                        } else if (isRegRejected) {
+                          shiftBalance = (
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                              {diff < 0 && (
+                                <span style={{ fontSize: 11, fontWeight: 700, color: '#DC2626' }}>
+                                  -{deficitH}h Deficit
+                                </span>
+                              )}
+                              <span
+                                style={{
+                                  fontSize: 11,
+                                  fontWeight: 700,
+                                  padding: '2px 8px',
+                                  borderRadius: 4,
+                                  backgroundColor: '#FEE2E2',
+                                  color: '#DC2626',
+                                  border: '1px solid #FCA5A5',
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: 4,
+                                  width: 'fit-content',
+                                }}
+                              >
+                                <X size={12} /> Regularization Declined
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => handleOpenRegularize(item, canManage ? '' : (profile?.name || ''))}
+                                style={{
+                                  fontSize: 11,
+                                  color: '#2563EB',
+                                  textDecoration: 'underline',
+                                  background: 'none',
+                                  border: 'none',
+                                  cursor: 'pointer',
+                                  textAlign: 'left',
+                                  padding: 0,
+                                  fontWeight: 600,
+                                }}
+                              >
+                                Submit Revised Request
+                              </button>
+                            </div>
+                          )
+                        } else if (isAutoClosed) {
+                          shiftBalance = (
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+                              <span
+                                style={{
+                                  fontSize: 11,
+                                  fontWeight: 700,
+                                  padding: '2px 8px',
+                                  borderRadius: 4,
+                                  backgroundColor: '#FEF3C7',
+                                  color: '#B45309',
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: 4,
+                                  width: 'fit-content',
+                                }}
+                              >
+                                ⚠️ Auto-Closed (17:00 EOD)
+                              </span>
+                              {diff < 0 && (
+                                <span style={{ fontSize: 11, fontWeight: 700, color: '#DC2626' }}>
+                                  -{deficitH}h Deficit
+                                </span>
+                              )}
+                              <button
+                                type="button"
+                                onClick={() => handleOpenRegularize(item, canManage ? '' : (profile?.name || ''))}
+                                style={{
+                                  fontSize: 11,
+                                  color: '#2563EB',
+                                  textDecoration: 'underline',
+                                  background: 'none',
+                                  border: 'none',
+                                  cursor: 'pointer',
+                                  textAlign: 'left',
+                                  padding: 0,
+                                  fontWeight: 600,
+                                }}
+                              >
+                                {canManage ? 'Regularize / Edit Punch' : 'Request Regularization'}
+                              </button>
+                            </div>
+                          )
+                        } else if (item.punch_out_at) {
                           shiftBalance = diff < 0 ? (
-                            <span style={{ fontSize: 12, fontWeight: 700, color: '#DC2626' }}>
-                              -{(Math.abs(diff) / 60).toFixed(1)}h Deficit
-                            </span>
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                              <span style={{ fontSize: 12, fontWeight: 700, color: '#DC2626' }}>
+                                -{(Math.abs(diff) / 60).toFixed(1)}h Deficit
+                              </span>
+                              <span style={{ fontSize: 11, color: '#64748B' }}>
+                                {hrs}h / {dayExpectedH}h shift
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => handleOpenRegularize(item, canManage ? '' : (profile?.name || ''))}
+                                style={{
+                                  fontSize: 11,
+                                  color: '#2563EB',
+                                  textDecoration: 'underline',
+                                  background: 'none',
+                                  border: 'none',
+                                  cursor: 'pointer',
+                                  textAlign: 'left',
+                                  padding: 0,
+                                }}
+                              >
+                                {canManage ? 'Adjust' : 'Request Adjustment'}
+                              </button>
+                            </div>
                           ) : (
-                            <span style={{ fontSize: 12, fontWeight: 700, color: '#16A34A' }}>
-                              +{(diff / 60).toFixed(1)}h Met Shift
-                            </span>
+                            <div style={{ display: 'flex', flexDirection: 'column' }}>
+                              <span style={{ fontSize: 12, fontWeight: 700, color: '#16A34A' }}>
+                                ✓ Met Shift (0h Deficit)
+                              </span>
+                              <span style={{ fontSize: 11, color: '#64748B' }}>
+                                {hrs}h / {dayExpectedH}h shift
+                              </span>
+                            </div>
                           )
                         } else if (item.punch_in_at) {
                           shiftBalance = (
                             <span style={{ fontSize: 12, fontWeight: 700, color: '#2563EB' }}>
-                              🟢 Active Shift
+                              🟢 Active Shift ({hrs}h)
                             </span>
                           )
                         }
@@ -2684,7 +4036,7 @@ export default function AttendanceClient({ profile }: AttendanceClientProps) {
                               {outTime}
                             </td>
                             <td style={{ padding: '12px 14px', fontWeight: 700, color: '#0284C7' }}>
-                              {hrs} hrs ({item.total_working_minutes}m)
+                              {hrs} hrs ({workingMinutes}m)
                             </td>
                             <td style={{ padding: '12px 14px' }}>
                               {shiftBalance}
@@ -3021,6 +4373,26 @@ export default function AttendanceClient({ profile }: AttendanceClientProps) {
         onUpdated={(newPol) => {
           setWorkPolicy(newPol)
           loadInitialData()
+        }}
+      />
+
+      <RegularizeAttendanceModal
+        isOpen={regularizeModalOpen}
+        onClose={() => {
+          setRegularizeModalOpen(false)
+          setRegularizeLog(null)
+          setRegularizeEmployeeName('')
+        }}
+        log={regularizeLog}
+        employeeName={regularizeEmployeeName || profile?.name || 'Employee'}
+        adminId={userId}
+        expectedHours={workPolicy.daily_expected_hours || 8}
+        isRequestMode={!canManage}
+        onSuccess={() => {
+          loadInitialData()
+          if (canManage) {
+            loadMonthlyAudit(selectedAuditMonth)
+          }
         }}
       />
 

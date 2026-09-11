@@ -20,11 +20,13 @@ import {
   TrendingDown,
   TrendingUp,
   Maximize2,
+  Edit3,
 } from 'lucide-react'
 import { AttendanceLog, LeaveBalance, LeaveRequest, RosterEmployee } from '@/types/attendance'
 import { fetchUserAttendanceHistory, fetchLeaveBalances, fetchUserLeaveRequests } from '@/lib/attendanceService'
 import { formatDistance, getGoogleMapsUrl } from '@/lib/geoUtils'
 import { getEmployeeFaceEnrollment, resetEmployeeFaceEnrollment } from '@/lib/biometricEngine'
+import RegularizeAttendanceModal from '@/components/attendance/RegularizeAttendanceModal'
 
 interface EmployeeAttendanceDetailModalProps {
   isOpen: boolean
@@ -46,6 +48,8 @@ export default function EmployeeAttendanceDetailModal({
   const [selectedSelfie, setSelectedSelfie] = useState<{ url: string; title: string } | null>(null)
   const [enrolledInfo, setEnrolledInfo] = useState<{ hasEnrolled: boolean; enrolledAt: string | null }>({ hasEnrolled: false, enrolledAt: null })
   const [isResettingFace, setIsResettingFace] = useState(false)
+  const [regularizeLog, setRegularizeLog] = useState<AttendanceLog | null>(null)
+  const [regularizeModalOpen, setRegularizeModalOpen] = useState(false)
   const scrollContainerRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -201,9 +205,9 @@ export default function EmployeeAttendanceDetailModal({
       <div
         className="modal-box"
         style={{
-          maxWidth: '840px',
-          width: '100%',
-          maxHeight: '90vh',
+          maxWidth: '1100px',
+          width: '95%',
+          maxHeight: '92vh',
           backgroundColor: '#FFFFFF',
           borderRadius: '16px',
           boxShadow: '0 25px 50px -12px rgba(0,0,0,0.25)',
@@ -748,7 +752,7 @@ export default function EmployeeAttendanceDetailModal({
                     <th style={{ padding: '10px 14px', textAlign: 'left', color: '#64748B', fontWeight: 600 }}>Logout (Out)</th>
                     <th style={{ padding: '10px 14px', textAlign: 'left', color: '#64748B', fontWeight: 600 }}>Working Hours</th>
                     <th style={{ padding: '10px 14px', textAlign: 'left', color: '#64748B', fontWeight: 600 }}>Location Verification</th>
-                    <th style={{ padding: '10px 14px', textAlign: 'right', color: '#64748B', fontWeight: 600 }}>Photo Verification</th>
+                    <th style={{ padding: '10px 14px', textAlign: 'right', color: '#64748B', fontWeight: 600 }}>Photo &amp; Regularization Actions</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -769,13 +773,36 @@ export default function EmployeeAttendanceDetailModal({
                       const hrs = (log.total_working_minutes / 60).toFixed(1)
                       const isHq = log.punch_in_status === 'APPROVED'
 
+                      const isRegApproved = Boolean(log.review_notes?.includes('Regularized:'))
+                      const isRegRejected = Boolean(log.review_notes?.includes('REJECTED REGULARIZATION')) || Boolean(log.review_notes?.includes('REJECTED'))
+                      const isRegPending = Boolean(log.review_notes?.includes('REGULARIZATION REQUEST'))
+
                       return (
                         <tr key={log.id} style={{ borderBottom: '1px solid #F1F5F9' }}>
                           <td style={{ padding: '10px 14px', fontWeight: 600, color: '#0F172A' }}>{log.date}</td>
                           <td style={{ padding: '10px 14px', color: '#334155' }}>{inTime}</td>
                           <td style={{ padding: '10px 14px', color: '#334155' }}>{outTime}</td>
-                          <td style={{ padding: '10px 14px', fontWeight: 600, color: '#0284C7' }}>
-                            {hrs} hrs ({log.total_working_minutes}m)
+                          <td style={{ padding: '10px 14px' }}>
+                            <div style={{ fontWeight: 600, color: '#0284C7' }}>
+                              {hrs} hrs ({log.total_working_minutes}m)
+                            </div>
+                            {isRegApproved ? (
+                              <span style={{ display: 'inline-block', fontSize: '10px', fontWeight: 700, backgroundColor: '#DCFCE7', color: '#15803D', padding: '1px 6px', borderRadius: '4px', marginTop: '2px' }}>
+                                ✓ Regularized
+                              </span>
+                            ) : isRegRejected ? (
+                              <span style={{ display: 'inline-block', fontSize: '10px', fontWeight: 700, backgroundColor: '#FEE2E2', color: '#DC2626', padding: '1px 6px', borderRadius: '4px', marginTop: '2px' }}>
+                                ✕ Request Declined
+                              </span>
+                            ) : isRegPending ? (
+                              <span style={{ display: 'inline-block', fontSize: '10px', fontWeight: 700, backgroundColor: '#F5F3FF', color: '#6D28D9', padding: '1px 6px', borderRadius: '4px', marginTop: '2px' }}>
+                                ⏳ Pending Review
+                              </span>
+                            ) : log.is_auto_closed ? (
+                              <span style={{ display: 'inline-block', fontSize: '10px', fontWeight: 700, backgroundColor: '#FEF3C7', color: '#B45309', padding: '1px 6px', borderRadius: '4px', marginTop: '2px' }}>
+                                ⚠️ Auto-EOD
+                              </span>
+                            ) : null}
                           </td>
                           <td style={{ padding: '10px 14px' }}>
                             <span
@@ -792,7 +819,30 @@ export default function EmployeeAttendanceDetailModal({
                             </span>
                           </td>
                           <td style={{ padding: '10px 14px', textAlign: 'right' }}>
-                            <div style={{ display: 'inline-flex', gap: '6px', justifyContent: 'flex-end' }}>
+                            <div style={{ display: 'inline-flex', gap: '6px', justifyContent: 'flex-end', alignItems: 'center' }}>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setRegularizeLog(log)
+                                  setRegularizeModalOpen(true)
+                                }}
+                                style={{
+                                  border: '1px solid #CBD5E1',
+                                  background: '#FFFFFF',
+                                  color: '#334155',
+                                  padding: '4px 8px',
+                                  borderRadius: '6px',
+                                  cursor: 'pointer',
+                                  fontSize: '11px',
+                                  fontWeight: 600,
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: '3px',
+                                }}
+                                title="Adjust or regularize punch times"
+                              >
+                                <Edit3 size={12} /> Adjust
+                              </button>
                               {log.punch_in_selfie_url && (
                                 <button
                                   type="button"
@@ -857,6 +907,99 @@ export default function EmployeeAttendanceDetailModal({
               </table>
             </div>
           </div>
+
+          {/* Employee Leave Applications & History Section */}
+          <div
+            style={{
+              borderRadius: '12px',
+              border: '1px solid #E2E8F0',
+              overflow: 'hidden',
+              backgroundColor: '#FFFFFF',
+            }}
+          >
+            <div
+              style={{
+                padding: '14px 18px',
+                borderBottom: '1px solid #E2E8F0',
+                backgroundColor: '#F8FAFC',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+              }}
+            >
+              <h3 style={{ fontSize: '14px', fontWeight: 700, color: '#0F172A', margin: 0 }}>
+                Employee Leave Applications ({leaveRequests.length} Filed)
+              </h3>
+              <span style={{ fontSize: '12px', color: '#64748B' }}>Annual, Sick &amp; Emergency Time Off</span>
+            </div>
+
+            <div style={{ overflowX: 'auto' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
+                <thead>
+                  <tr style={{ backgroundColor: '#F8FAFC', borderBottom: '1px solid #E2E8F0' }}>
+                    <th style={{ padding: '10px 14px', textAlign: 'left', color: '#64748B', fontWeight: 600 }}>Category</th>
+                    <th style={{ padding: '10px 14px', textAlign: 'left', color: '#64748B', fontWeight: 600 }}>Dates &amp; Duration</th>
+                    <th style={{ padding: '10px 14px', textAlign: 'left', color: '#64748B', fontWeight: 600 }}>Reason</th>
+                    <th style={{ padding: '10px 14px', textAlign: 'left', color: '#64748B', fontWeight: 600 }}>Status</th>
+                    <th style={{ padding: '10px 14px', textAlign: 'right', color: '#64748B', fontWeight: 600 }}>Submitted On</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {leaveRequests.length === 0 ? (
+                    <tr>
+                      <td colSpan={5} style={{ textAlign: 'center', padding: '24px', color: '#94A3B8' }}>
+                        No leave applications submitted by this employee.
+                      </td>
+                    </tr>
+                  ) : (
+                    leaveRequests.map((req) => (
+                      <tr key={req.id} style={{ borderBottom: '1px solid #F1F5F9' }}>
+                        <td style={{ padding: '10px 14px' }}>
+                          <span
+                            style={{
+                              fontSize: 11,
+                              fontWeight: 700,
+                              padding: '2px 8px',
+                              borderRadius: 4,
+                              backgroundColor: req.leave_type === 'ANNUAL' ? '#E0F2FE' : '#ECFDF5',
+                              color: req.leave_type === 'ANNUAL' ? '#0369A1' : '#047857',
+                            }}
+                          >
+                            {req.leave_type} LEAVE
+                          </span>
+                        </td>
+                        <td style={{ padding: '10px 14px', fontWeight: 600, color: '#0F172A' }}>
+                          {req.start_date} to {req.end_date} ({req.total_days} days)
+                        </td>
+                        <td style={{ padding: '10px 14px', color: '#475569' }}>
+                          {req.reason || '-'}
+                        </td>
+                        <td style={{ padding: '10px 14px' }}>
+                          <span
+                            style={{
+                              fontSize: 11,
+                              fontWeight: 700,
+                              padding: '2px 8px',
+                              borderRadius: 4,
+                              backgroundColor:
+                                req.status === 'APPROVED' ? '#DCFCE7' : req.status === 'REJECTED' ? '#FEE2E2' : '#FEF3C7',
+                              color:
+                                req.status === 'APPROVED' ? '#15803D' : req.status === 'REJECTED' ? '#B91C1C' : '#B45309',
+                            }}
+                          >
+                            {req.status}
+                          </span>
+                        </td>
+                        <td style={{ padding: '10px 14px', textAlign: 'right', color: '#64748B', fontSize: 12 }}>
+                          {new Date(req.created_at).toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' })}
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -885,6 +1028,23 @@ export default function EmployeeAttendanceDetailModal({
         </button>
       </div>
     </div>
+
+      {/* Regularize Attendance Modal */}
+      <RegularizeAttendanceModal
+        isOpen={regularizeModalOpen}
+        onClose={() => {
+          setRegularizeModalOpen(false)
+          setRegularizeLog(null)
+        }}
+        log={regularizeLog}
+        employeeName={employee.name}
+        adminId={adminId}
+        onSuccess={() => {
+          if (employee) {
+            loadEmployeeData(employee.profile_id)
+          }
+        }}
+      />
 
       {/* Selfie Preview Lightbox Modal Mounted via Portal to document.body */}
       {selectedSelfie && typeof document !== 'undefined' && createPortal(
