@@ -934,7 +934,8 @@ textarea {
     align-items: flex-end !important;
   }
 
-  .modal-content {
+  .modal-content,
+  .modal-box {
     width: 100% !important;
     max-width: 100% !important;
     max-height: 92vh !important;
@@ -970,11 +971,74 @@ textarea {
   }
 
   /* Mobile tabs wrapper */
-  .modal-tabs-scroll {
+  .modal-tabs-scroll,
+  .attendance-tabs-scroll {
     overflow-x: auto !important;
     white-space: nowrap !important;
     -webkit-overflow-scrolling: touch !important;
+    scrollbar-width: none !important;
+    -ms-overflow-style: none !important;
     padding-bottom: 4px !important;
+  }
+  .attendance-tabs-scroll::-webkit-scrollbar {
+    display: none !important;
+  }
+
+  /* Attendance Mobile Visibility Toggles */
+  .attendance-desktop-only {
+    display: none !important;
+  }
+  .attendance-mobile-only {
+    display: block !important;
+  }
+  .attendance-mobile-flex {
+    display: flex !important;
+  }
+
+  /* Attendance Hero & KPI Mobile Grid */
+  .attendance-hero-grid {
+    grid-template-columns: 1fr !important;
+    gap: 16px !important;
+  }
+
+  .attendance-kpi-grid {
+    grid-template-columns: repeat(2, 1fr) !important;
+    gap: 10px !important;
+  }
+
+  .attendance-kpi-grid > div:last-child:nth-child(odd) {
+    grid-column: span 2;
+  }
+
+  /* Attendance Mobile Card Styling */
+  .attendance-mobile-card {
+    background: #FFFFFF;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 14px 16px;
+    margin-bottom: 12px;
+    box-shadow: var(--shadow-sm);
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    transition: transform 0.15s ease, box-shadow 0.15s ease;
+  }
+  .attendance-mobile-card:active {
+    background-color: #F8FAFC;
+  }
+}
+
+/* Default Desktop Visibility for Attendance Toggles */
+@media (min-width: 768px) {
+  .attendance-mobile-only,
+  .attendance-mobile-flex {
+    display: none !important;
+  }
+  .attendance-desktop-only {
+    display: block;
+  }
+  table.attendance-desktop-only {
+    display: table !important;
   }
 }
 

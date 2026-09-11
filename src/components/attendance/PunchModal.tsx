@@ -949,7 +949,7 @@ export default function PunchModal({
                   position: 'relative',
                   width: '100%',
                   aspectRatio: '1/1',
-                  maxHeight: '320px',
+                  maxHeight: 'min(300px, 42vh)',
                   backgroundColor: '#0F172A',
                   borderRadius: '14px',
                   overflow: 'hidden',

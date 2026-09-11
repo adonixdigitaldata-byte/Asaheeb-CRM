@@ -217,12 +217,11 @@ export async function loadBiometricModels(): Promise<boolean> {
 
       const MODEL_URL = '/models'
 
-      // Load lightweight TinyFaceDetector (190KB) + Landmarks (350KB) + Recognition (6MB) + Expression (300KB)
+      // Load lightweight TinyFaceDetector (190KB) + Landmarks (350KB) + Recognition (6MB)
       await Promise.all([
         faceapiModule.nets.tinyFaceDetector.loadFromUri(MODEL_URL),
         faceapiModule.nets.faceLandmark68Net.loadFromUri(MODEL_URL),
         faceapiModule.nets.faceRecognitionNet.loadFromUri(MODEL_URL),
-        faceapiModule.nets.faceExpressionNet.loadFromUri(MODEL_URL),
       ])
 
       modelsLoaded = true
@@ -230,6 +229,7 @@ export async function loadBiometricModels(): Promise<boolean> {
     } catch (err) {
       console.warn('Biometric models failed to load from /models:', err)
       modelsLoadingPromise = null
+      modelsLoaded = false
       return false
     }
   })()
@@ -293,7 +293,6 @@ export async function analyzeLiveFace(
     const detections = await faceapiModule
       .detectAllFaces(source, detectorOptions)
       .withFaceLandmarks()
-      .withFaceExpressions()
       .withFaceDescriptors()
 
     if (!detections || detections.length === 0) {

@@ -141,6 +141,9 @@ export default function AttendanceClient({ profile }: AttendanceClientProps) {
   const [regularizeLog, setRegularizeLog] = useState<AttendanceLog | null>(null)
   const [regularizeEmployeeName, setRegularizeEmployeeName] = useState('')
 
+  // Initial Page Loading Spinner state
+  const [pageInitialLoading, setPageInitialLoading] = useState(true)
+
   // Live Clock & Active Duration
   const [currentTime, setCurrentTime] = useState<string>('')
   const [activeWorkDuration, setActiveWorkDuration] = useState<string>('00h 00m')
@@ -479,6 +482,8 @@ export default function AttendanceClient({ profile }: AttendanceClientProps) {
       }
     } catch (e) {
       console.error('Error loading attendance data:', e)
+    } finally {
+      setPageInitialLoading(false)
     }
   }
 
@@ -881,6 +886,36 @@ export default function AttendanceClient({ profile }: AttendanceClientProps) {
 
   const isPunchedIn = Boolean(todayLog?.punch_in_at && !todayLog?.punch_out_at)
   const isPunchedOut = Boolean(todayLog?.punch_in_at && todayLog?.punch_out_at)
+  if (pageInitialLoading) {
+    return (
+      <div
+        style={{
+          width: '100%',
+          minHeight: '70vh',
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          justifyContent: 'center',
+          gap: '16px',
+        }}
+      >
+        <div
+          style={{
+            width: '42px',
+            height: '42px',
+            border: '4px solid #E2E8F0',
+            borderTopColor: '#2563EB',
+            borderRadius: '50%',
+            animation: 'spin 0.8s linear infinite',
+          }}
+        />
+        <style>{`@keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }`}</style>
+        <div style={{ fontSize: '14px', fontWeight: 600, color: '#475569' }}>
+          Loading Workforce &amp; Attendance Data...
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div style={{ width: '100%', minHeight: '100%' }}>
@@ -1067,6 +1102,7 @@ export default function AttendanceClient({ profile }: AttendanceClientProps) {
             </div>
           )}
           <div
+            className="attendance-hero-grid"
             style={{
               display: 'grid',
               gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
@@ -1345,6 +1381,7 @@ export default function AttendanceClient({ profile }: AttendanceClientProps) {
         {/* ======================================================= */}
         {canManage && (
           <div
+            className="attendance-kpi-grid"
             style={{
               display: 'grid',
               gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))',
@@ -1487,7 +1524,7 @@ export default function AttendanceClient({ profile }: AttendanceClientProps) {
             marginBottom: 16,
           }}
         >
-          <div style={{ display: 'flex', gap: 8, overflowX: 'auto', paddingBottom: 4 }}>
+          <div className="attendance-tabs-scroll" style={{ display: 'flex', gap: 8, overflowX: 'auto', paddingBottom: 4 }}>
             {canManage && (
               <>
                 <button
@@ -3668,7 +3705,8 @@ export default function AttendanceClient({ profile }: AttendanceClientProps) {
                 </button>
               </div>
 
-              <div className="table-responsive-wrapper" style={{ overflowX: 'auto', width: '100%' }}>
+              {/* Desktop Table View */}
+              <div className="table-responsive-wrapper attendance-desktop-only" style={{ overflowX: 'auto', width: '100%' }}>
                 <table className="table" style={{ width: '100%', minWidth: '820px', fontSize: '13px' }}>
                   <thead>
                     <tr>
@@ -4063,6 +4101,294 @@ export default function AttendanceClient({ profile }: AttendanceClientProps) {
                 </table>
               </div>
 
+              {/* Mobile Card List View (Phones & Small Viewports) */}
+              <div className="attendance-mobile-only" style={{ padding: '12px 14px' }}>
+                {myHistory.length === 0 ? (
+                  <div style={{ textAlign: 'center', padding: '30px 10px', color: 'var(--text-secondary)' }}>
+                    No punches logged yet. Clock in today using the button above!
+                  </div>
+                ) : (
+                  paginatedMyHistory.map((item) => {
+                    const inTime = formatDisplayTime(item.punch_in_at)
+                    const outTime = formatDisplayTime(item.punch_out_at)
+                    const isUnclosedPast = !item.punch_out_at && item.date < new Date().toISOString().split('T')[0]
+                    const isAutoClosed = Boolean(item.is_auto_closed) || isUnclosedPast
+                    let workingMinutes = item.total_working_minutes || 0
+                    if (isUnclosedPast && workingMinutes === 0 && item.punch_in_at) {
+                      const inDate = new Date(item.punch_in_at)
+                      const inMin = inDate.getHours() * 60 + inDate.getMinutes()
+                      const endMin = 17 * 60
+                      workingMinutes = Math.max(0, endMin - inMin)
+                    }
+                    const hrs = (workingMinutes / 60).toFixed(1)
+                    const isHq = item.punch_in_status === 'APPROVED'
+
+                    // Punctuality check
+                    let punctualityBadge = null
+                    if (item.punch_in_at) {
+                      const inDate = new Date(item.punch_in_at)
+                      const inMin = inDate.getHours() * 60 + inDate.getMinutes()
+                      const isLate = inMin > myMonthlyStats.shiftStartCutoffMinutes
+                      const lateMins = isLate ? inMin - (myMonthlyStats.shiftHour * 60 + myMonthlyStats.shiftMinute) : 0
+
+                      punctualityBadge = isLate ? (
+                        <span
+                          style={{
+                            padding: '2px 7px',
+                            borderRadius: 4,
+                            fontSize: 11,
+                            fontWeight: 700,
+                            backgroundColor: '#FEF3C7',
+                            color: '#B45309',
+                          }}
+                        >
+                          🟡 Late (+{lateMins}m)
+                        </span>
+                      ) : (
+                        <span
+                          style={{
+                            padding: '2px 7px',
+                            borderRadius: 4,
+                            fontSize: 11,
+                            fontWeight: 700,
+                            backgroundColor: '#DCFCE7',
+                            color: '#15803D',
+                          }}
+                        >
+                          🟢 On-Time
+                        </span>
+                      )
+                    }
+
+                    // Determine expected hours configured for this specific day
+                    let dayExpectedH = workPolicy.daily_expected_hours || 8
+                    if (item.date) {
+                      const d = new Date(item.date + 'T00:00:00')
+                      const dayName = d.toLocaleDateString('en-US', { weekday: 'long' })
+                      if (workPolicy.custom_day_hours && workPolicy.custom_day_hours[dayName] !== undefined) {
+                        dayExpectedH = workPolicy.custom_day_hours[dayName]
+                      }
+                    }
+                    const dayExpectedM = dayExpectedH * 60
+                    const diff = workingMinutes - dayExpectedM
+                    const deficitH = (Math.abs(diff) / 60).toFixed(1)
+
+                    // Regularization Request details & status
+                    const regDetails = parseRegularizationRequestNotes(item.review_notes)
+                    const isRegApproved =
+                      (item.punch_in_status === 'APPROVED' || item.punch_out_status === 'APPROVED') &&
+                      Boolean(item.review_notes?.includes('Regularized:'))
+                    const isRegRejected =
+                      Boolean(item.review_notes?.includes('REJECTED REGULARIZATION')) ||
+                      Boolean(item.review_notes?.includes('REJECTED'))
+                    const isRegPending =
+                      !isRegApproved &&
+                      !isRegRejected &&
+                      (item.punch_out_status === 'PENDING_REVIEW' ||
+                        item.punch_in_status === 'PENDING_REVIEW' ||
+                        regDetails.isRegularization)
+
+                    return (
+                      <div
+                        key={item.id}
+                        className="attendance-mobile-card"
+                        style={{
+                          borderLeft: `4px solid ${
+                            isRegPending ? '#7C3AED' : isRegApproved ? '#16A34A' : diff < 0 ? '#DC2626' : '#2563EB'
+                          }`,
+                        }}
+                      >
+                        {/* Top: Date + Location + Punctuality */}
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 6 }}>
+                          <div style={{ fontWeight: 700, fontSize: '14px', color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: 6 }}>
+                            <Calendar size={14} color="#64748B" />
+                            {item.date}
+                          </div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                            <span
+                              style={{
+                                padding: '2px 7px',
+                                borderRadius: 4,
+                                fontSize: 11,
+                                fontWeight: 600,
+                                backgroundColor: isHq ? '#DCFCE7' : '#FEF3C7',
+                                color: isHq ? '#15803D' : '#B45309',
+                              }}
+                            >
+                              {isHq ? '🟢 HQ' : '🟡 Remote'}
+                            </span>
+                            {punctualityBadge}
+                          </div>
+                        </div>
+
+                        {/* Punch In / Out Times Grid */}
+                        <div
+                          style={{
+                            display: 'grid',
+                            gridTemplateColumns: '1fr 1fr',
+                            gap: 8,
+                            padding: '10px 12px',
+                            borderRadius: 8,
+                            backgroundColor: '#F8FAFC',
+                            border: '1px solid #E2E8F0',
+                          }}
+                        >
+                          <div>
+                            <div style={{ fontSize: '10.5px', color: '#64748B', fontWeight: 600, textTransform: 'uppercase' }}>
+                              Punch In
+                            </div>
+                            <div style={{ fontSize: '13.5px', fontWeight: 700, color: inTime !== '--:--' ? '#0F172A' : '#94A3B8', marginTop: 1 }}>
+                              {inTime}
+                            </div>
+                          </div>
+
+                          <div>
+                            <div style={{ fontSize: '10.5px', color: '#64748B', fontWeight: 600, textTransform: 'uppercase' }}>
+                              Punch Out
+                            </div>
+                            <div style={{ fontSize: '13.5px', fontWeight: 700, color: outTime !== '--:--' ? '#0F172A' : '#94A3B8', marginTop: 1 }}>
+                              {outTime}
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Total Duration & Status */}
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 6 }}>
+                          <div style={{ fontSize: '12.5px', fontWeight: 700, color: '#0284C7' }}>
+                            Worked: {hrs} hrs ({workingMinutes}m)
+                          </div>
+                          {diff < 0 ? (
+                            <span style={{ fontSize: '11.5px', fontWeight: 700, color: '#DC2626' }}>
+                              -{deficitH}h Deficit ({dayExpectedH}h shift)
+                            </span>
+                          ) : (
+                            <span style={{ fontSize: '11.5px', fontWeight: 700, color: '#16A34A' }}>
+                              ✓ Met Shift ({dayExpectedH}h)
+                            </span>
+                          )}
+                        </div>
+
+                        {/* Regularization Action / Status Section */}
+                        {isRegPending ? (
+                          <div
+                            style={{
+                              padding: '8px 10px',
+                              borderRadius: 8,
+                              backgroundColor: '#FAF5FF',
+                              border: '1px solid #E9D5FF',
+                              display: 'flex',
+                              flexDirection: 'column',
+                              gap: 4,
+                              fontSize: 11.5,
+                            }}
+                          >
+                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6 }}>
+                              <span style={{ fontWeight: 700, color: '#7C3AED', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                                <Clock size={12} /> Pending Review
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => handleOpenRegularize(item, canManage ? '' : (profile?.name || ''))}
+                                style={{
+                                  fontSize: 11,
+                                  fontWeight: 700,
+                                  color: '#2563EB',
+                                  background: 'none',
+                                  border: 'none',
+                                  cursor: 'pointer',
+                                  textDecoration: 'underline',
+                                  padding: 0,
+                                }}
+                              >
+                                Edit Request
+                              </button>
+                            </div>
+                            <div style={{ color: '#581C87', fontWeight: 600 }}>
+                              Req: <strong style={{ color: '#15803D' }}>{regDetails.requestedIn || inTime}</strong> ➔{' '}
+                              <strong style={{ color: '#15803D' }}>{regDetails.requestedOut || outTime}</strong>
+                            </div>
+                          </div>
+                        ) : isRegApproved ? (
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                            <span
+                              style={{
+                                fontSize: 11,
+                                fontWeight: 700,
+                                padding: '3px 8px',
+                                borderRadius: 4,
+                                backgroundColor: '#DCFCE7',
+                                color: '#15803D',
+                                border: '1px solid #86EFAC',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: 4,
+                              }}
+                            >
+                              <Check size={12} /> Regularized &amp; Approved
+                            </span>
+                          </div>
+                        ) : isRegRejected ? (
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6 }}>
+                            <span
+                              style={{
+                                fontSize: 11,
+                                fontWeight: 700,
+                                padding: '3px 8px',
+                                borderRadius: 4,
+                                backgroundColor: '#FEE2E2',
+                                color: '#DC2626',
+                                border: '1px solid #FCA5A5',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: 4,
+                              }}
+                            >
+                              <X size={12} /> Declined
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => handleOpenRegularize(item, canManage ? '' : (profile?.name || ''))}
+                              style={{
+                                fontSize: 11.5,
+                                color: '#2563EB',
+                                textDecoration: 'underline',
+                                background: 'none',
+                                border: 'none',
+                                cursor: 'pointer',
+                                fontWeight: 600,
+                              }}
+                            >
+                              Submit Revised
+                            </button>
+                          </div>
+                        ) : isAutoClosed || (item.punch_out_at && diff < 0) ? (
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6, paddingTop: 4, borderTop: '1px dashed #E2E8F0' }}>
+                            <span style={{ fontSize: 11, color: '#64748B' }}>
+                              {isAutoClosed ? '⚠️ Auto-Closed' : 'Deficit hours'}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => handleOpenRegularize(item, canManage ? '' : (profile?.name || ''))}
+                              className="btn btn-outline btn-sm"
+                              style={{
+                                fontSize: 11.5,
+                                padding: '4px 10px',
+                                color: '#2563EB',
+                                borderColor: '#BFDBFE',
+                                backgroundColor: '#EFF6FF',
+                                fontWeight: 600,
+                              }}
+                            >
+                              Request Regularization
+                            </button>
+                          </div>
+                        ) : null}
+                      </div>
+                    )
+                  })
+                )}
+              </div>
+
               <Pagination
                 currentPage={myHistoryPage}
                 totalItems={myHistory.length}
@@ -4083,6 +4409,7 @@ export default function AttendanceClient({ profile }: AttendanceClientProps) {
           <div>
             {/* Quota Cards */}
             <div
+              className="attendance-kpi-grid"
               style={{
                 display: 'grid',
                 gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))',
@@ -4218,7 +4545,8 @@ export default function AttendanceClient({ profile }: AttendanceClientProps) {
                 </button>
               </div>
 
-              <div className="table-responsive-wrapper" style={{ overflowX: 'auto', width: '100%' }}>
+              {/* Desktop Table View */}
+              <div className="table-responsive-wrapper attendance-desktop-only" style={{ overflowX: 'auto', width: '100%' }}>
                 <table className="table" style={{ width: '100%', minWidth: '760px', fontSize: '13px' }}>
                   <thead>
                     <tr>
@@ -4326,6 +4654,92 @@ export default function AttendanceClient({ profile }: AttendanceClientProps) {
                     )}
                   </tbody>
                 </table>
+              </div>
+
+              {/* Mobile Leaves Card View (Phones & Small Viewports) */}
+              <div className="attendance-mobile-only" style={{ padding: '12px 14px' }}>
+                {myLeaveRequests.length === 0 ? (
+                  <div style={{ textAlign: 'center', padding: '30px 10px', color: 'var(--text-secondary)' }}>
+                    <Calendar size={32} style={{ color: '#94A3B8', margin: '0 auto 8px', display: 'block' }} />
+                    You have not submitted any leave applications yet.
+                  </div>
+                ) : (
+                  paginatedMyLeaves.map((req) => (
+                    <div
+                      key={req.id}
+                      className="attendance-mobile-card"
+                      style={{
+                        borderLeft: `4px solid ${
+                          req.status === 'APPROVED' ? '#16A34A' : req.status === 'REJECTED' ? '#DC2626' : '#F59E0B'
+                        }`,
+                      }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 6 }}>
+                        <span
+                          style={{
+                            fontSize: 11,
+                            fontWeight: 700,
+                            padding: '3px 8px',
+                            borderRadius: 4,
+                            backgroundColor:
+                              req.leave_type === 'ANNUAL'
+                                ? '#E0F2FE'
+                                : req.leave_type === 'SICK'
+                                ? '#ECFDF5'
+                                : req.leave_type === 'EMERGENCY'
+                                ? '#FEF3C7'
+                                : '#F1F5F9',
+                            color:
+                              req.leave_type === 'ANNUAL'
+                                ? '#0369A1'
+                                : req.leave_type === 'SICK'
+                                ? '#047857'
+                                : req.leave_type === 'EMERGENCY'
+                                ? '#B45309'
+                                : '#475569',
+                          }}
+                        >
+                          {req.leave_type} LEAVE
+                        </span>
+                        <span
+                          style={{
+                            fontSize: 11,
+                            fontWeight: 700,
+                            padding: '3px 8px',
+                            borderRadius: 4,
+                            backgroundColor:
+                              req.status === 'APPROVED' ? '#DCFCE7' : req.status === 'REJECTED' ? '#FEE2E2' : '#FEF3C7',
+                            color:
+                              req.status === 'APPROVED' ? '#15803D' : req.status === 'REJECTED' ? '#B91C1C' : '#B45309',
+                          }}
+                        >
+                          {req.status === 'APPROVED' ? '🟢 APPROVED' : req.status === 'REJECTED' ? '🔴 REJECTED' : '🟡 PENDING'}
+                        </span>
+                      </div>
+
+                      <div>
+                        <div style={{ fontSize: '13.5px', fontWeight: 700, color: 'var(--text-primary)' }}>
+                          {req.start_date} ➔ {req.end_date}
+                        </div>
+                        <div style={{ fontSize: '12px', color: '#64748B', marginTop: 2 }}>
+                          Total Duration: <strong>{req.total_days} {req.total_days === 1 ? 'day' : 'days'}</strong>
+                        </div>
+                      </div>
+
+                      {req.reason && (
+                        <div style={{ fontSize: '12px', color: 'var(--text-secondary)', backgroundColor: '#F8FAFC', padding: '6px 10px', borderRadius: 6 }}>
+                          &ldquo;{req.reason}&rdquo;
+                        </div>
+                      )}
+
+                      {req.admin_notes && (
+                        <div style={{ fontSize: '11.5px', color: '#475569', borderTop: '1px dashed #E2E8F0', paddingTop: 6 }}>
+                          <strong>Note:</strong> {req.admin_notes}
+                        </div>
+                      )}
+                    </div>
+                  ))
+                )}
               </div>
 
               <Pagination
