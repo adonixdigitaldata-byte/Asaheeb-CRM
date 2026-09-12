@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import {
   X,
   MapPin,
@@ -48,6 +48,18 @@ export default function OfficeSettingsModal({
   const [gpsMessage, setGpsMessage] = useState<string | null>(null)
   const [isSaving, setIsSaving] = useState(false)
   const [savedSuccess, setSavedSuccess] = useState(false)
+
+  useEffect(() => {
+    if (isOpen && currentOffice) {
+      setName(currentOffice.name || 'Jeddah Headquarters')
+      setAddress(currentOffice.address || 'Al-Andalus District, Prince Mohammed Bin Abdulaziz St, Jeddah, Saudi Arabia')
+      setLatitude(currentOffice.latitude ?? 21.5433)
+      setLongitude(currentOffice.longitude ?? 39.1728)
+      setRadiusMeters(currentOffice.radius_meters || 150)
+      setGpsMessage(null)
+      setSavedSuccess(false)
+    }
+  }, [isOpen, currentOffice])
 
   if (!isOpen) return null
 

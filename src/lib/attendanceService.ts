@@ -13,28 +13,60 @@ import {
 import { DeviceSpecs, NetworkSpecs } from '@/lib/deviceTelemetry'
 import { DEFAULT_JEDDAH_HQ } from '@/lib/geoUtils'
 
-const LOCAL_OFFICE_KEY = 'asaheeb_crm_office_location_v1'
-const LOCAL_ATTENDANCE_KEY = 'asaheeb_crm_attendance_logs_v1'
-const LOCAL_LEAVE_BALANCES_KEY = 'asaheeb_crm_leave_balances_v1'
-const LOCAL_LEAVE_REQUESTS_KEY = 'asaheeb_crm_leave_requests_v1'
+// ==========================================
+// PURGE LEGACY CLIENT CACHE
+// ==========================================
+if (typeof window !== 'undefined') {
+  try {
+    localStorage.removeItem('asaheeb_crm_office_location_v1')
+    localStorage.removeItem('asaheeb_crm_attendance_logs_v1')
+    localStorage.removeItem('asaheeb_crm_work_policy_v1')
+    localStorage.removeItem('asaheeb_crm_company_work_policy_v2')
+    localStorage.removeItem('asaheeb_crm_leave_balances_v1')
+    localStorage.removeItem('asaheeb_crm_leave_requests_v1')
+  } catch (e) {}
+}
 
 // ==========================================
-// LOCAL STORAGE FALLBACK HELPERS
+// 1. OFFICE GEOFENCE & LOCATION API
 // ==========================================
-function getLocalOffice(): CompanyLocation {
-  if (typeof window === 'undefined') {
-    return {
-      id: 'default-jeddah',
-      ...DEFAULT_JEDDAH_HQ,
-      is_active: true,
+export async function fetchOfficeLocation(): Promise<CompanyLocation> {
+  // 1. Primary: Fetch live location from server API with service client & no-cache headers
+  if (typeof window !== 'undefined') {
+    try {
+      const res = await fetch('/api/attendance/office-location', {
+        cache: 'no-store',
+        headers: { 'Cache-Control': 'no-cache, no-store' },
+      })
+      if (res.ok) {
+        const json = await res.json()
+        if (json.location) {
+          return json.location as CompanyLocation
+        }
+      }
+    } catch (apiErr) {
+      console.warn('API /api/attendance/office-location GET failed, trying direct:', apiErr)
     }
   }
+
+  // 2. Direct Supabase Query Fallback
   try {
-    const raw = localStorage.getItem(LOCAL_OFFICE_KEY)
-    if (raw) return JSON.parse(raw)
-  } catch (e) {
-    console.error(e)
+    const supabase = createClient()
+    const { data, error } = await supabase
+      .from('company_locations')
+      .select('*')
+      .eq('is_active', true)
+      .order('updated_at', { ascending: false })
+      .limit(1)
+      .maybeSingle()
+
+    if (!error && data) {
+      return data as CompanyLocation
+    }
+  } catch (err) {
+    console.warn('Direct Supabase office fetch failed:', err)
   }
+
   return {
     id: 'default-jeddah',
     ...DEFAULT_JEDDAH_HQ,
@@ -42,111 +74,43 @@ function getLocalOffice(): CompanyLocation {
   }
 }
 
-function saveLocalOffice(loc: CompanyLocation) {
-  if (typeof window === 'undefined') return
-  try {
-    localStorage.setItem(LOCAL_OFFICE_KEY, JSON.stringify(loc))
-  } catch (e) {
-    console.error(e)
-  }
-}
-
-export function getLocalAttendance(): AttendanceLog[] {
-  if (typeof window === 'undefined') return []
-  try {
-    const raw = localStorage.getItem(LOCAL_ATTENDANCE_KEY)
-    if (raw) return JSON.parse(raw)
-  } catch (e) {
-    console.error(e)
-  }
-  return []
-}
-
-export function saveLocalAttendance(logs: AttendanceLog[]) {
-  if (typeof window === 'undefined') return
-  try {
-    localStorage.setItem(LOCAL_ATTENDANCE_KEY, JSON.stringify(logs))
-  } catch (e) {
-    console.error(e)
-  }
-}
-
-function getLocalLeaveBalances(): LeaveBalance[] {
-  if (typeof window === 'undefined') return []
-  try {
-    const raw = localStorage.getItem(LOCAL_LEAVE_BALANCES_KEY)
-    if (raw) return JSON.parse(raw)
-  } catch (e) {
-    console.error(e)
-  }
-  return []
-}
-
-function saveLocalLeaveBalances(balances: LeaveBalance[]) {
-  if (typeof window === 'undefined') return
-  try {
-    localStorage.setItem(LOCAL_LEAVE_BALANCES_KEY, JSON.stringify(balances))
-  } catch (e) {
-    console.error(e)
-  }
-}
-
-function getLocalLeaveRequests(): LeaveRequest[] {
-  if (typeof window === 'undefined') return []
-  try {
-    const raw = localStorage.getItem(LOCAL_LEAVE_REQUESTS_KEY)
-    if (raw) return JSON.parse(raw)
-  } catch (e) {
-    console.error(e)
-  }
-  return []
-}
-
-function saveLocalLeaveRequests(reqs: LeaveRequest[]) {
-  if (typeof window === 'undefined') return
-  try {
-    localStorage.setItem(LOCAL_LEAVE_REQUESTS_KEY, JSON.stringify(reqs))
-  } catch (e) {
-    console.error(e)
-  }
-}
-
-// ==========================================
-// 1. OFFICE GEOFENCE & LOCATION API
-// ==========================================
-export async function fetchOfficeLocation(): Promise<CompanyLocation> {
-  try {
-    const supabase = createClient()
-    const { data, error } = await supabase
-      .from('company_locations')
-      .select('*')
-      .eq('is_active', true)
-      .limit(1)
-      .maybeSingle()
-
-    if (!error && data) {
-      saveLocalOffice(data as CompanyLocation)
-      return data as CompanyLocation
-    }
-  } catch (err) {
-    console.warn('Using local office location fallback:', err)
-  }
-  return getLocalOffice()
-}
-
 export async function saveOfficeLocation(
   loc: Partial<CompanyLocation> & { latitude: number; longitude: number; radius_meters: number }
 ): Promise<CompanyLocation> {
   const payload = {
+    id: loc.id,
     name: loc.name || DEFAULT_JEDDAH_HQ.name,
     address: loc.address || DEFAULT_JEDDAH_HQ.address,
-    latitude: loc.latitude,
-    longitude: loc.longitude,
-    radius_meters: loc.radius_meters,
+    latitude: Number(loc.latitude),
+    longitude: Number(loc.longitude),
+    radius_meters: Number(loc.radius_meters) || 150,
     is_active: true,
-    updated_at: new Date().toISOString(),
   }
 
+  // 1. Primary: Save via server API with service role (persists 100% reliably in Supabase)
+  if (typeof window !== 'undefined') {
+    try {
+      const res = await fetch('/api/attendance/office-location', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        cache: 'no-store',
+        body: JSON.stringify(payload),
+      })
+      if (res.ok) {
+        const json = await res.json()
+        if (json.location) {
+          if (typeof window !== 'undefined') {
+            window.dispatchEvent(new CustomEvent('asaheeb_attendance_updated'))
+          }
+          return json.location as CompanyLocation
+        }
+      }
+    } catch (apiErr) {
+      console.warn('API /api/attendance/office-location POST failed, trying direct:', apiErr)
+    }
+  }
+
+  // 2. Direct Supabase Fallback
   try {
     const supabase = createClient()
     const existing = await fetchOfficeLocation()
@@ -155,7 +119,10 @@ export async function saveOfficeLocation(
     if (existing?.id && existing.id !== 'default-jeddah') {
       const { data, error } = await supabase
         .from('company_locations')
-        .update(payload)
+        .update({
+          ...payload,
+          updated_at: new Date().toISOString(),
+        })
         .eq('id', existing.id)
         .select()
         .single()
@@ -163,18 +130,23 @@ export async function saveOfficeLocation(
     } else {
       const { data, error } = await supabase
         .from('company_locations')
-        .insert(payload)
+        .insert({
+          ...payload,
+          updated_at: new Date().toISOString(),
+        })
         .select()
         .single()
       if (!error && data) resData = data as CompanyLocation
     }
 
     if (resData) {
-      saveLocalOffice(resData)
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('asaheeb_attendance_updated'))
+      }
       return resData
     }
   } catch (err) {
-    console.warn('Supabase office save failed, saving locally:', err)
+    console.warn('Direct Supabase office save failed:', err)
   }
 
   const fallback: CompanyLocation = {
@@ -185,9 +157,8 @@ export async function saveOfficeLocation(
     longitude: payload.longitude,
     radius_meters: payload.radius_meters,
     is_active: true,
-    updated_at: payload.updated_at,
+    updated_at: new Date().toISOString(),
   }
-  saveLocalOffice(fallback)
   return fallback
 }
 
@@ -209,11 +180,10 @@ export async function fetchTodayAttendance(userId: string): Promise<AttendanceLo
       return data as AttendanceLog
     }
   } catch (err) {
-    console.warn('Supabase attendance fetch failed, checking local:', err)
+    console.warn('Supabase attendance fetch failed:', err)
   }
 
-  const logs = getLocalAttendance()
-  return logs.find((l) => l.user_id === userId && l.date === todayStr) || null
+  return null
 }
 
 export async function submitPunchIn(params: {
@@ -255,43 +225,22 @@ export async function submitPunchIn(params: {
     updated_at: new Date().toISOString(),
   }
 
-  try {
-    const supabase = createClient()
-    const { data, error } = await supabase
-      .from('attendance_logs')
-      .upsert(recordPayload, { onConflict: 'user_id,date' })
-      .select()
-      .single()
+  const supabase = createClient()
+  const { data, error } = await supabase
+    .from('attendance_logs')
+    .upsert(recordPayload, { onConflict: 'user_id,date' })
+    .select()
+    .single()
 
-    if (!error && data) {
-      updateLocalLog(data as AttendanceLog)
-      return data as AttendanceLog
-    }
-  } catch (err) {
-    console.warn('Supabase punch in failed, storing locally:', err)
+  if (error) {
+    console.error('Supabase punch-in error:', error)
+    throw new Error(error.message || 'Failed to submit punch-in')
   }
 
-  const localLog: AttendanceLog = {
-    id: `local-log-${Date.now()}`,
-    ...recordPayload,
-    punch_out_at: null,
-    punch_out_lat: null,
-    punch_out_lng: null,
-    punch_out_accuracy: null,
-    punch_out_distance_m: null,
-    punch_out_selfie_url: null,
-    punch_out_status: null,
-    punch_out_reason: null,
-    punch_out_explanation: null,
-    punch_out_device_info: null,
-    punch_out_network_info: null,
-    punch_out_ip: null,
-    review_notes: null,
-    reviewed_by: null,
-    reviewed_at: null,
-  } as AttendanceLog
-  updateLocalLog(localLog)
-  return localLog
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('asaheeb_attendance_updated'))
+  }
+  return data as AttendanceLog
 }
 
 export async function submitPunchOut(params: {
@@ -338,45 +287,24 @@ export async function submitPunchOut(params: {
     updated_at: new Date().toISOString(),
   }
 
-  try {
-    const supabase = createClient()
-    const { data, error } = await supabase
-      .from('attendance_logs')
-      .update(updatePayload)
-      .eq('user_id', params.userId)
-      .eq('date', todayStr)
-      .select()
-      .single()
+  const supabase = createClient()
+  const { data, error } = await supabase
+    .from('attendance_logs')
+    .update(updatePayload)
+    .eq('user_id', params.userId)
+    .eq('date', todayStr)
+    .select()
+    .single()
 
-    if (!error && data) {
-      updateLocalLog(data as AttendanceLog)
-      return data as AttendanceLog
-    }
-  } catch (err) {
-    console.warn('Supabase punch out failed, updating locally:', err)
+  if (error) {
+    console.error('Supabase punch-out error:', error)
+    throw new Error(error.message || 'Failed to submit punch-out')
   }
 
-  if (currentRecord) {
-    const updated: AttendanceLog = {
-      ...currentRecord,
-      ...updatePayload,
-    }
-    updateLocalLog(updated)
-    return updated
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('asaheeb_attendance_updated'))
   }
-
-  throw new Error('No punch-in record found for today to punch out from.')
-}
-
-function updateLocalLog(log: AttendanceLog) {
-  const logs = getLocalAttendance()
-  const idx = logs.findIndex((l) => l.user_id === log.user_id && l.date === log.date)
-  if (idx >= 0) {
-    logs[idx] = log
-  } else {
-    logs.unshift(log)
-  }
-  saveLocalAttendance(logs)
+  return data as AttendanceLog
 }
 
 // ==========================================
@@ -385,7 +313,6 @@ function updateLocalLog(log: AttendanceLog) {
 export async function fetchUserAttendanceHistory(userId: string): Promise<AttendanceLog[]> {
   const todayStr = new Date().toISOString().split('T')[0]
   let rawLogs: AttendanceLog[] = []
-  const policy = await fetchCompanyWorkPolicy()
 
   try {
     const supabase = createClient()
@@ -428,7 +355,6 @@ export async function fetchUserAttendanceHistory(userId: string): Promise<Attend
             matchLog.review_notes = statusNote
           }
         } else {
-          // If no log exists for this date, create a representation so the user sees their pending/regularized request
           rawLogs.push({
             id: req.attendance_log_id || req.id,
             user_id: req.user_id,
@@ -448,11 +374,6 @@ export async function fetchUserAttendanceHistory(userId: string): Promise<Attend
     }
   } catch (err) {
     console.warn('Supabase history fetch failed:', err)
-  }
-
-  if (rawLogs.length === 0) {
-    const logs = getLocalAttendance()
-    rawLogs = logs.filter((l) => l.user_id === userId).sort((a, b) => b.date.localeCompare(a.date))
   }
 
   // Post-process logs: handle active shift and past unclosed shift fallback
@@ -547,7 +468,9 @@ export async function regularizeAttendanceLog(params: {
     if (res.ok) {
       const json = await res.json()
       if (json.success && json.log) {
-        updateLocalLog(json.log as AttendanceLog)
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new CustomEvent('asaheeb_attendance_updated'))
+        }
         return json.log as AttendanceLog
       }
     }
@@ -582,11 +505,6 @@ export async function regularizeAttendanceLog(params: {
     } catch (e) { }
   }
 
-  if (!currentLog) {
-    const local = getLocalAttendance().find((l) => l.id === params.logId || (l.user_id === params.userId && l.date === dateStr))
-    if (local) currentLog = local
-  }
-
   const dbPayload: Record<string, any> = {
     punch_in_at: inTimeStr,
     punch_out_at: params.punchOutAt,
@@ -611,7 +529,9 @@ export async function regularizeAttendanceLog(params: {
         .maybeSingle()
 
       if (!error && data) {
-        updateLocalLog(data as AttendanceLog)
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new CustomEvent('asaheeb_attendance_updated'))
+        }
         return data as AttendanceLog
       }
     } catch (err) {
@@ -628,7 +548,9 @@ export async function regularizeAttendanceLog(params: {
     }),
     ...dbPayload,
   } as unknown as AttendanceLog
-  updateLocalLog(updated)
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('asaheeb_attendance_updated'))
+  }
   return updated
 }
 
@@ -675,7 +597,9 @@ export async function requestAttendanceRegularization(params: {
     if (res.ok) {
       const json = await res.json()
       if (json.success && json.log) {
-        updateLocalLog(json.log as AttendanceLog)
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new CustomEvent('asaheeb_attendance_updated'))
+        }
         return true
       }
     }
@@ -731,12 +655,8 @@ export async function requestAttendanceRegularization(params: {
         .eq('id', existingId)
 
       if (!error) {
-        const local = getLocalAttendance().find((l) => l.id === existingId || (l.user_id === params.userId && l.date === dateStr))
-        if (local) {
-          updateLocalLog({
-            ...local,
-            ...updatePayload,
-          })
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new CustomEvent('asaheeb_attendance_updated'))
         }
         return true
       }
@@ -745,24 +665,7 @@ export async function requestAttendanceRegularization(params: {
     }
   }
 
-  const local = getLocalAttendance().find((l) => l.id === params.logId || (l.user_id === params.userId && l.date === dateStr))
-  if (local) {
-    updateLocalLog({
-      ...local,
-      ...updatePayload,
-    })
-    return true
-  }
-
-  const newLocal = {
-    id: params.logId,
-    user_id: params.userId,
-    date: dateStr,
-    created_at: new Date().toISOString(),
-    ...updatePayload,
-  } as unknown as AttendanceLog
-  updateLocalLog(newLocal)
-  return true
+  return false
 }
 
 /**
@@ -850,7 +753,9 @@ export async function rejectRegularizationRequest(
     if (res.ok) {
       const json = await res.json()
       if (json.success && json.log) {
-        updateLocalLog(json.log as AttendanceLog)
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new CustomEvent('asaheeb_attendance_updated'))
+        }
         return true
       }
     }
@@ -881,7 +786,9 @@ export async function rejectRegularizationRequest(
         .maybeSingle()
 
       if (!error && data) {
-        updateLocalLog(data as AttendanceLog)
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new CustomEvent('asaheeb_attendance_updated'))
+        }
         return true
       }
     } catch (e) { }
@@ -897,17 +804,14 @@ export async function rejectRegularizationRequest(
         .select()
         .maybeSingle()
       if (!res.error && res.data) {
-        updateLocalLog(res.data as AttendanceLog)
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new CustomEvent('asaheeb_attendance_updated'))
+        }
         return true
       }
     } catch (e) { }
   }
 
-  const local = getLocalAttendance().find((l) => l.id === logId || (l.user_id === userId && l.date === dateStr))
-  if (local) {
-    updateLocalLog({ ...local, ...dbPayload })
-    return true
-  }
   return false
 }
 
@@ -920,22 +824,6 @@ export async function deleteAttendanceLog(params: {
   date?: string
   isDedicatedRequest?: boolean
 }): Promise<boolean> {
-  // Always clean local storage cache
-  try {
-    const logs = getLocalAttendance()
-    const updated = logs.filter((l) => {
-      if (params.logId && l.id === params.logId) return false
-      if (params.userId && params.date && l.user_id === params.userId && (l.date === params.date || l.created_at?.startsWith(params.date))) return false
-      return true
-    })
-    saveLocalAttendance(updated)
-    if (typeof window !== 'undefined') {
-      window.dispatchEvent(new CustomEvent('asaheeb_attendance_updated'))
-    }
-  } catch (localErr) {
-    console.warn('Error updating local attendance state:', localErr)
-  }
-
   try {
     const res = await fetch('/api/attendance/regularize', {
       method: 'POST',
@@ -951,6 +839,9 @@ export async function deleteAttendanceLog(params: {
     if (res.ok) {
       const json = await res.json()
       if (json.success) {
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new CustomEvent('asaheeb_attendance_updated'))
+        }
         return true
       }
     }
@@ -975,6 +866,9 @@ export async function deleteAttendanceLog(params: {
         .delete()
         .eq('user_id', params.userId)
         .eq('date', params.date)
+    }
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('asaheeb_attendance_updated'))
     }
     return true
   } catch (err) {
@@ -1228,17 +1122,7 @@ export async function fetchPendingExceptions(): Promise<AttendanceLog[]> {
     console.warn('Supabase exceptions fetch failed:', err)
   }
 
-  const logs = getLocalAttendance()
-  return logs.filter(
-    (l) =>
-      l.punch_in_status === 'PENDING_REVIEW' ||
-      l.punch_out_status === 'PENDING_REVIEW' ||
-      l.punch_in_status === 'FLAGGED' ||
-      l.punch_out_status === 'FLAGGED' ||
-      (l.punch_in_distance_m && l.punch_in_distance_m > 150) ||
-      (l.punch_out_distance_m && l.punch_out_distance_m > 150) ||
-      (l.review_notes && (l.review_notes.includes('REGULARIZATION') || l.review_notes.includes('Regularized')))
-  )
+  return []
 }
 
 export async function reviewAttendancePunch(
@@ -1268,23 +1152,16 @@ export async function reviewAttendancePunch(
       .update(updatePayload)
       .eq('id', attendanceId)
 
-    if (!error) return true
+    if (!error) {
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('asaheeb_attendance_updated'))
+      }
+      return true
+    }
   } catch (err) {
     console.warn('Supabase review update failed:', err)
   }
 
-  // Local update
-  const logs = getLocalAttendance()
-  const item = logs.find((l) => l.id === attendanceId)
-  if (item) {
-    if (punchType === 'IN') item.punch_in_status = newStatus
-    else item.punch_out_status = newStatus
-    item.review_notes = adminNotes
-    item.reviewed_by = adminId
-    item.reviewed_at = new Date().toISOString()
-    saveLocalAttendance(logs)
-    return true
-  }
   return false
 }
 
@@ -1309,11 +1186,7 @@ export async function fetchLeaveBalances(userId: string, year?: number): Promise
     console.warn('Supabase leave balances fetch failed:', err)
   }
 
-  const balances = getLocalLeaveBalances()
-  const found = balances.find((b) => b.user_id === userId && b.year === targetYear)
-  if (found) return found
-
-  const def: LeaveBalance = {
+  return {
     id: `leave-bal-${userId}-${targetYear}`,
     user_id: userId,
     year: targetYear,
@@ -1324,9 +1197,6 @@ export async function fetchLeaveBalances(userId: string, year?: number): Promise
     unpaid_leave_used: 0.0,
     emergency_leave_used: 0.0,
   }
-  balances.push(def)
-  saveLocalLeaveBalances(balances)
-  return def
 }
 
 export async function updateEmployeeLeaveBalance(
@@ -1344,7 +1214,6 @@ export async function updateEmployeeLeaveBalance(
     updated_at: new Date().toISOString(),
   }
 
-  // Try Supabase upsert
   try {
     const supabase = createClient()
     const { data, error } = await supabase
@@ -1367,18 +1236,15 @@ export async function updateEmployeeLeaveBalance(
       .maybeSingle()
 
     if (!error && data) {
-      const balances = getLocalLeaveBalances().filter((b) => !(b.user_id === userId && b.year === targetYear))
-      balances.push(data as LeaveBalance)
-      saveLocalLeaveBalances(balances)
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('asaheeb_attendance_updated'))
+      }
       return data as LeaveBalance
     }
   } catch (err) {
-    console.warn('Supabase leave balance update failed, using local:', err)
+    console.warn('Supabase leave balance update failed:', err)
   }
 
-  const balances = getLocalLeaveBalances().filter((b) => !(b.user_id === userId && b.year === targetYear))
-  balances.push(updated)
-  saveLocalLeaveBalances(balances)
   return updated
 }
 
@@ -1398,8 +1264,7 @@ export async function fetchUserLeaveRequests(userId: string): Promise<LeaveReque
     console.warn('Supabase leave requests fetch failed:', err)
   }
 
-  const reqs = getLocalLeaveRequests()
-  return reqs.filter((r) => r.user_id === userId).sort((a, b) => b.start_date.localeCompare(a.start_date))
+  return []
 }
 
 export async function fetchAllLeaveRequests(): Promise<LeaveRequest[]> {
@@ -1423,7 +1288,7 @@ export async function fetchAllLeaveRequests(): Promise<LeaveRequest[]> {
     console.warn('Supabase all leave requests fetch failed:', err)
   }
 
-  return getLocalLeaveRequests()
+  return []
 }
 
 export async function submitLeaveRequest(params: {
@@ -1446,31 +1311,22 @@ export async function submitLeaveRequest(params: {
     updated_at: new Date().toISOString(),
   }
 
-  try {
-    const supabase = createClient()
-    const { data, error } = await supabase
-      .from('leave_requests')
-      .insert(payload)
-      .select()
-      .single()
+  const supabase = createClient()
+  const { data, error } = await supabase
+    .from('leave_requests')
+    .insert(payload)
+    .select()
+    .single()
 
-    if (!error && data) {
-      return data as LeaveRequest
-    }
-  } catch (err) {
-    console.warn('Supabase leave submit failed, saving locally:', err)
+  if (error) {
+    console.error('Supabase leave submit error:', error)
+    throw new Error(error.message || 'Failed to submit leave request')
   }
 
-  const reqs = getLocalLeaveRequests()
-  const localReq: LeaveRequest = {
-    id: `leave-req-${Date.now()}`,
-    ...payload,
-    approved_by: null,
-    admin_notes: null,
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('asaheeb_attendance_updated'))
   }
-  reqs.unshift(localReq)
-  saveLocalLeaveRequests(reqs)
-  return localReq
+  return data as LeaveRequest
 }
 
 export async function reviewLeaveRequest(
@@ -1491,35 +1347,16 @@ export async function reviewLeaveRequest(
       })
       .eq('id', requestId)
 
-    if (!error) return true
+    if (!error) {
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('asaheeb_attendance_updated'))
+      }
+      return true
+    }
   } catch (err) {
     console.warn('Supabase leave review failed:', err)
   }
 
-  // Local fallback with auto-deduction
-  const reqs = getLocalLeaveRequests()
-  const target = reqs.find((r) => r.id === requestId)
-  if (target) {
-    target.status = newStatus
-    target.admin_notes = adminNotes
-    target.approved_by = adminId
-    target.updated_at = new Date().toISOString()
-    saveLocalLeaveRequests(reqs)
-
-    // Deduct from balance if approved
-    if (newStatus === 'APPROVED') {
-      const balances = getLocalLeaveBalances()
-      const bal = balances.find((b) => b.user_id === target.user_id)
-      if (bal) {
-        if (target.leave_type === 'ANNUAL') bal.annual_leave_used += target.total_days
-        else if (target.leave_type === 'SICK') bal.sick_leave_used += target.total_days
-        else if (target.leave_type === 'EMERGENCY') bal.emergency_leave_used += target.total_days
-        else if (target.leave_type === 'UNPAID') bal.unpaid_leave_used += target.total_days
-        saveLocalLeaveBalances(balances)
-      }
-    }
-    return true
-  }
   return false
 }
 
@@ -1535,7 +1372,6 @@ export async function uploadSelfieSnapshot(
     const supabase = createClient()
     const filename = `${userId}/${Date.now()}_${type}.jpg`
 
-    // Convert base64 dataUrl to blob
     const res = await fetch(dataUrl)
     const blob = await res.blob()
 
@@ -1556,15 +1392,12 @@ export async function uploadSelfieSnapshot(
     console.warn('Storage upload failed, retaining inline preview dataUrl:', err)
   }
 
-  // Fallback: return the dataUrl directly so photo verification is never lost
   return dataUrl
 }
 
 // ==========================================
 // 7. COMPANY WORK POLICY & SCHEDULE API
 // ==========================================
-const LOCAL_POLICY_KEY = 'asaheeb_crm_work_policy_v1'
-
 export const DEFAULT_OFFICIAL_HOLIDAYS: import('@/types/attendance').CompanyHoliday[] = [
   { id: 'hol-1', name: 'Saudi Founding Day', date: '2026-02-22' },
   { id: 'hol-2', name: 'Eid Al-Fitr Holiday', date: '2026-03-20' },
@@ -1595,7 +1428,10 @@ export const DEFAULT_WORK_POLICY: CompanyWorkPolicy = {
 export async function fetchOfficialHolidays(): Promise<import('@/types/attendance').CompanyHoliday[]> {
   if (typeof window !== 'undefined') {
     try {
-      const res = await fetch('/api/attendance/holidays')
+      const res = await fetch('/api/attendance/holidays', {
+        cache: 'no-store',
+        headers: { 'Cache-Control': 'no-cache, no-store' },
+      })
       if (res.ok) {
         const json = await res.json()
         if (json.holidays && Array.isArray(json.holidays)) {
@@ -1637,20 +1473,14 @@ export async function saveOfficialHolidays(
       const res = await fetch('/api/attendance/holidays', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        cache: 'no-store',
         body: JSON.stringify({ holidays }),
       })
       if (res.ok) {
         const json = await res.json()
         if (json.holidays) {
-          // Update cached policy
-          const cachedRaw = localStorage.getItem(LOCAL_POLICY_KEY)
-          if (cachedRaw) {
-            try {
-              const cached = JSON.parse(cachedRaw)
-              cached.official_holidays = json.holidays
-              if (cached.custom_day_hours) cached.custom_day_hours._holidays = json.holidays
-              localStorage.setItem(LOCAL_POLICY_KEY, JSON.stringify(cached))
-            } catch (e) { }
+          if (typeof window !== 'undefined') {
+            window.dispatchEvent(new CustomEvent('asaheeb_attendance_updated'))
           }
           return json.holidays
         }
@@ -1660,16 +1490,18 @@ export async function saveOfficialHolidays(
     }
   }
 
-  // Also save via saveCompanyWorkPolicy
   const updated = await saveCompanyWorkPolicy({ official_holidays: holidays })
   return updated.official_holidays || holidays
 }
 
 export async function fetchCompanyWorkPolicy(): Promise<CompanyWorkPolicy> {
-  // 1. In browser, fetch via backend API endpoint (bypasses RLS with service client)
+  // 1. In browser, fetch via backend API endpoint (bypasses RLS with service client & no-cache headers)
   if (typeof window !== 'undefined') {
     try {
-      const res = await fetch('/api/attendance/work-policy')
+      const res = await fetch('/api/attendance/work-policy', {
+        cache: 'no-store',
+        headers: { 'Cache-Control': 'no-cache, no-store' },
+      })
       if (res.ok) {
         const json = await res.json()
         if (json.policy) {
@@ -1696,7 +1528,6 @@ export async function fetchCompanyWorkPolicy(): Promise<CompanyWorkPolicy> {
             exempt_employee_ids: exemptIds,
             tracking_start_date: trackingStartDate,
           }
-          localStorage.setItem(LOCAL_POLICY_KEY, JSON.stringify(fullPolicy))
           return fullPolicy
         }
       }
@@ -1710,11 +1541,11 @@ export async function fetchCompanyWorkPolicy(): Promise<CompanyWorkPolicy> {
     const { data, error } = await supabase
       .from('company_work_policy')
       .select('*')
+      .order('updated_at', { ascending: false })
       .limit(1)
       .maybeSingle()
 
     if (!error && data) {
-      // Also try fetching from company_holidays table if present
       let holidays = (data.custom_day_hours as any)?._holidays || (data as any).official_holidays || DEFAULT_OFFICIAL_HOLIDAYS
       try {
         const { data: hData } = await supabase.from('company_holidays').select('*').order('date', { ascending: true })
@@ -1743,31 +1574,12 @@ export async function fetchCompanyWorkPolicy(): Promise<CompanyWorkPolicy> {
         exempt_employee_ids: exemptIds,
         tracking_start_date: trackingStartDate,
       }
-      if (typeof window !== 'undefined') {
-        localStorage.setItem(LOCAL_POLICY_KEY, JSON.stringify(parsedPolicy))
-      }
       return parsedPolicy
     }
   } catch (err) {
     console.warn('Supabase work policy fetch failed:', err)
   }
 
-  if (typeof window !== 'undefined') {
-    try {
-      const raw = localStorage.getItem(LOCAL_POLICY_KEY)
-      if (raw) {
-        const parsed = JSON.parse(raw)
-        parsed.custom_day_schedules = parsed.custom_day_hours?._schedules || parsed.custom_day_schedules || {}
-        parsed.custom_employee_schedules = parsed.custom_day_hours?._employee_schedules || parsed.custom_employee_schedules || {}
-        parsed.official_holidays = parsed.custom_day_hours?._holidays || parsed.official_holidays || DEFAULT_OFFICIAL_HOLIDAYS
-        parsed.exempt_employee_ids = parsed.custom_day_hours?._exempt_ids || parsed.exempt_employee_ids || []
-        parsed.tracking_start_date = parsed.custom_day_hours?._tracking_start_date || parsed.tracking_start_date || null
-        return parsed
-      }
-    } catch (e) {
-      console.error(e)
-    }
-  }
   return DEFAULT_WORK_POLICY
 }
 
@@ -1776,7 +1588,6 @@ export async function saveCompanyWorkPolicy(
 ): Promise<CompanyWorkPolicy> {
   const current = await fetchCompanyWorkPolicy()
 
-  // Merge numeric hours, schedules, employee custom schedules, holidays, and tracking_start_date into custom_day_hours payload
   const rawCustomHours = policy.custom_day_hours !== undefined ? { ...policy.custom_day_hours } : { ...(current.custom_day_hours || {}) }
   const schedules = policy.custom_day_schedules || current.custom_day_schedules || {}
   if (Object.keys(schedules).length > 0) {
@@ -1825,6 +1636,7 @@ export async function saveCompanyWorkPolicy(
       const res = await fetch('/api/attendance/work-policy', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        cache: 'no-store',
         body: JSON.stringify({
           ...payload,
           official_holidays: holidays,
@@ -1845,7 +1657,6 @@ export async function saveCompanyWorkPolicy(
             exempt_employee_ids: json.policy.exempt_employee_ids || json.policy.custom_day_hours?._exempt_ids || exemptIds,
             tracking_start_date: json.policy.tracking_start_date || json.policy.custom_day_hours?._tracking_start_date || trackingStartDate,
           }
-          localStorage.setItem(LOCAL_POLICY_KEY, JSON.stringify(parsedSaved))
           if (typeof window !== 'undefined') {
             window.dispatchEvent(new CustomEvent('asaheeb_attendance_updated'))
           }
@@ -1884,15 +1695,15 @@ export async function saveCompanyWorkPolicy(
         custom_employee_schedules: saved.custom_day_hours?._employee_schedules || empSchedules,
         official_holidays: saved.custom_day_hours?._holidays || holidays,
         exempt_employee_ids: saved.custom_day_hours?._exempt_ids || exemptIds,
+        tracking_start_date: trackingStartDate,
       }
       if (typeof window !== 'undefined') {
-        localStorage.setItem(LOCAL_POLICY_KEY, JSON.stringify(parsedSaved))
         window.dispatchEvent(new CustomEvent('asaheeb_attendance_updated'))
       }
       return parsedSaved
     }
   } catch (err) {
-    console.warn('Supabase policy save failed, updating locally:', err)
+    console.warn('Supabase policy save failed:', err)
   }
 
   const localRes: CompanyWorkPolicy = {
@@ -1902,9 +1713,9 @@ export async function saveCompanyWorkPolicy(
     custom_employee_schedules: empSchedules,
     official_holidays: holidays,
     exempt_employee_ids: exemptIds,
+    tracking_start_date: trackingStartDate,
   }
   if (typeof window !== 'undefined') {
-    localStorage.setItem(LOCAL_POLICY_KEY, JSON.stringify(localRes))
     window.dispatchEvent(new CustomEvent('asaheeb_attendance_updated'))
   }
   return localRes

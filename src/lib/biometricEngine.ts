@@ -536,7 +536,46 @@ export async function enrollEmployeeFace(
 export async function getEmployeeFaceEnrollment(
   userId: string
 ): Promise<{ descriptor: number[] | null; enrolled_at: string | null; snapshot_url?: string | null }> {
-  // Check local cache first for instant load
+  const supabase = createClient()
+  try {
+    const { data, error } = await supabase
+      .from('profiles')
+      .select('face_descriptor, face_enrolled_at, face_enrollment_snapshot_url')
+      .eq('id', userId)
+      .maybeSingle()
+
+    if (!error && data) {
+      if (data.face_descriptor && Array.isArray(data.face_descriptor)) {
+        if (typeof window !== 'undefined') {
+          try {
+            localStorage.setItem(
+              `${LOCAL_BIOMETRIC_PREFIX}${userId}`,
+              JSON.stringify({
+                descriptor: data.face_descriptor,
+                enrolled_at: data.face_enrolled_at,
+                snapshot_url: data.face_enrollment_snapshot_url,
+              })
+            )
+          } catch (e) {}
+        }
+        return {
+          descriptor: data.face_descriptor,
+          enrolled_at: data.face_enrolled_at,
+          snapshot_url: data.face_enrollment_snapshot_url,
+        }
+      } else {
+        // Enrolled face was removed on server
+        if (typeof window !== 'undefined') {
+          try {
+            localStorage.removeItem(`${LOCAL_BIOMETRIC_PREFIX}${userId}`)
+          } catch (e) {}
+        }
+        return { descriptor: null, enrolled_at: null, snapshot_url: null }
+      }
+    }
+  } catch (e) {}
+
+  // Fallback to local cache only if Supabase call failed (e.g. offline)
   if (typeof window !== 'undefined') {
     try {
       const raw = localStorage.getItem(`${LOCAL_BIOMETRIC_PREFIX}${userId}`)
@@ -552,37 +591,6 @@ export async function getEmployeeFaceEnrollment(
       }
     } catch (e) {}
   }
-
-  const supabase = createClient()
-  try {
-    const { data, error } = await supabase
-      .from('profiles')
-      .select('face_descriptor, face_enrolled_at, face_enrollment_snapshot_url')
-      .eq('id', userId)
-      .maybeSingle()
-
-    if (!error && data?.face_descriptor && Array.isArray(data.face_descriptor)) {
-      // Sync into local cache
-      if (typeof window !== 'undefined') {
-        try {
-          localStorage.setItem(
-            `${LOCAL_BIOMETRIC_PREFIX}${userId}`,
-            JSON.stringify({
-              descriptor: data.face_descriptor,
-              enrolled_at: data.face_enrolled_at,
-              snapshot_url: data.face_enrollment_snapshot_url,
-            })
-          )
-        } catch (e) {}
-      }
-
-      return {
-        descriptor: data.face_descriptor,
-        enrolled_at: data.face_enrolled_at,
-        snapshot_url: data.face_enrollment_snapshot_url,
-      }
-    }
-  } catch (e) {}
 
   return { descriptor: null, enrolled_at: null }
 }

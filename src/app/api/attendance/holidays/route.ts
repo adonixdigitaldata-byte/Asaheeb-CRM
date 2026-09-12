@@ -2,6 +2,16 @@ import { NextResponse } from 'next/server'
 import { createServiceClient, createClient } from '@/lib/supabase/server'
 import { CompanyHoliday } from '@/types/attendance'
 
+export const dynamic = 'force-dynamic'
+export const revalidate = 0
+export const fetchCache = 'force-no-store'
+
+const NO_CACHE_HEADERS = {
+  'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0',
+  Pragma: 'no-cache',
+  Expires: '0',
+}
+
 const DEFAULT_OFFICIAL_HOLIDAYS: CompanyHoliday[] = [
   { id: 'hol-1', name: 'Saudi Founding Day', date: '2026-02-22' },
   { id: 'hol-2', name: 'Eid Al-Fitr Holiday', date: '2026-03-20' },
@@ -26,13 +36,16 @@ export async function GET() {
         .order('date', { ascending: true })
 
       if (!error && data && data.length > 0) {
-        return NextResponse.json({
-          holidays: data.map((h) => ({
-            id: h.id,
-            name: h.name,
-            date: typeof h.date === 'string' ? h.date.slice(0, 10) : h.date,
-          })),
-        })
+        return NextResponse.json(
+          {
+            holidays: data.map((h) => ({
+              id: h.id,
+              name: h.name,
+              date: typeof h.date === 'string' ? h.date.slice(0, 10) : h.date,
+            })),
+          },
+          { headers: NO_CACHE_HEADERS }
+        )
       }
     } catch (tblErr) {
       // Table may not have been created in database yet
@@ -42,6 +55,7 @@ export async function GET() {
     const { data: policyData } = await serviceClient
       .from('company_work_policy')
       .select('custom_day_hours')
+      .order('updated_at', { ascending: false })
       .limit(1)
       .maybeSingle()
 
@@ -50,17 +64,17 @@ export async function GET() {
       (policyData as any)?.official_holidays ||
       DEFAULT_OFFICIAL_HOLIDAYS
 
-    return NextResponse.json({ holidays })
+    return NextResponse.json({ holidays }, { headers: NO_CACHE_HEADERS })
   } catch (err: any) {
     console.error('API /api/attendance/holidays GET error:', err)
-    return NextResponse.json({ holidays: DEFAULT_OFFICIAL_HOLIDAYS, error: err.message }, { status: 200 })
+    return NextResponse.json({ holidays: DEFAULT_OFFICIAL_HOLIDAYS, error: err.message }, { status: 200, headers: NO_CACHE_HEADERS })
   }
 }
 
 export async function POST(req: Request) {
   try {
     const body = await req.json()
-    const { holidays } = body // Can pass a full array to sync or a single holiday
+    const { holidays } = body
 
     const serviceClient = await createServiceClient()
 
@@ -69,7 +83,6 @@ export async function POST(req: Request) {
     if (Array.isArray(holidays)) {
       updatedHolidays = holidays
     } else if (body.name && body.date) {
-      // Fetch current list first
       const getRes = await GET()
       const existing = (await getRes.json()).holidays || []
       const newHol: CompanyHoliday = {
@@ -81,12 +94,11 @@ export async function POST(req: Request) {
         a.date.localeCompare(b.date)
       )
     } else {
-      return NextResponse.json({ error: 'Invalid holiday payload' }, { status: 400 })
+      return NextResponse.json({ error: 'Invalid holiday payload' }, { status: 400, headers: NO_CACHE_HEADERS })
     }
 
     // Try persisting to public.company_holidays table if present
     try {
-      // Clear and re-insert or upsert
       await serviceClient.from('company_holidays').upsert(
         updatedHolidays.map((h) => ({
           name: h.name,
@@ -103,6 +115,7 @@ export async function POST(req: Request) {
       const { data: currentPolicy } = await serviceClient
         .from('company_work_policy')
         .select('*')
+        .order('updated_at', { ascending: false })
         .limit(1)
         .maybeSingle()
 
@@ -121,10 +134,10 @@ export async function POST(req: Request) {
       console.warn('Syncing to company_work_policy failed:', polErr)
     }
 
-    return NextResponse.json({ success: true, holidays: updatedHolidays })
+    return NextResponse.json({ success: true, holidays: updatedHolidays }, { headers: NO_CACHE_HEADERS })
   } catch (err: any) {
     console.error('API /api/attendance/holidays POST error:', err)
-    return NextResponse.json({ error: err.message }, { status: 500 })
+    return NextResponse.json({ error: err.message }, { status: 500, headers: NO_CACHE_HEADERS })
   }
 }
 
@@ -135,7 +148,7 @@ export async function DELETE(req: Request) {
     const holidayDate = searchParams.get('date')
 
     if (!holidayId && !holidayDate) {
-      return NextResponse.json({ error: 'id or date is required to delete' }, { status: 400 })
+      return NextResponse.json({ error: 'id or date is required to delete' }, { status: 400, headers: NO_CACHE_HEADERS })
     }
 
     const serviceClient = await createServiceClient()
@@ -153,6 +166,7 @@ export async function DELETE(req: Request) {
     const { data: currentPolicy } = await serviceClient
       .from('company_work_policy')
       .select('*')
+      .order('updated_at', { ascending: false })
       .limit(1)
       .maybeSingle()
 
@@ -175,9 +189,9 @@ export async function DELETE(req: Request) {
         .eq('id', currentPolicy.id)
     }
 
-    return NextResponse.json({ success: true, holidays: remainingHolidays })
+    return NextResponse.json({ success: true, holidays: remainingHolidays }, { headers: NO_CACHE_HEADERS })
   } catch (err: any) {
     console.error('API /api/attendance/holidays DELETE error:', err)
-    return NextResponse.json({ error: err.message }, { status: 500 })
+    return NextResponse.json({ error: err.message }, { status: 500, headers: NO_CACHE_HEADERS })
   }
 }

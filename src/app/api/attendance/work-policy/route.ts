@@ -1,18 +1,29 @@
 import { NextResponse } from 'next/server'
 import { createServiceClient, createClient } from '@/lib/supabase/server'
 
+export const dynamic = 'force-dynamic'
+export const revalidate = 0
+export const fetchCache = 'force-no-store'
+
+const NO_CACHE_HEADERS = {
+  'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0',
+  Pragma: 'no-cache',
+  Expires: '0',
+}
+
 export async function GET() {
   try {
     const serviceClient = await createServiceClient()
     const { data, error } = await serviceClient
       .from('company_work_policy')
       .select('*')
+      .order('updated_at', { ascending: false })
       .limit(1)
       .maybeSingle()
 
     if (error) {
       console.error('Error fetching work policy in API:', error)
-      return NextResponse.json({ error: error.message }, { status: 500 })
+      return NextResponse.json({ error: error.message }, { status: 500, headers: NO_CACHE_HEADERS })
     }
 
     let policyObj = data ? { ...data } : null
@@ -46,10 +57,10 @@ export async function GET() {
       }
     }
 
-    return NextResponse.json({ policy: policyObj })
+    return NextResponse.json({ policy: policyObj }, { headers: NO_CACHE_HEADERS })
   } catch (err: any) {
     console.error('API /api/attendance/work-policy GET error:', err)
-    return NextResponse.json({ error: err.message }, { status: 500 })
+    return NextResponse.json({ error: err.message }, { status: 500, headers: NO_CACHE_HEADERS })
   }
 }
 
@@ -66,7 +77,7 @@ export async function POST(req: Request) {
           .eq('id', user.id)
           .single()
         if (profile && profile.role !== 'ADMIN' && profile.role !== 'SALES_MANAGER') {
-          return NextResponse.json({ error: 'Forbidden: Admin or Manager access required' }, { status: 403 })
+          return NextResponse.json({ error: 'Forbidden: Admin or Manager access required' }, { status: 403, headers: NO_CACHE_HEADERS })
         }
       }
     } catch (authErr) {
@@ -80,6 +91,7 @@ export async function POST(req: Request) {
     const { data: existing } = await serviceClient
       .from('company_work_policy')
       .select('id')
+      .order('updated_at', { ascending: false })
       .limit(1)
       .maybeSingle()
 
@@ -132,7 +144,7 @@ export async function POST(req: Request) {
 
       if (error) {
         console.error('Error updating company_work_policy via serviceClient:', error)
-        return NextResponse.json({ error: error.message }, { status: 500 })
+        return NextResponse.json({ error: error.message }, { status: 500, headers: NO_CACHE_HEADERS })
       }
       savedData = data
     } else {
@@ -144,7 +156,7 @@ export async function POST(req: Request) {
 
       if (error) {
         console.error('Error inserting company_work_policy via serviceClient:', error)
-        return NextResponse.json({ error: error.message }, { status: 500 })
+        return NextResponse.json({ error: error.message }, { status: 500, headers: NO_CACHE_HEADERS })
       }
       savedData = data
     }
@@ -170,11 +182,12 @@ export async function POST(req: Request) {
       custom_employee_schedules: empSchedules || savedData?.custom_day_hours?._employee_schedules || {},
       custom_day_schedules: daySchedules || savedData?.custom_day_hours?._schedules || {},
       official_holidays: holidays || savedData?.custom_day_hours?._holidays || [],
+      tracking_start_date: trackingStartDate,
     }
 
-    return NextResponse.json({ success: true, policy: returnObj })
+    return NextResponse.json({ success: true, policy: returnObj }, { headers: NO_CACHE_HEADERS })
   } catch (err: any) {
     console.error('API /api/attendance/work-policy POST error:', err)
-    return NextResponse.json({ error: err.message }, { status: 500 })
+    return NextResponse.json({ error: err.message }, { status: 500, headers: NO_CACHE_HEADERS })
   }
 }

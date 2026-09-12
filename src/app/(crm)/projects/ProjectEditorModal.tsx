@@ -25,11 +25,18 @@ import {
   Clock,
   Calendar,
   Percent,
+  MapPin,
+  ZoomIn,
+  ZoomOut,
+  ExternalLink,
+  Sliders,
+  Search,
 } from 'lucide-react'
 import { SaudiRiyalIcon } from '@/components/SaudiRiyalIcon'
 import type { Project, ProjectVideo, Landmark, Amenity, ProjectDiscountOffer } from '@/types/database'
 import ImageGalleryManager from '@/components/ImageGalleryManager'
 import CmsActivityTimeline from '@/components/CmsActivityTimeline'
+import InteractiveMapPicker from '@/components/InteractiveMapPicker'
 
 interface Props {
   project?: Project | null
@@ -59,6 +66,31 @@ function normalizePropertyType(typeStr?: string | null): string {
   if (t === 'residential buildings' || t === 'residential building' || t.includes('residential')) return 'Residential Buildings'
   if (t === 'land' || t === 'lands' || t.includes('land') || t.includes('أراض')) return 'Land'
   return typeStr
+}
+
+function getCoordinatesFromEmbedUrl(url?: string | null): { lat: string; lng: string } | null {
+  if (!url) return null
+  const pbLat = url.match(/!3d(-?\d+\.\d+)/)
+  const pbLng = url.match(/!2d(-?\d+\.\d+)/)
+  if (pbLat && pbLng) {
+    return { lat: pbLat[1], lng: pbLng[1] }
+  }
+  const qCoords = url.match(/[?&]q=(-?\d+\.\d+),(-?\d+\.\d+)/)
+  if (qCoords) {
+    return { lat: qCoords[1], lng: qCoords[2] }
+  }
+  const atCoords = url.match(/@(-?\d+\.\d+),(-?\d+\.\d+)/)
+  if (atCoords) {
+    return { lat: atCoords[1], lng: atCoords[2] }
+  }
+  return null
+}
+
+function getZoomFromEmbedUrl(url?: string | null): number {
+  if (!url) return 17
+  const zMatch = url.match(/[?&]z=(\d+)/)
+  if (zMatch) return parseInt(zMatch[1], 10)
+  return 17
 }
 
 export default function ProjectEditorModal({
@@ -174,6 +206,13 @@ export default function ProjectEditorModal({
   const [editingHighlightIndex, setEditingHighlightIndex] = useState<number | null>(null)
   const [editHighlightEn, setEditHighlightEn] = useState('')
   const [editHighlightAr, setEditHighlightAr] = useState('')
+
+  // Interactive Map Adjustment State
+  const [mapInputMode, setMapInputMode] = useState<'embed' | 'picker'>('embed')
+  const [showCoordAdjuster, setShowCoordAdjuster] = useState(false)
+  const [mapSearchQuery, setMapSearchQuery] = useState('')
+  const [customLat, setCustomLat] = useState('')
+  const [customLng, setCustomLng] = useState('')
 
   if (!isOpen) return null
 
@@ -759,21 +798,150 @@ export default function ProjectEditorModal({
                   </div>
                 </div>
 
-                {/* Map Links */}
-                <div style={{ marginTop: '6px' }}>
-                  <div className="form-group">
-                    <label className="form-label">Google Maps Embed URL (iframe src)</label>
-                    <input
-                      type="url"
-                      value={form.map_embed_url || ''}
-                      onChange={(e) => setForm({ ...form, map_embed_url: e.target.value })}
-                      placeholder="https://www.google.com/maps/embed?pb=..."
-                      className="form-input"
-                    />
-                    <span style={{ fontSize: '11px', color: '#94A3B8', marginTop: '2px' }}>
-                      Paste Google Maps iframe src URL to display the interactive location map on the website project page.
-                    </span>
+                {/* Map Section */}
+                <div style={{ marginTop: '6px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                  {/* Mode Selector Header */}
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
+                    <div>
+                      <label className="form-label" style={{ marginBottom: 0, fontSize: '13px' }}>
+                        Project Location on Map
+                      </label>
+                      <span style={{ fontSize: '11px', color: '#64748B', display: 'block' }}>
+                        Paste Google Maps embed code, or switch to drag the pin with your cursor.
+                      </span>
+                    </div>
+                    <div style={{ display: 'flex', background: '#F1F5F9', padding: '3px', borderRadius: '8px', gap: '4px' }}>
+                      <button
+                        type="button"
+                        onClick={() => setMapInputMode('embed')}
+                        style={{
+                          padding: '5px 12px',
+                          borderRadius: '6px',
+                          fontSize: '11px',
+                          fontWeight: 600,
+                          border: 'none',
+                          cursor: 'pointer',
+                          background: mapInputMode === 'embed' ? '#FFFFFF' : 'transparent',
+                          color: mapInputMode === 'embed' ? '#0F172A' : '#64748B',
+                          boxShadow: mapInputMode === 'embed' ? '0 1px 3px rgba(0,0,0,0.1)' : 'none',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '5px',
+                        }}
+                      >
+                        📋 Paste Google Embed Link
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setMapInputMode('picker')}
+                        style={{
+                          padding: '5px 12px',
+                          borderRadius: '6px',
+                          fontSize: '11px',
+                          fontWeight: 600,
+                          border: 'none',
+                          cursor: 'pointer',
+                          background: mapInputMode === 'picker' ? '#FFFFFF' : 'transparent',
+                          color: mapInputMode === 'picker' ? '#0F172A' : '#64748B',
+                          boxShadow: mapInputMode === 'picker' ? '0 1px 3px rgba(0,0,0,0.1)' : 'none',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '5px',
+                        }}
+                      >
+                        <MapPin size={13} color="#D97706" />
+                        🎯 Drag Pin with Cursor
+                      </button>
+                    </div>
                   </div>
+
+                  {/* Mode 1: Paste Google Embed Link (First) */}
+                  {mapInputMode === 'embed' && (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                      <div className="form-group">
+                        <label className="form-label">Google Maps Embed URL (or paste iframe snippet)</label>
+                        <input
+                          type="text"
+                          value={form.map_embed_url || ''}
+                          onChange={(e) => {
+                            const raw = e.target.value;
+                            const iframeMatch = raw.match(/<iframe[^>]+src=["']([^"']+)["']/i);
+                            if (iframeMatch && iframeMatch[1]) {
+                              setForm((prev) => ({ ...prev, map_embed_url: iframeMatch[1] }));
+                              return;
+                            }
+                            const coordsMatch = raw.match(/@(-?\d+\.\d+),(-?\d+\.\d+)/) || raw.match(/[?&]q=(-?\d+\.\d+),(-?\d+\.\d+)/);
+                            if (coordsMatch && !raw.includes('/maps/embed')) {
+                              const lat = coordsMatch[1];
+                              const lng = coordsMatch[2];
+                              setForm((prev) => ({
+                                ...prev,
+                                map_embed_url: `https://maps.google.com/maps?q=${lat},${lng}&hl=en&z=17&output=embed`,
+                                google_maps_url: prev.google_maps_url || raw.trim(),
+                              }));
+                              return;
+                            }
+                            setForm((prev) => ({ ...prev, map_embed_url: raw }));
+                          }}
+                          placeholder="Paste iframe HTML from Google Maps, or https://www.google.com/maps/embed?pb=..."
+                          className="form-input"
+                        />
+                        {form.map_embed_url && (form.map_embed_url.includes('maps.app.goo.gl') || (form.map_embed_url.includes('google.com/maps') && !form.map_embed_url.includes('/maps/embed') && !form.map_embed_url.includes('output=embed'))) && (
+                          <div style={{
+                            marginTop: '8px',
+                            padding: '10px 12px',
+                            background: 'rgba(245, 158, 11, 0.1)',
+                            border: '1px solid rgba(245, 158, 11, 0.3)',
+                            borderRadius: '8px',
+                            fontSize: '12px',
+                            color: '#D97706',
+                          }}>
+                            ⚠️ Google Share Link Detected. Switch to &quot;🎯 Drag Pin with Cursor&quot; above, or paste the iframe code from Google Maps &quot;Embed a map&quot; tab.
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Google Map Iframe Preview */}
+                      {form.map_embed_url && (form.map_embed_url.includes('/maps/embed') || form.map_embed_url.includes('output=embed')) && (
+                        <div style={{ border: '1px solid #CBD5E1', borderRadius: '8px', overflow: 'hidden' }}>
+                          <iframe
+                            src={form.map_embed_url}
+                            width="100%"
+                            height="240"
+                            style={{ border: 0, display: 'block' }}
+                            loading="lazy"
+                            allowFullScreen
+                            referrerPolicy="no-referrer-when-downgrade"
+                          />
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Mode 2: Interactive Pin Picker (Second) */}
+                  {mapInputMode === 'picker' && (() => {
+                    const parsed = getCoordinatesFromEmbedUrl(form.map_embed_url);
+                    const initLat = parsed ? parseFloat(parsed.lat) : 21.534639;
+                    const initLng = parsed ? parseFloat(parsed.lng) : 39.176639;
+
+                    return (
+                      <InteractiveMapPicker
+                        latitude={initLat}
+                        longitude={initLng}
+                        districtName={form.district_en}
+                        cityName={form.city_en}
+                        onLocationChange={(lat, lng) => {
+                          const embed = `https://maps.google.com/maps?q=${lat},${lng}&hl=en&z=17&output=embed`;
+                          const share = `https://maps.google.com/maps?q=${lat},${lng}`;
+                          setForm((prev) => ({
+                            ...prev,
+                            map_embed_url: embed,
+                            google_maps_url: share,
+                          }));
+                        }}
+                      />
+                    );
+                  })()}
                 </div>
               </div>
             )}

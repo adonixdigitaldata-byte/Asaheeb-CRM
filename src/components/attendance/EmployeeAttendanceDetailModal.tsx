@@ -29,7 +29,6 @@ import {
   fetchCompanyWorkPolicy,
   saveEmployeeCustomSchedule,
   updateEmployeeLeaveBalance,
-  getLocalAttendance,
   deleteAttendanceLog,
   toggleEmployeeTrackingExemption,
 } from '@/lib/attendanceService'
@@ -113,14 +112,6 @@ export default function EmployeeAttendanceDetailModal({
 
   useEffect(() => {
     if (isOpen && employee) {
-      // Pre-hydrate history immediately from local storage cache to eliminate blank flash
-      try {
-        const localLogs = getLocalAttendance().filter((l: AttendanceLog) => l.user_id === employee.profile_id)
-        if (localLogs.length > 0) {
-          setHistory(localLogs)
-        }
-      } catch (_) {}
-
       loadEmployeeData(employee.profile_id)
     }
   }, [isOpen, employee])
