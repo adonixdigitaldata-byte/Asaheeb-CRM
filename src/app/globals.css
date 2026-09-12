@@ -528,6 +528,50 @@ textarea {
   height: 0 !important;
 }
 
+.attendance-tabs-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 20px;
+  width: 100%;
+}
+
+.attendance-tabs-strip-container {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+}
+
+.attendance-tabs-export-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+@media (max-width: 768px) {
+  .attendance-tabs-toolbar {
+    flex-direction: column !important;
+    align-items: stretch !important;
+    gap: 12px !important;
+  }
+  .attendance-tabs-strip-container {
+    width: 100% !important;
+    max-width: 100% !important;
+    flex: none !important;
+  }
+  .attendance-tabs-export-actions {
+    width: 100% !important;
+  }
+  .attendance-tabs-export-actions button {
+    width: 100% !important;
+    justify-content: center !important;
+  }
+}
+
 .modal-header {
   padding: 18px 24px;
   border-bottom: 1px solid var(--border);

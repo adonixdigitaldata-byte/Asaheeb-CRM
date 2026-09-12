@@ -146,7 +146,7 @@ export default function AttendanceClient({ profile }: AttendanceClientProps) {
   const [auditExpectedToDateHours, setAuditExpectedToDateHours] = useState<number>(80)
   const [auditElapsedDays, setAuditElapsedDays] = useState<number>(10)
   const [auditLoading, setAuditLoading] = useState(false)
-  const [mySalary, setMySalary] = useState<{ base_salary: number; currency: string } | null>(null)
+  const [mySalary, setMySalary] = useState<{ base_salary: number; currency: string; joining_date?: string | null } | null>(null)
 
   // Regularization Modal State
   const [regularizeModalOpen, setRegularizeModalOpen] = useState(false)
@@ -301,7 +301,7 @@ export default function AttendanceClient({ profile }: AttendanceClientProps) {
     }
   }, [canManage, selectedAuditMonth])
 
-  // Personal Monthly Work Hours, Punctuality, Deficit & Pay Cut Statistics
+  // Personal Monthly Work Hours, Punctuality, Deficit & Pay Cut Statistics (aligned with Monthly Deficit Audit)
   const myMonthlyStats = useMemo(() => {
     let totalWorkedMinutes = 0
     let currentMonthWorkedMinutes = 0
@@ -316,7 +316,29 @@ export default function AttendanceClient({ profile }: AttendanceClientProps) {
     const currentMonthStr = `${currentYear}-${currentMonth.toString().padStart(2, '0')}`
     const todayDateStr = now.toISOString().split('T')[0]
 
-    // Calculate Month-to-Date (MTD) elapsed expected hours (never includes future days!)
+    // Check if user has personalized schedule or tracking exemption (identical to audit page)
+    const empSchedule = workPolicy.custom_employee_schedules?.[userId]
+    const isExempt =
+      (workPolicy.exempt_employee_ids || []).includes(userId) ||
+      Boolean(empSchedule?.is_exempt_from_tracking)
+
+    const empShiftStart = empSchedule?.shift_start_time || workPolicy.shift_start_time || '08:00'
+    const empGrace = empSchedule?.grace_period_mins ?? workPolicy.grace_period_mins ?? 15
+    const empDailyHours = empSchedule?.daily_expected_hours ?? workPolicy.daily_expected_hours ?? 8
+    const empWorkDays = empSchedule?.work_days || workPolicy.work_days || ['SUNDAY', 'MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'SATURDAY']
+    const empCustomDayHours = empSchedule?.custom_day_hours || workPolicy.custom_day_hours
+    const empCustomDaySchedules = empSchedule?.custom_day_schedules || workPolicy.custom_day_schedules
+
+    // Determine employee's effective tracking start date (tracking_start_date or employee joining_date, whichever is later)
+    const effectiveStartDate = (() => {
+      const dates: string[] = []
+      if (workPolicy.tracking_start_date) dates.push(workPolicy.tracking_start_date)
+      if (mySalary?.joining_date) dates.push(mySalary.joining_date)
+      if (dates.length === 0) return null
+      return dates.sort().pop() || null
+    })()
+
+    // Calculate Month-to-Date (MTD) elapsed expected hours considering effectiveStartDate (identical to audit page)
     const {
       count: totalExpectedDays,
       totalHours: totalExpectedHours,
@@ -325,28 +347,28 @@ export default function AttendanceClient({ profile }: AttendanceClientProps) {
     } = calculateExpectedHoursInMonth(
       currentYear,
       currentMonth,
-      workPolicy.work_days,
-      workPolicy.daily_expected_hours,
-      workPolicy.custom_day_hours,
+      empWorkDays,
+      empDailyHours,
+      empCustomDayHours,
       workPolicy.official_holidays,
-      currentDay
+      undefined,
+      effectiveStartDate
     )
 
-    const defaultDayHours = workPolicy.daily_expected_hours || 8
-    const [shiftH, shiftM] = (workPolicy.shift_start_time || '09:00').split(':').map(Number)
-    const shiftHour = isNaN(shiftH) ? 9 : shiftH
+    const [shiftH, shiftM] = empShiftStart.split(':').map(Number)
+    const shiftHour = isNaN(shiftH) ? 8 : shiftH
     const shiftMinute = isNaN(shiftM) ? 0 : shiftM
-    const graceMinutes = workPolicy.grace_period_mins ?? 15
+    const graceMinutes = empGrace
     const shiftStartCutoffMinutes = shiftHour * 60 + shiftMinute + graceMinutes
 
     for (const log of myHistory) {
       // Determine expected hours configured for this specific day
-      let dayExpectedHours = defaultDayHours
+      let dayExpectedHours = empDailyHours
       if (log.date) {
         const d = new Date(log.date + 'T00:00:00')
         const dayName = d.toLocaleDateString('en-US', { weekday: 'long' })
-        if (workPolicy.custom_day_hours && workPolicy.custom_day_hours[dayName] !== undefined) {
-          dayExpectedHours = workPolicy.custom_day_hours[dayName]
+        if (empCustomDayHours && empCustomDayHours[dayName] !== undefined) {
+          dayExpectedHours = empCustomDayHours[dayName]
         }
       }
       const dayExpectedMinutes = dayExpectedHours * 60
@@ -372,18 +394,27 @@ export default function AttendanceClient({ profile }: AttendanceClientProps) {
         currentMonthWorkedMinutes += worked
       }
 
-      // Calculate punctuality from punch_in_at
-      if (log.punch_in_at) {
-        const inDate = new Date(log.punch_in_at)
-        const inMinutes = inDate.getHours() * 60 + inDate.getMinutes()
-        if (inMinutes > shiftStartCutoffMinutes) {
+      // Calculate punctuality from punch_in_at considering custom day schedules
+      if (log.punch_in_at && log.date) {
+        const punchDate = new Date(log.punch_in_at)
+        const dObj = new Date(log.date + 'T00:00:00')
+        const dayName = dObj.toLocaleDateString('en-US', { weekday: 'long' }).toUpperCase()
+        const daySched = empCustomDaySchedules?.[dayName]
+        const dayShiftStart = daySched?.startTime || empShiftStart
+
+        const [sH, sM] = dayShiftStart.split(':').map(Number)
+        const validShiftH = isNaN(sH) ? shiftHour : sH
+        const validShiftM = isNaN(sM) ? shiftMinute : sM
+        const cutoffMinutes = validShiftH * 60 + validShiftM + empGrace
+
+        const punchMins = punchDate.getHours() * 60 + punchDate.getMinutes()
+        if (punchMins > cutoffMinutes) {
           lateDaysCount++
-          totalLateMinutes += inMinutes - (shiftHour * 60 + shiftMinute)
+          totalLateMinutes += punchMins - (validShiftH * 60 + validShiftM)
         }
       }
 
-      // Daily flexible workday: If employee worked their configured hours (e.g. 1pm - 9pm = 8.0h),
-      // duration covers expected time -> 0 deficit!
+      // Daily flexible workday: If employee worked their configured hours, duration covers expected time -> 0 deficit!
       if (worked > dayExpectedMinutes) {
         overtimeMinutes += (worked - dayExpectedMinutes)
       }
@@ -393,30 +424,32 @@ export default function AttendanceClient({ profile }: AttendanceClientProps) {
     const currentMonthWorkedHours = currentMonthWorkedMinutes / 60
     const overtimeHours = (overtimeMinutes / 60).toFixed(1)
 
-    // Approved leave hours for this user in current month up to today (strictly elapsed days!)
+    // Approved leave hours for this user in current month up to today (strictly elapsed days, active tracking only!)
     let mtdApprovedLeaveDays = 0
     let mtdApprovedLeaveHours = 0
     let totalApprovedLeaveDaysInMonth = 0
 
     const holidays = (workPolicy.official_holidays || []).map((h: any) => typeof h === 'string' ? h : h.date)
-    const policyWorkDays = workPolicy.work_days || ['SUNDAY', 'MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'SATURDAY']
     const approvedLeaves = myLeaveRequests.filter((r) => r.status === 'APPROVED')
 
     for (let day = 1; day <= currentDay; day++) {
       const dateStr = `${currentYear}-${currentMonth.toString().padStart(2, '0')}-${day.toString().padStart(2, '0')}`
       const d = new Date(dateStr + 'T00:00:00')
       const dayName = d.toLocaleDateString('en-US', { weekday: 'long' }).toUpperCase()
-      const isWorkDay = policyWorkDays.includes(dayName) && !holidays.includes(dateStr)
+      const isWorkDay = empWorkDays.includes(dayName) && !holidays.includes(dateStr)
+      const isAfterTrackingStart = !effectiveStartDate || dateStr >= effectiveStartDate
 
       if (isWorkDay) {
         const isCovered = approvedLeaves.some((r) => r.start_date <= dateStr && r.end_date >= dateStr)
         if (isCovered) {
-          mtdApprovedLeaveDays++
-          let dayH = defaultDayHours
-          if (workPolicy.custom_day_hours && workPolicy.custom_day_hours[dayName] !== undefined) {
-            dayH = workPolicy.custom_day_hours[dayName]
+          if (isAfterTrackingStart) {
+            mtdApprovedLeaveDays++
+            let dayH = empDailyHours
+            if (empCustomDayHours && empCustomDayHours[dayName] !== undefined) {
+              dayH = empCustomDayHours[dayName]
+            }
+            mtdApprovedLeaveHours += dayH
           }
-          mtdApprovedLeaveHours += dayH
         }
       }
     }
@@ -428,10 +461,14 @@ export default function AttendanceClient({ profile }: AttendanceClientProps) {
     }
 
     // Deficit strictly for Month-To-Date (elapsed days only, no future deficit!)
-    const mtdDeficitHours = Math.max(
-      0,
-      Math.round((mtdExpectedHours - currentMonthWorkedHours - mtdApprovedLeaveHours) * 10) / 10
-    )
+    // If user is exempt or current day is prior to effective tracking start date, deficit is strictly 0!
+    const isPastTrackingStart = !effectiveStartDate || todayDateStr >= effectiveStartDate
+    const mtdDeficitHours = (isExempt || !isPastTrackingStart)
+      ? 0
+      : Math.max(
+          0,
+          Math.round((mtdExpectedHours - currentMonthWorkedHours - mtdApprovedLeaveHours) * 10) / 10
+        )
 
     // Pay cut calculation strictly based on employee's real base salary (no random fallback!)
     const hasSalaryProfile = Boolean(mySalary && mySalary.base_salary > 0)
@@ -439,7 +476,7 @@ export default function AttendanceClient({ profile }: AttendanceClientProps) {
     const hourlyRate = (baseSalary > 0 && totalExpectedHours > 0)
       ? Math.round((baseSalary / totalExpectedHours) * 100) / 100
       : 0
-    const estimatedPayCut = (hourlyRate > 0 && mtdDeficitHours > 0)
+    const estimatedPayCut = (!isExempt && isPastTrackingStart && hourlyRate > 0 && mtdDeficitHours > 0)
       ? Math.round(mtdDeficitHours * hourlyRate)
       : 0
     const currency = mySalary?.currency || 'SAR'
@@ -454,8 +491,8 @@ export default function AttendanceClient({ profile }: AttendanceClientProps) {
       totalLateMinutes,
       deficitHours: mtdDeficitHours.toFixed(1),
       mtdDeficitHours,
-      mtdExpectedHours,
-      mtdExpectedDays,
+      mtdExpectedHours: (isExempt || !isPastTrackingStart) ? 0 : mtdExpectedHours,
+      mtdExpectedDays: (isExempt || !isPastTrackingStart) ? 0 : mtdExpectedDays,
       totalExpectedHours,
       totalExpectedDays,
       hasSalaryProfile,
@@ -472,10 +509,12 @@ export default function AttendanceClient({ profile }: AttendanceClientProps) {
       shiftHour,
       shiftMinute,
       graceMinutes,
-      expectedMinutesPerDay: defaultDayHours * 60,
-      defaultDayHours,
+      expectedMinutesPerDay: empDailyHours * 60,
+      defaultDayHours: empDailyHours,
+      isExempt,
+      effectiveStartDate,
     }
-  }, [myHistory, workPolicy, myLeaveRequests, mySalary])
+  }, [myHistory, workPolicy, myLeaveRequests, mySalary, userId])
 
   async function loadInitialData() {
     try {
@@ -1541,7 +1580,7 @@ export default function AttendanceClient({ profile }: AttendanceClientProps) {
           }}
           className="attendance-tabs-toolbar"
         >
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6, flex: 1, minWidth: 0 }}>
+          <div className="attendance-tabs-strip-container" style={{ display: 'flex', alignItems: 'center', gap: 6, flex: 1, minWidth: 0 }}>
             {/* Scroll Left Button */}
             <button
               type="button"
@@ -1822,7 +1861,7 @@ export default function AttendanceClient({ profile }: AttendanceClientProps) {
             </button>
           </div>
 
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <div className="attendance-tabs-export-actions" style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             {activeTab === 'HOURS_AUDIT' ? (
               <button
                 onClick={handleExportMonthlyAuditCsv}
@@ -3766,6 +3805,14 @@ export default function AttendanceClient({ profile }: AttendanceClientProps) {
                         <AlertCircle size={13} /> Pay Cut: Salary Profile Not Configured
                       </span>
                     )
+                  ) : myMonthlyStats.isExempt ? (
+                    <span style={{ color: '#16A34A' }}>
+                      ✓ 0 SAR Pay Cut • Tracking Exempt
+                    </span>
+                  ) : (myMonthlyStats.effectiveStartDate && todayDateStr < myMonthlyStats.effectiveStartDate) ? (
+                    <span style={{ color: '#16A34A' }}>
+                      ✓ 0 SAR Pay Cut • Go-Live on {myMonthlyStats.effectiveStartDate}
+                    </span>
                   ) : (
                     <span style={{ color: '#16A34A' }}>
                       ✓ 0 SAR Pay Cut • Shift Target Met to Date
@@ -3773,7 +3820,13 @@ export default function AttendanceClient({ profile }: AttendanceClientProps) {
                   )}
                 </div>
                 <div style={{ fontSize: '11px', color: '#64748B', marginTop: '3px' }}>
-                  Expected MTD: {myMonthlyStats.mtdExpectedHours}h ({myMonthlyStats.mtdExpectedDays} working days passed)
+                  {myMonthlyStats.isExempt ? (
+                    'Exempt from attendance tracking'
+                  ) : (myMonthlyStats.effectiveStartDate && todayDateStr < myMonthlyStats.effectiveStartDate) ? (
+                    `Tracking begins ${myMonthlyStats.effectiveStartDate} (Grace period active)`
+                  ) : (
+                    `Expected MTD: ${myMonthlyStats.mtdExpectedHours}h (${myMonthlyStats.mtdExpectedDays} working days passed)`
+                  )}
                 </div>
               </div>
 
@@ -4152,7 +4205,26 @@ export default function AttendanceClient({ profile }: AttendanceClientProps) {
                             </div>
                           )
                         } else if (item.punch_out_at) {
-                          shiftBalance = diff < 0 ? (
+                          const isGraceDay = Boolean(myMonthlyStats.effectiveStartDate && item.date && item.date < myMonthlyStats.effectiveStartDate)
+                          shiftBalance = isGraceDay ? (
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                              <span style={{ fontSize: 12, fontWeight: 700, color: '#16A34A' }}>
+                                🟢 Grace Day (0h Deficit)
+                              </span>
+                              <span style={{ fontSize: 11, color: '#64748B' }}>
+                                {hrs}h logged • Prior to go-live
+                              </span>
+                            </div>
+                          ) : myMonthlyStats.isExempt ? (
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                              <span style={{ fontSize: 12, fontWeight: 700, color: '#16A34A' }}>
+                                🟢 Tracking Exempt
+                              </span>
+                              <span style={{ fontSize: 11, color: '#64748B' }}>
+                                {hrs}h logged
+                              </span>
+                            </div>
+                          ) : diff < 0 ? (
                             <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
                               <span style={{ fontSize: 12, fontWeight: 700, color: '#DC2626' }}>
                                 -{(Math.abs(diff) / 60).toFixed(1)}h Deficit
@@ -4172,6 +4244,7 @@ export default function AttendanceClient({ profile }: AttendanceClientProps) {
                                   cursor: 'pointer',
                                   textAlign: 'left',
                                   padding: 0,
+                                  fontWeight: 600,
                                 }}
                               >
                                 {canManage ? 'Adjust' : 'Request Adjustment'}
@@ -4392,15 +4465,35 @@ export default function AttendanceClient({ profile }: AttendanceClientProps) {
                           <div style={{ fontSize: '12.5px', fontWeight: 700, color: '#0284C7' }}>
                             Worked: {hrs} hrs ({workingMinutes}m)
                           </div>
-                          {diff < 0 ? (
-                            <span style={{ fontSize: '11.5px', fontWeight: 700, color: '#DC2626' }}>
-                              -{deficitH}h Deficit ({dayExpectedH}h shift)
-                            </span>
-                          ) : (
-                            <span style={{ fontSize: '11.5px', fontWeight: 700, color: '#16A34A' }}>
-                              ✓ Met Shift ({dayExpectedH}h)
-                            </span>
-                          )}
+                          {(() => {
+                            const isGraceDay = Boolean(myMonthlyStats.effectiveStartDate && item.date && item.date < myMonthlyStats.effectiveStartDate)
+                            if (isGraceDay) {
+                              return (
+                                <span style={{ fontSize: '11.5px', fontWeight: 700, color: '#16A34A' }}>
+                                  🟢 Grace Day (0h Deficit)
+                                </span>
+                              )
+                            }
+                            if (myMonthlyStats.isExempt) {
+                              return (
+                                <span style={{ fontSize: '11.5px', fontWeight: 700, color: '#16A34A' }}>
+                                  🟢 Tracking Exempt
+                                </span>
+                              )
+                            }
+                            if (diff < 0) {
+                              return (
+                                <span style={{ fontSize: '11.5px', fontWeight: 700, color: '#DC2626' }}>
+                                  -{deficitH}h Deficit ({dayExpectedH}h shift)
+                                </span>
+                              )
+                            }
+                            return (
+                              <span style={{ fontSize: '11.5px', fontWeight: 700, color: '#16A34A' }}>
+                                ✓ Met Shift ({dayExpectedH}h)
+                              </span>
+                            )
+                          })()}
                         </div>
 
                         {/* Regularization Action / Status Section */}

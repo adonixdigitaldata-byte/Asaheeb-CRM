@@ -1937,14 +1937,14 @@ export async function fetchMonthlyWorkHoursAudit(
     // Fetch salary profiles from employee_salary_profiles and active employee_salary_history
     const { data: salaryProfiles } = await supabase
       .from('employee_salary_profiles')
-      .select('profile_id, base_salary, currency')
+      .select('profile_id, base_salary, currency, joining_date')
 
     const { data: salaryHistory } = await supabase
       .from('employee_salary_history')
       .select('profile_id, base_salary, currency')
       .is('end_date', null)
 
-    const salMap = new Map<string, { base_salary: number; currency: string }>()
+    const salMap = new Map<string, { base_salary: number; currency: string; joining_date?: string | null }>()
       ; (salaryHistory || []).forEach((sh: any) => {
         if (sh.profile_id && Number(sh.base_salary) > 0) {
           salMap.set(sh.profile_id, {
@@ -1958,6 +1958,7 @@ export async function fetchMonthlyWorkHoursAudit(
           salMap.set(sp.profile_id, {
             base_salary: Number(sp.base_salary),
             currency: sp.currency || 'SAR',
+            joining_date: sp.joining_date || null,
           })
         }
       })
@@ -1987,6 +1988,16 @@ export async function fetchMonthlyWorkHoursAudit(
           (policy.exempt_employee_ids || []).includes(p.id) ||
           Boolean(empSchedule?.is_exempt_from_tracking)
 
+        const sal = salMap.get(p.id)
+        const empJoiningDate = sal?.joining_date || null
+        const effectiveStartDate = (() => {
+          const dates: string[] = []
+          if (policy.tracking_start_date) dates.push(policy.tracking_start_date)
+          if (empJoiningDate) dates.push(empJoiningDate)
+          if (dates.length === 0) return null
+          return dates.sort().pop() || null
+        })()
+
         const empShiftStart = empSchedule?.shift_start_time || policy.shift_start_time
         const empGrace = empSchedule?.grace_period_mins ?? policy.grace_period_mins
         const empDailyHours = empSchedule?.daily_expected_hours ?? policy.daily_expected_hours
@@ -1999,7 +2010,7 @@ export async function fetchMonthlyWorkHoursAudit(
         let empWorkingDaysCount = workingDaysCount
         let empElapsedWorkingDays = elapsedWorkingDays
 
-        if (empSchedule && !isExempt) {
+        if ((empSchedule || empJoiningDate || policy.tracking_start_date) && !isExempt) {
           const empCalc = calculateExpectedHoursInMonth(
             year,
             month,
@@ -2008,7 +2019,7 @@ export async function fetchMonthlyWorkHoursAudit(
             empCustomDayHours,
             policy.official_holidays,
             undefined,
-            policy.tracking_start_date
+            effectiveStartDate
           )
           empExpectedHours = empCalc.totalHours
           empExpectedToDateHours = empCalc.elapsedHours
@@ -2036,7 +2047,7 @@ export async function fetchMonthlyWorkHoursAudit(
         }, 0)
         const actualHours = Math.round((totalWorkedMins / 60) * 10) / 10
 
-        // Approved leave hours strictly elapsed up to today in the month (never future leaves!)
+        // Approved leave hours strictly elapsed up to today in the month (never future leaves, active tracking only!)
         let elapsedLeaveHours = 0
         let elapsedLeaveDays = 0
         staffLeaves.forEach((l) => {
@@ -2052,8 +2063,9 @@ export async function fetchMonthlyWorkHoursAudit(
               const dayName = d.toLocaleDateString('en-US', { weekday: 'long' }).toUpperCase()
               const isWorkDay = empWorkDays.includes(dayName)
               const isHoliday = (policy.official_holidays || []).some((h) => h.date === dDateStr)
+              const isAfterStart = !effectiveStartDate || dDateStr >= effectiveStartDate
 
-              if (isWorkDay && !isHoliday && dDateStr <= todayStr) {
+              if (isWorkDay && !isHoliday && dDateStr <= todayStr && isAfterStart) {
                 elapsedLeaveDays++
                 const dayHrs = (empCustomDayHours && empCustomDayHours[dayName] !== undefined)
                   ? empCustomDayHours[dayName]
@@ -2109,7 +2121,6 @@ export async function fetchMonthlyWorkHoursAudit(
             : 100
 
         // Financial pay cut deduction calculation strictly based on REAL salary profile:
-        const sal = salMap.get(p.id)
         const baseSalary = sal?.base_salary || 0
         const currency = sal?.currency || 'SAR'
         const hourlyRate = (empExpectedHours > 0 && baseSalary > 0)
@@ -2194,13 +2205,13 @@ export async function fetchMonthlyWorkHoursAudit(
   }
 }
 
-export async function fetchUserSalaryProfile(userId: string): Promise<{ base_salary: number; currency: string } | null> {
+export async function fetchUserSalaryProfile(userId: string): Promise<{ base_salary: number; currency: string; joining_date?: string | null } | null> {
   try {
     const supabase = createClient()
     // 1. Try employee_salary_profiles
     const { data: esp } = await supabase
       .from('employee_salary_profiles')
-      .select('base_salary, currency')
+      .select('base_salary, currency, joining_date')
       .eq('profile_id', userId)
       .maybeSingle()
 
@@ -2208,6 +2219,7 @@ export async function fetchUserSalaryProfile(userId: string): Promise<{ base_sal
       return {
         base_salary: Number(esp.base_salary),
         currency: esp.currency || 'SAR',
+        joining_date: esp.joining_date || null,
       }
     }
 
