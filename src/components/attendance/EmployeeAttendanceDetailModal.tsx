@@ -8,7 +8,6 @@ import {
   Clock,
   Calendar,
   MapPin,
-  Camera,
   ShieldCheck,
   CheckCircle2,
   AlertTriangle,
@@ -16,17 +15,27 @@ import {
   Download,
   ExternalLink,
   ChevronRight,
-  Sparkles,
   TrendingDown,
   TrendingUp,
-  Maximize2,
   Edit3,
+  Trash2,
+  Loader2,
 } from 'lucide-react'
-import { AttendanceLog, LeaveBalance, LeaveRequest, RosterEmployee } from '@/types/attendance'
-import { fetchUserAttendanceHistory, fetchLeaveBalances, fetchUserLeaveRequests } from '@/lib/attendanceService'
+import { AttendanceLog, LeaveBalance, LeaveRequest, RosterEmployee, CompanyWorkPolicy, EmployeeShiftSchedule } from '@/types/attendance'
+import {
+  fetchUserAttendanceHistory,
+  fetchLeaveBalances,
+  fetchUserLeaveRequests,
+  fetchCompanyWorkPolicy,
+  saveEmployeeCustomSchedule,
+  updateEmployeeLeaveBalance,
+  getLocalAttendance,
+  deleteAttendanceLog,
+  toggleEmployeeTrackingExemption,
+} from '@/lib/attendanceService'
 import { formatDistance, getGoogleMapsUrl } from '@/lib/geoUtils'
-import { getEmployeeFaceEnrollment, resetEmployeeFaceEnrollment } from '@/lib/biometricEngine'
 import RegularizeAttendanceModal from '@/components/attendance/RegularizeAttendanceModal'
+import ConfirmModal from '@/components/ConfirmModal'
 
 interface EmployeeAttendanceDetailModalProps {
   isOpen: boolean
@@ -34,6 +43,16 @@ interface EmployeeAttendanceDetailModalProps {
   employee: RosterEmployee | null
   adminId: string
 }
+
+const ALL_DAYS = [
+  { key: 'SUNDAY', label: 'Sunday' },
+  { key: 'MONDAY', label: 'Monday' },
+  { key: 'TUESDAY', label: 'Tuesday' },
+  { key: 'WEDNESDAY', label: 'Wednesday' },
+  { key: 'THURSDAY', label: 'Thursday' },
+  { key: 'FRIDAY', label: 'Friday' },
+  { key: 'SATURDAY', label: 'Saturday' },
+]
 
 export default function EmployeeAttendanceDetailModal({
   isOpen,
@@ -44,16 +63,64 @@ export default function EmployeeAttendanceDetailModal({
   const [history, setHistory] = useState<AttendanceLog[]>([])
   const [leaveBalances, setLeaveBalances] = useState<LeaveBalance | null>(null)
   const [leaveRequests, setLeaveRequests] = useState<LeaveRequest[]>([])
+  const [policy, setPolicy] = useState<CompanyWorkPolicy | null>(null)
   const [loading, setLoading] = useState(true)
-  const [selectedSelfie, setSelectedSelfie] = useState<{ url: string; title: string } | null>(null)
-  const [enrolledInfo, setEnrolledInfo] = useState<{ hasEnrolled: boolean; enrolledAt: string | null }>({ hasEnrolled: false, enrolledAt: null })
-  const [isResettingFace, setIsResettingFace] = useState(false)
   const [regularizeLog, setRegularizeLog] = useState<AttendanceLog | null>(null)
   const [regularizeModalOpen, setRegularizeModalOpen] = useState(false)
   const scrollContainerRef = useRef<HTMLDivElement>(null)
 
+  // Tracking Exemption state
+  const [isTrackingExempt, setIsTrackingExempt] = useState(false)
+  const [isTogglingExemption, setIsTogglingExemption] = useState(false)
+
+  // Leave editing state
+  const [isEditingLeave, setIsEditingLeave] = useState(false)
+  const [leaveForm, setLeaveForm] = useState({
+    annual_total: 21,
+    annual_used: 0,
+    sick_total: 30,
+    sick_used: 0,
+    unpaid_used: 0,
+    emergency_used: 0,
+  })
+  const [isSavingLeave, setIsSavingLeave] = useState(false)
+  const [leaveSaveSuccess, setLeaveSaveSuccess] = useState(false)
+
+  // Schedule editing state
+  const [isEditingSchedule, setIsEditingSchedule] = useState(false)
+  const [useCustomSchedule, setUseCustomSchedule] = useState(false)
+  const [enableEmpCustomDays, setEnableEmpCustomDays] = useState(false)
+  const [empCustomDayHours, setEmpCustomDayHours] = useState<Record<string, number>>({})
+  const [empCustomDaySchedules, setEmpCustomDaySchedules] = useState<Record<string, { startTime: string; endTime: string; hours: number }>>({})
+  const [scheduleForm, setScheduleForm] = useState({
+    shift_start_time: '09:00',
+    shift_end_time: '17:00',
+    daily_expected_hours: 8.0,
+    grace_period_mins: 15,
+  })
+  const [isSavingSchedule, setIsSavingSchedule] = useState(false)
+  const [scheduleSaveSuccess, setScheduleSaveSuccess] = useState(false)
+
+  // In-app Delete Confirmation Modal State
+  const [deleteConfirmModal, setDeleteConfirmModal] = useState<{
+    isOpen: boolean
+    record: AttendanceLog | null
+  }>({
+    isOpen: false,
+    record: null,
+  })
+  const [isDeletingRecord, setIsDeletingRecord] = useState(false)
+
   useEffect(() => {
     if (isOpen && employee) {
+      // Pre-hydrate history immediately from local storage cache to eliminate blank flash
+      try {
+        const localLogs = getLocalAttendance().filter((l: AttendanceLog) => l.user_id === employee.profile_id)
+        if (localLogs.length > 0) {
+          setHistory(localLogs)
+        }
+      } catch (_) {}
+
       loadEmployeeData(employee.profile_id)
     }
   }, [isOpen, employee])
@@ -61,39 +128,232 @@ export default function EmployeeAttendanceDetailModal({
   async function loadEmployeeData(id: string) {
     setLoading(true)
     try {
-      const [hist, bal, reqs] = await Promise.all([
+      const [hist, bal, reqs, pol] = await Promise.all([
         fetchUserAttendanceHistory(id),
         fetchLeaveBalances(id),
         fetchUserLeaveRequests(id),
+        fetchCompanyWorkPolicy(),
       ])
-      setHistory(hist)
-      setLeaveBalances(bal)
-      setLeaveRequests(reqs)
+      if (hist) setHistory(hist)
+      if (bal) setLeaveBalances(bal)
+      if (reqs) setLeaveRequests(reqs)
+      if (pol) setPolicy(pol)
 
-      getEmployeeFaceEnrollment(id).then((res) => {
-        setEnrolledInfo({
-          hasEnrolled: Boolean(res.descriptor && res.descriptor.length === 128),
-          enrolledAt: res.enrolled_at,
+      if (bal) {
+        setLeaveForm({
+          annual_total: bal.annual_leave_total ?? 21,
+          annual_used: bal.annual_leave_used ?? 0,
+          sick_total: bal.sick_leave_total ?? 30,
+          sick_used: bal.sick_leave_used ?? 0,
+          unpaid_used: bal.unpaid_leave_used ?? 0,
+          emergency_used: bal.emergency_leave_used ?? 0,
         })
-      })
+      }
+
+      if (pol) {
+        const empSched = pol.custom_employee_schedules?.[id]
+        const isExempt =
+          (pol.exempt_employee_ids || []).includes(id) ||
+          Boolean(empSched?.is_exempt_from_tracking)
+        setIsTrackingExempt(isExempt)
+
+        if (empSched) {
+          setUseCustomSchedule(true)
+          setScheduleForm({
+            shift_start_time: empSched.shift_start_time || pol.shift_start_time?.slice(0, 5) || '09:00',
+            shift_end_time: empSched.shift_end_time || pol.shift_end_time?.slice(0, 5) || '17:00',
+            daily_expected_hours: empSched.daily_expected_hours || pol.daily_expected_hours || 8.0,
+            grace_period_mins: empSched.grace_period_mins ?? pol.grace_period_mins ?? 15,
+          })
+          const dayHrs = empSched.custom_day_hours || {}
+          const dayScheds = empSched.custom_day_schedules || {}
+          setEmpCustomDayHours(dayHrs)
+          setEmpCustomDaySchedules(dayScheds)
+          setEnableEmpCustomDays(Object.keys(dayHrs).length > 0 || Object.keys(dayScheds).length > 0)
+        } else {
+          setUseCustomSchedule(false)
+          setEnableEmpCustomDays(false)
+          setEmpCustomDayHours({})
+          setEmpCustomDaySchedules({})
+          setScheduleForm({
+            shift_start_time: pol.shift_start_time?.slice(0, 5) || '09:00',
+            shift_end_time: pol.shift_end_time?.slice(0, 5) || '17:00',
+            daily_expected_hours: pol.daily_expected_hours || 8.0,
+            grace_period_mins: pol.grace_period_mins ?? 15,
+          })
+        }
+      }
     } catch (err) {
-      console.error(err)
+      console.error('Error loading employee details:', err)
     } finally {
       setLoading(false)
     }
   }
 
-  async function handleResetFaceId() {
+  async function handleToggleExemption(newExemptVal: boolean) {
     if (!employee) return
-    const confirmed = window.confirm(
-      `Are you sure you want to reset the Biometric Face ID for ${employee.name}?\n\nThey will be prompted to re-enroll a new face on their next attendance punch.`
-    )
-    if (!confirmed) return
+    setIsTogglingExemption(true)
+    try {
+      const updated = await toggleEmployeeTrackingExemption(employee.profile_id, newExemptVal)
+      setPolicy(updated)
+      setIsTrackingExempt(newExemptVal)
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('asaheeb_attendance_updated'))
+      }
+    } catch (err) {
+      console.error('Failed to toggle tracking exemption:', err)
+    } finally {
+      setIsTogglingExemption(false)
+    }
+  }
 
-    setIsResettingFace(true)
-    await resetEmployeeFaceEnrollment(employee.profile_id)
-    setEnrolledInfo({ hasEnrolled: false, enrolledAt: null })
-    setIsResettingFace(false)
+  async function handleConfirmDeleteLog() {
+    const { record } = deleteConfirmModal
+    if (!record || !employee) return
+
+    setIsDeletingRecord(true)
+    try {
+      const ok = await deleteAttendanceLog({
+        logId: record.id,
+        userId: record.user_id || employee.profile_id,
+        date: record.date,
+      })
+
+      if (ok) {
+        setHistory((prev) => prev.filter((l) => l.id !== record.id && l.date !== record.date))
+        setDeleteConfirmModal({ isOpen: false, record: null })
+        // Reload fresh data
+        loadEmployeeData(employee.profile_id)
+      }
+    } catch (err) {
+      console.error('Failed to delete attendance log:', err)
+    } finally {
+      setIsDeletingRecord(false)
+      setDeleteConfirmModal({ isOpen: false, record: null })
+    }
+  }
+
+  function computeHours(start: string, end: string): number {
+    if (!start || !end) return 8.0
+    const [sh, sm] = start.split(':').map(Number)
+    const [eh, em] = end.split(':').map(Number)
+    if (isNaN(sh) || isNaN(sm) || isNaN(eh) || isNaN(em)) return 8.0
+    let diffMinutes = (eh * 60 + (em || 0)) - (sh * 60 + (sm || 0))
+    if (diffMinutes < 0) diffMinutes += 24 * 60
+    return Math.round((diffMinutes / 60) * 10) / 10
+  }
+
+  function handleMainShiftTimingChange(field: 'start' | 'end', val: string) {
+    const newStart = field === 'start' ? val : scheduleForm.shift_start_time
+    const newEnd = field === 'end' ? val : scheduleForm.shift_end_time
+    const autoHours = computeHours(newStart, newEnd)
+    setScheduleForm((prev) => ({
+      ...prev,
+      shift_start_time: newStart,
+      shift_end_time: newEnd,
+      daily_expected_hours: autoHours,
+    }))
+  }
+
+  function handleEmpDayHoursChange(dayKey: string, hours: number) {
+    setEmpCustomDayHours((prev) => ({
+      ...prev,
+      [dayKey]: hours,
+    }))
+    setEmpCustomDaySchedules((prev) => {
+      const existing = prev[dayKey] || {
+        startTime: scheduleForm.shift_start_time,
+        endTime: scheduleForm.shift_end_time,
+        hours,
+      }
+      return {
+        ...prev,
+        [dayKey]: {
+          ...existing,
+          hours,
+        },
+      }
+    })
+  }
+
+  function handleEmpDayTimingChange(dayKey: string, field: 'start' | 'end', val: string) {
+    const existing = empCustomDaySchedules[dayKey] || {
+      startTime: scheduleForm.shift_start_time,
+      endTime: scheduleForm.shift_end_time,
+      hours: empCustomDayHours[dayKey] ?? scheduleForm.daily_expected_hours,
+    }
+    const newStart = field === 'start' ? val : existing.startTime
+    const newEnd = field === 'end' ? val : existing.endTime
+    const autoHours = computeHours(newStart, newEnd)
+
+    setEmpCustomDaySchedules((prev) => ({
+      ...prev,
+      [dayKey]: {
+        startTime: newStart,
+        endTime: newEnd,
+        hours: autoHours,
+      },
+    }))
+
+    setEmpCustomDayHours((prev) => ({
+      ...prev,
+      [dayKey]: autoHours,
+    }))
+  }
+
+  async function handleSaveLeaveBalances() {
+    if (!employee) return
+    setIsSavingLeave(true)
+    try {
+      const updated = await updateEmployeeLeaveBalance(employee.profile_id, {
+        annual_leave_total: Number(leaveForm.annual_total),
+        annual_leave_used: Number(leaveForm.annual_used),
+        sick_leave_total: Number(leaveForm.sick_total),
+        sick_leave_used: Number(leaveForm.sick_used),
+        unpaid_leave_used: Number(leaveForm.unpaid_used),
+        emergency_leave_used: Number(leaveForm.emergency_used),
+      })
+      setLeaveBalances(updated)
+      setLeaveSaveSuccess(true)
+      setTimeout(() => {
+        setLeaveSaveSuccess(false)
+        setIsEditingLeave(false)
+      }, 1200)
+    } catch (err) {
+      console.error('Failed to update leave balance:', err)
+    } finally {
+      setIsSavingLeave(false)
+    }
+  }
+
+  async function handleSaveSchedule() {
+    if (!employee) return
+    setIsSavingSchedule(true)
+    try {
+      const schedulePayload: EmployeeShiftSchedule | null = useCustomSchedule
+        ? {
+            shift_start_time: scheduleForm.shift_start_time,
+            shift_end_time: scheduleForm.shift_end_time,
+            daily_expected_hours: Number(scheduleForm.daily_expected_hours),
+            grace_period_mins: Number(scheduleForm.grace_period_mins),
+            custom_day_hours: enableEmpCustomDays ? empCustomDayHours : undefined,
+            custom_day_schedules: enableEmpCustomDays ? empCustomDaySchedules : undefined,
+            is_exempt_from_tracking: isTrackingExempt,
+          }
+        : null
+
+      const updatedPol = await saveEmployeeCustomSchedule(employee.profile_id, schedulePayload)
+      setPolicy(updatedPol)
+      setScheduleSaveSuccess(true)
+      setTimeout(() => {
+        setScheduleSaveSuccess(false)
+        setIsEditingSchedule(false)
+      }, 1200)
+    } catch (err) {
+      console.error('Failed to update employee schedule:', err)
+    } finally {
+      setIsSavingSchedule(false)
+    }
   }
 
   // Lock background window / body scroll when modal is open
@@ -118,18 +378,7 @@ export default function EmployeeAttendanceDetailModal({
     }
   }, [isOpen])
 
-  // Listen for Escape key to close selfie lightbox
-  useEffect(() => {
-    function onKeyDown(e: KeyboardEvent) {
-      if (e.key === 'Escape') {
-        setSelectedSelfie(null)
-      }
-    }
-    if (selectedSelfie) {
-      window.addEventListener('keydown', onKeyDown)
-      return () => window.removeEventListener('keydown', onKeyDown)
-    }
-  }, [selectedSelfie])
+
 
   if (!isOpen || !employee) return null
 
@@ -428,34 +677,13 @@ export default function EmployeeAttendanceDetailModal({
               </div>
             </div>
 
-            {/* Leave Balance */}
+            {/* Leave Balance Card */}
             <div
               style={{
                 padding: '16px',
                 borderRadius: '12px',
                 backgroundColor: '#F8FAFC',
                 border: '1px solid #E2E8F0',
-              }}
-            >
-              <div style={{ fontSize: '11px', fontWeight: 600, color: '#64748B', textTransform: 'uppercase' }}>
-                Annual Paid Leave Balance
-              </div>
-              <div style={{ fontSize: '20px', fontWeight: 800, color: '#0284C7', marginTop: '4px' }}>
-                {remainingAnnual} / {leaveBalances?.annual_leave_total || 21} Days
-              </div>
-              <div style={{ fontSize: '12px', color: '#64748B', marginTop: '2px' }}>
-                {leaveBalances?.sick_leave_total ? leaveBalances.sick_leave_total - leaveBalances.sick_leave_used : 30} Sick
-                days remaining
-              </div>
-            </div>
-
-            {/* Biometric Face ID Status & Reset */}
-            <div
-              style={{
-                padding: '16px',
-                borderRadius: '12px',
-                backgroundColor: enrolledInfo.hasEnrolled ? '#F0FDF4' : '#FFFBEB',
-                border: `1px solid ${enrolledInfo.hasEnrolled ? '#BBF7D0' : '#FDE68A'}`,
                 display: 'flex',
                 flexDirection: 'column',
                 justifyContent: 'space-between',
@@ -463,44 +691,720 @@ export default function EmployeeAttendanceDetailModal({
             >
               <div>
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                  <span style={{ fontSize: '11px', fontWeight: 700, color: enrolledInfo.hasEnrolled ? '#166534' : '#92400E', textTransform: 'uppercase' }}>
-                    Biometric Face ID
-                  </span>
-                  <ShieldCheck size={16} style={{ color: enrolledInfo.hasEnrolled ? '#16A34A' : '#D97706' }} />
+                  <div style={{ fontSize: '11px', fontWeight: 600, color: '#64748B', textTransform: 'uppercase' }}>
+                    Annual Paid Leave
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setIsEditingLeave(!isEditingLeave)}
+                    style={{
+                      background: 'none',
+                      border: 'none',
+                      color: '#4F46E5',
+                      fontSize: '11px',
+                      fontWeight: 700,
+                      cursor: 'pointer',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '4px',
+                      padding: '2px 6px',
+                      borderRadius: '4px',
+                      backgroundColor: isEditingLeave ? '#EEF2FF' : 'transparent',
+                    }}
+                  >
+                    <Edit3 size={12} /> {isEditingLeave ? 'Close' : 'Adjust Quotas'}
+                  </button>
                 </div>
-                <div style={{ fontSize: '15px', fontWeight: 800, color: enrolledInfo.hasEnrolled ? '#15803D' : '#B45309', marginTop: '4px' }}>
-                  {enrolledInfo.hasEnrolled ? '🟢 Registered' : '🟡 Pending Setup'}
+                <div style={{ fontSize: '20px', fontWeight: 800, color: '#0284C7', marginTop: '4px' }}>
+                  {remainingAnnual} / {leaveBalances?.annual_leave_total || 21} Days
+                </div>
+                <div style={{ fontSize: '12px', color: '#64748B', marginTop: '2px' }}>
+                  {leaveBalances?.sick_leave_total ? leaveBalances.sick_leave_total - leaveBalances.sick_leave_used : 30} Sick
+                  days remaining
+                </div>
+              </div>
+            </div>
+
+            {/* Individual Shift Schedule Overview Card */}
+            <div
+              style={{
+                padding: '16px',
+                borderRadius: '12px',
+                backgroundColor: useCustomSchedule ? '#F0FDF4' : '#F8FAFC',
+                border: `1px solid ${useCustomSchedule ? '#86EFAC' : '#E2E8F0'}`,
+                display: 'flex',
+                flexDirection: 'column',
+                justifyContent: 'space-between',
+              }}
+            >
+              <div>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <div style={{ fontSize: '11px', fontWeight: 700, color: useCustomSchedule ? '#166534' : '#4338CA', textTransform: 'uppercase' }}>
+                    {useCustomSchedule ? '👤 Custom Shift Schedule' : '🏢 Company Default Schedule'}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setIsEditingSchedule(!isEditingSchedule)}
+                    style={{
+                      background: 'none',
+                      border: 'none',
+                      color: '#4F46E5',
+                      fontSize: '11px',
+                      fontWeight: 700,
+                      cursor: 'pointer',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '4px',
+                      padding: '2px 6px',
+                      borderRadius: '4px',
+                      backgroundColor: isEditingSchedule ? '#EEF2FF' : 'transparent',
+                    }}
+                  >
+                    <Edit3 size={12} /> {isEditingSchedule ? 'Close' : 'Edit Timing'}
+                  </button>
+                </div>
+                <div style={{ fontSize: '16px', fontWeight: 800, color: '#0F172A', marginTop: '4px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <Clock size={15} color="#4F46E5" />
+                  {scheduleForm.shift_start_time} – {scheduleForm.shift_end_time} ({scheduleForm.daily_expected_hours}h)
                 </div>
                 <div style={{ fontSize: '11px', color: '#64748B', marginTop: '2px' }}>
-                  {enrolledInfo.hasEnrolled && enrolledInfo.enrolledAt
-                    ? `Enrolled ${new Date(enrolledInfo.enrolledAt).toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' })}`
-                    : 'Auto-enrolls on employee first punch'}
+                  Late threshold: Shift + {scheduleForm.grace_period_mins}m grace period
+                </div>
+              </div>
+            </div>
+
+            {/* Attendance Tracking & Deficit Exemption Card */}
+            <div
+              style={{
+                padding: '16px',
+                borderRadius: '12px',
+                backgroundColor: isTrackingExempt ? '#FEF2F2' : '#F0FDF4',
+                border: `1px solid ${isTrackingExempt ? '#FECACA' : '#BBF7D0'}`,
+                display: 'flex',
+                flexDirection: 'column',
+                justifyContent: 'space-between',
+              }}
+            >
+              <div>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <div style={{ fontSize: '11px', fontWeight: 700, color: isTrackingExempt ? '#991B1B' : '#166534', textTransform: 'uppercase' }}>
+                    Tracking Status
+                  </div>
+                  <button
+                    type="button"
+                    disabled={isTogglingExemption}
+                    onClick={() => handleToggleExemption(!isTrackingExempt)}
+                    style={{
+                      background: isTrackingExempt ? '#DC2626' : '#FFFFFF',
+                      border: `1px solid ${isTrackingExempt ? '#DC2626' : '#CBD5E1'}`,
+                      color: isTrackingExempt ? '#FFFFFF' : '#334155',
+                      fontSize: '11px',
+                      fontWeight: 700,
+                      cursor: isTogglingExemption ? 'not-allowed' : 'pointer',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '4px',
+                      padding: '3px 8px',
+                      borderRadius: '6px',
+                      boxShadow: '0 1px 2px rgba(0,0,0,0.05)',
+                    }}
+                  >
+                    {isTogglingExemption ? 'Updating...' : isTrackingExempt ? 'Re-enable Tracking' : 'Exempt from Tracking'}
+                  </button>
+                </div>
+                <div style={{ fontSize: '15px', fontWeight: 800, color: isTrackingExempt ? '#B91C1C' : '#15803D', marginTop: '4px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  {isTrackingExempt ? '🛡️ Tracking Exempt' : '🟢 Active Tracking'}
+                </div>
+                <div style={{ fontSize: '11px', color: '#64748B', marginTop: '2px' }}>
+                  {isTrackingExempt
+                    ? '0h deficit & 0 SAR deduction in monthly audit'
+                    : 'Tracked according to shift hours & timesheets'}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Inline Edit Panel: Adjust Leave Quotas & Balances */}
+          {isEditingLeave && (
+            <div
+              style={{
+                padding: '16px 20px',
+                borderRadius: '12px',
+                backgroundColor: '#F0F9FF',
+                border: '1px solid #BAE6FD',
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
+                <div>
+                  <h4 style={{ fontSize: '13px', fontWeight: 700, color: '#0369A1', margin: 0 }}>
+                    Adjust Leave Quotas &amp; Balances for {employee.name}
+                  </h4>
+                  <p style={{ fontSize: '11px', color: '#0284C7', margin: '2px 0 0 0' }}>
+                    Update this employee's annual leave entitlement, sick leave, and used days directly.
+                  </p>
                 </div>
               </div>
 
-              {enrolledInfo.hasEnrolled && (
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '12px' }}>
+                <div>
+                  <label style={{ display: 'block', fontSize: '11px', fontWeight: 600, color: '#334155', marginBottom: '4px' }}>
+                    Annual Quota (Days)
+                  </label>
+                  <input
+                    type="number"
+                    min="0"
+                    max="100"
+                    value={leaveForm.annual_total}
+                    onChange={(e) => setLeaveForm({ ...leaveForm, annual_total: Number(e.target.value) })}
+                    style={{
+                      width: '100%',
+                      padding: '6px 10px',
+                      borderRadius: '6px',
+                      border: '1px solid #CBD5E1',
+                      fontSize: '13px',
+                      fontWeight: 600,
+                      backgroundColor: '#FFFFFF',
+                    }}
+                  />
+                </div>
+
+                <div>
+                  <label style={{ display: 'block', fontSize: '11px', fontWeight: 600, color: '#334155', marginBottom: '4px' }}>
+                    Annual Used (Days)
+                  </label>
+                  <input
+                    type="number"
+                    min="0"
+                    max="100"
+                    value={leaveForm.annual_used}
+                    onChange={(e) => setLeaveForm({ ...leaveForm, annual_used: Number(e.target.value) })}
+                    style={{
+                      width: '100%',
+                      padding: '6px 10px',
+                      borderRadius: '6px',
+                      border: '1px solid #CBD5E1',
+                      fontSize: '13px',
+                      fontWeight: 600,
+                      backgroundColor: '#FFFFFF',
+                    }}
+                  />
+                </div>
+
+                <div>
+                  <label style={{ display: 'block', fontSize: '11px', fontWeight: 600, color: '#334155', marginBottom: '4px' }}>
+                    Sick Quota (Days)
+                  </label>
+                  <input
+                    type="number"
+                    min="0"
+                    max="100"
+                    value={leaveForm.sick_total}
+                    onChange={(e) => setLeaveForm({ ...leaveForm, sick_total: Number(e.target.value) })}
+                    style={{
+                      width: '100%',
+                      padding: '6px 10px',
+                      borderRadius: '6px',
+                      border: '1px solid #CBD5E1',
+                      fontSize: '13px',
+                      fontWeight: 600,
+                      backgroundColor: '#FFFFFF',
+                    }}
+                  />
+                </div>
+
+                <div>
+                  <label style={{ display: 'block', fontSize: '11px', fontWeight: 600, color: '#334155', marginBottom: '4px' }}>
+                    Sick Used (Days)
+                  </label>
+                  <input
+                    type="number"
+                    min="0"
+                    max="100"
+                    value={leaveForm.sick_used}
+                    onChange={(e) => setLeaveForm({ ...leaveForm, sick_used: Number(e.target.value) })}
+                    style={{
+                      width: '100%',
+                      padding: '6px 10px',
+                      borderRadius: '6px',
+                      border: '1px solid #CBD5E1',
+                      fontSize: '13px',
+                      fontWeight: 600,
+                      backgroundColor: '#FFFFFF',
+                    }}
+                  />
+                </div>
+
+                <div>
+                  <label style={{ display: 'block', fontSize: '11px', fontWeight: 600, color: '#334155', marginBottom: '4px' }}>
+                    Emergency Used
+                  </label>
+                  <input
+                    type="number"
+                    min="0"
+                    max="100"
+                    value={leaveForm.emergency_used}
+                    onChange={(e) => setLeaveForm({ ...leaveForm, emergency_used: Number(e.target.value) })}
+                    style={{
+                      width: '100%',
+                      padding: '6px 10px',
+                      borderRadius: '6px',
+                      border: '1px solid #CBD5E1',
+                      fontSize: '13px',
+                      backgroundColor: '#FFFFFF',
+                    }}
+                  />
+                </div>
+
+                <div>
+                  <label style={{ display: 'block', fontSize: '11px', fontWeight: 600, color: '#334155', marginBottom: '4px' }}>
+                    Unpaid Used
+                  </label>
+                  <input
+                    type="number"
+                    min="0"
+                    max="100"
+                    value={leaveForm.unpaid_used}
+                    onChange={(e) => setLeaveForm({ ...leaveForm, unpaid_used: Number(e.target.value) })}
+                    style={{
+                      width: '100%',
+                      padding: '6px 10px',
+                      borderRadius: '6px',
+                      border: '1px solid #CBD5E1',
+                      fontSize: '13px',
+                      backgroundColor: '#FFFFFF',
+                    }}
+                  />
+                </div>
+              </div>
+
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '12px' }}>
                 <button
                   type="button"
-                  onClick={handleResetFaceId}
-                  disabled={isResettingFace}
-                  className="btn btn-outline btn-sm"
-                  style={{
-                    marginTop: '10px',
-                    padding: '4px 8px',
-                    fontSize: '11px',
-                    fontWeight: 600,
-                    color: '#DC2626',
-                    borderColor: '#FECACA',
-                    backgroundColor: '#FFFFFF',
-                    alignSelf: 'flex-start',
-                  }}
-                  title="Reset Face ID so employee can register again"
+                  onClick={() => setIsEditingLeave(false)}
+                  className="btn btn-outline"
+                  style={{ padding: '6px 12px', fontSize: '12px' }}
                 >
-                  {isResettingFace ? 'Resetting...' : 'Reset Face ID'}
+                  Cancel
                 </button>
-              )}
+                <button
+                  type="button"
+                  onClick={handleSaveLeaveBalances}
+                  disabled={isSavingLeave || leaveSaveSuccess}
+                  className="btn btn-primary"
+                  style={{
+                    padding: '6px 16px',
+                    fontSize: '12px',
+                    fontWeight: 600,
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '4px',
+                  }}
+                >
+                  {isSavingLeave ? 'Saving...' : leaveSaveSuccess ? '✓ Saved!' : 'Save Leave Balances'}
+                </button>
+              </div>
             </div>
-          </div>
+          )}
+
+          {/* Inline Edit Panel: Configure Employee Shift Schedule */}
+          {isEditingSchedule && (
+            <div
+              style={{
+                padding: '20px 22px',
+                borderRadius: '16px',
+                background: 'linear-gradient(180deg, #F8FAFC 0%, #EEF2FF 100%)',
+                border: '1.5px solid #C7D2FE',
+                boxShadow: '0 10px 25px -5px rgba(79, 70, 229, 0.08)',
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px', flexWrap: 'wrap', gap: '8px' }}>
+                <div>
+                  <h4 style={{ fontSize: '14px', fontWeight: 800, color: '#1E1B4B', margin: 0, display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <Clock size={16} color="#4F46E5" /> Individual Working Hours &amp; Shift Schedule
+                  </h4>
+                  <p style={{ fontSize: '12px', color: '#6366F1', margin: '3px 0 0 0' }}>
+                    Personalize shift hours for <strong>{employee.name}</strong>. Late thresholds and deficits will calculate automatically.
+                  </p>
+                </div>
+              </div>
+
+              {/* Segmented Mode Selector */}
+              <div
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
+                  gap: '10px',
+                  marginBottom: '16px',
+                }}
+              >
+                <div
+                  onClick={() => {
+                    setUseCustomSchedule(false)
+                    if (policy) {
+                      setScheduleForm({
+                        shift_start_time: policy.shift_start_time?.slice(0, 5) || '09:00',
+                        shift_end_time: policy.shift_end_time?.slice(0, 5) || '17:00',
+                        daily_expected_hours: policy.daily_expected_hours || 8.0,
+                        grace_period_mins: policy.grace_period_mins ?? 15,
+                      })
+                    }
+                  }}
+                  style={{
+                    padding: '12px 14px',
+                    borderRadius: '10px',
+                    cursor: 'pointer',
+                    backgroundColor: !useCustomSchedule ? '#FFFFFF' : 'rgba(255, 255, 255, 0.6)',
+                    border: `1.5px solid ${!useCustomSchedule ? '#4F46E5' : '#E2E8F0'}`,
+                    boxShadow: !useCustomSchedule ? '0 2px 8px rgba(79, 70, 229, 0.15)' : 'none',
+                    transition: 'all 0.15s ease',
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <div
+                      style={{
+                        width: '16px',
+                        height: '16px',
+                        borderRadius: '50%',
+                        border: `2px solid ${!useCustomSchedule ? '#4F46E5' : '#CBD5E1'}`,
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                      }}
+                    >
+                      {!useCustomSchedule && (
+                        <div style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#4F46E5' }} />
+                      )}
+                    </div>
+                    <div>
+                      <div style={{ fontSize: '12px', fontWeight: 700, color: !useCustomSchedule ? '#4338CA' : '#475569' }}>
+                        🏢 Company Standard Policy
+                      </div>
+                      <div style={{ fontSize: '11px', color: '#64748B', marginTop: '2px' }}>
+                        {policy?.shift_start_time?.slice(0, 5) || '09:00'} – {policy?.shift_end_time?.slice(0, 5) || '17:00'} ({policy?.daily_expected_hours || 8}h/day)
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div
+                  onClick={() => setUseCustomSchedule(true)}
+                  style={{
+                    padding: '12px 14px',
+                    borderRadius: '10px',
+                    cursor: 'pointer',
+                    backgroundColor: useCustomSchedule ? '#FFFFFF' : 'rgba(255, 255, 255, 0.6)',
+                    border: `1.5px solid ${useCustomSchedule ? '#4F46E5' : '#E2E8F0'}`,
+                    boxShadow: useCustomSchedule ? '0 2px 8px rgba(79, 70, 229, 0.15)' : 'none',
+                    transition: 'all 0.15s ease',
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <div
+                      style={{
+                        width: '16px',
+                        height: '16px',
+                        borderRadius: '50%',
+                        border: `2px solid ${useCustomSchedule ? '#4F46E5' : '#CBD5E1'}`,
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                      }}
+                    >
+                      {useCustomSchedule && (
+                        <div style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#4F46E5' }} />
+                      )}
+                    </div>
+                    <div>
+                      <div style={{ fontSize: '12px', fontWeight: 700, color: useCustomSchedule ? '#4338CA' : '#475569' }}>
+                        👤 Personalized Custom Shift
+                      </div>
+                      <div style={{ fontSize: '11px', color: '#64748B', marginTop: '2px' }}>
+                        Custom daily start/end &amp; individual timings
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {useCustomSchedule && (
+                <div
+                  style={{
+                    backgroundColor: '#FFFFFF',
+                    padding: '16px',
+                    borderRadius: '12px',
+                    border: '1px solid #E0E7FF',
+                    boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
+                  }}
+                >
+                  <div style={{ fontSize: '12px', fontWeight: 700, color: '#334155', marginBottom: '10px' }}>
+                    Base Shift Configuration (Auto-calculates Hours)
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: '12px' }}>
+                    <div>
+                      <label style={{ display: 'block', fontSize: '11px', fontWeight: 600, color: '#475569', marginBottom: '4px' }}>
+                        Shift Start Time
+                      </label>
+                      <input
+                        type="time"
+                        value={scheduleForm.shift_start_time}
+                        onChange={(e) => handleMainShiftTimingChange('start', e.target.value)}
+                        style={{
+                          width: '100%',
+                          padding: '7px 10px',
+                          borderRadius: '8px',
+                          border: '1.5px solid #CBD5E1',
+                          fontSize: '13px',
+                          fontWeight: 600,
+                          color: '#0F172A',
+                          backgroundColor: '#FFFFFF',
+                        }}
+                      />
+                    </div>
+
+                    <div>
+                      <label style={{ display: 'block', fontSize: '11px', fontWeight: 600, color: '#475569', marginBottom: '4px' }}>
+                        Shift End Time
+                      </label>
+                      <input
+                        type="time"
+                        value={scheduleForm.shift_end_time}
+                        onChange={(e) => handleMainShiftTimingChange('end', e.target.value)}
+                        style={{
+                          width: '100%',
+                          padding: '7px 10px',
+                          borderRadius: '8px',
+                          border: '1.5px solid #CBD5E1',
+                          fontSize: '13px',
+                          fontWeight: 600,
+                          color: '#0F172A',
+                          backgroundColor: '#FFFFFF',
+                        }}
+                      />
+                    </div>
+
+                    <div>
+                      <label style={{ display: 'block', fontSize: '11px', fontWeight: 600, color: '#475569', marginBottom: '4px' }}>
+                        Expected Hours / Day
+                      </label>
+                      <div style={{ position: 'relative' }}>
+                        <input
+                          type="number"
+                          step="0.5"
+                          min="1"
+                          max="24"
+                          value={scheduleForm.daily_expected_hours}
+                          onChange={(e) => setScheduleForm({ ...scheduleForm, daily_expected_hours: Number(e.target.value) })}
+                          style={{
+                            width: '100%',
+                            padding: '7px 10px',
+                            borderRadius: '8px',
+                            border: '1.5px solid #818CF8',
+                            fontSize: '13px',
+                            fontWeight: 800,
+                            color: '#4338CA',
+                            backgroundColor: '#EEF2FF',
+                          }}
+                        />
+                        <span style={{ position: 'absolute', right: '10px', top: '8px', fontSize: '11px', fontWeight: 700, color: '#6366F1' }}>
+                          hrs
+                        </span>
+                      </div>
+                    </div>
+
+                    <div>
+                      <label style={{ display: 'block', fontSize: '11px', fontWeight: 600, color: '#475569', marginBottom: '4px' }}>
+                        Grace Period (Mins)
+                      </label>
+                      <input
+                        type="number"
+                        min="0"
+                        max="60"
+                        value={scheduleForm.grace_period_mins}
+                        onChange={(e) => setScheduleForm({ ...scheduleForm, grace_period_mins: Number(e.target.value) })}
+                        style={{
+                          width: '100%',
+                          padding: '7px 10px',
+                          borderRadius: '8px',
+                          border: '1.5px solid #CBD5E1',
+                          fontSize: '13px',
+                          fontWeight: 600,
+                          color: '#0F172A',
+                          backgroundColor: '#FFFFFF',
+                        }}
+                      />
+                    </div>
+                  </div>
+
+                  {/* Day-to-Day Custom Hours for this Employee */}
+                  <div style={{ marginTop: '16px', paddingTop: '14px', borderTop: '1px dashed #E2E8F0' }}>
+                    <label
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '8px',
+                        cursor: 'pointer',
+                        fontSize: '12px',
+                        fontWeight: 700,
+                        color: '#1E1B4B',
+                      }}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={enableEmpCustomDays}
+                        onChange={(e) => setEnableEmpCustomDays(e.target.checked)}
+                        style={{ width: '16px', height: '16px', accentColor: '#4F46E5', cursor: 'pointer' }}
+                      />
+                      <span>✨ Set different hours for specific days for {employee.name} (e.g. 7 hours on Saturday)</span>
+                    </label>
+
+                    {enableEmpCustomDays && (
+                      <div style={{ marginTop: '12px', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '10px' }}>
+                        {ALL_DAYS.filter((d) => (policy?.work_days || ['SUNDAY', 'MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'SATURDAY']).includes(d.key)).map((d) => {
+                          const daySchedule = empCustomDaySchedules[d.key]
+                          const dayStartTime = daySchedule?.startTime || scheduleForm.shift_start_time
+                          const dayEndTime = daySchedule?.endTime || scheduleForm.shift_end_time
+                          const currentHours =
+                            empCustomDayHours[d.key] !== undefined && empCustomDayHours[d.key] !== null
+                              ? empCustomDayHours[d.key]
+                              : scheduleForm.daily_expected_hours
+
+                          const isCustom = Boolean(
+                            (empCustomDayHours[d.key] !== undefined && empCustomDayHours[d.key] !== scheduleForm.daily_expected_hours) ||
+                            (daySchedule && (daySchedule.startTime !== scheduleForm.shift_start_time || daySchedule.endTime !== scheduleForm.shift_end_time))
+                          )
+
+                          return (
+                            <div
+                              key={d.key}
+                              style={{
+                                padding: '12px 14px',
+                                borderRadius: '10px',
+                                backgroundColor: isCustom ? '#EEF2FF' : '#F8FAFC',
+                                border: `1.5px solid ${isCustom ? '#6366F1' : '#E2E8F0'}`,
+                                display: 'flex',
+                                flexDirection: 'column',
+                                gap: '8px',
+                                transition: 'all 0.15s ease',
+                              }}
+                            >
+                              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                                <span style={{ fontSize: '13px', fontWeight: 700, color: '#0F172A' }}>
+                                  {d.label}
+                                </span>
+                                {isCustom ? (
+                                  <span style={{ fontSize: '10px', backgroundColor: '#4F46E5', color: '#FFFFFF', fontWeight: 700, padding: '2px 7px', borderRadius: '999px' }}>
+                                    {currentHours}h Shift
+                                  </span>
+                                ) : (
+                                  <span style={{ fontSize: '11px', color: '#64748B', fontWeight: 500 }}>
+                                    Standard ({scheduleForm.daily_expected_hours}h)
+                                  </span>
+                                )}
+                              </div>
+
+                              <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1.2fr 1fr', gap: '8px', alignItems: 'center' }}>
+                                <div>
+                                  <label style={{ display: 'block', fontSize: '10px', fontWeight: 600, color: '#64748B', marginBottom: '3px' }}>
+                                    Start
+                                  </label>
+                                  <input
+                                    type="time"
+                                    value={dayStartTime}
+                                    onChange={(e) => handleEmpDayTimingChange(d.key, 'start', e.target.value)}
+                                    style={{
+                                      width: '100%',
+                                      padding: '5px 8px',
+                                      borderRadius: '6px',
+                                      border: '1px solid #CBD5E1',
+                                      fontSize: '12px',
+                                      backgroundColor: '#FFFFFF',
+                                    }}
+                                  />
+                                </div>
+
+                                <div>
+                                  <label style={{ display: 'block', fontSize: '10px', fontWeight: 600, color: '#64748B', marginBottom: '3px' }}>
+                                    End
+                                  </label>
+                                  <input
+                                    type="time"
+                                    value={dayEndTime}
+                                    onChange={(e) => handleEmpDayTimingChange(d.key, 'end', e.target.value)}
+                                    style={{
+                                      width: '100%',
+                                      padding: '5px 8px',
+                                      borderRadius: '6px',
+                                      border: '1px solid #CBD5E1',
+                                      fontSize: '12px',
+                                      backgroundColor: '#FFFFFF',
+                                    }}
+                                  />
+                                </div>
+
+                                <div>
+                                  <label style={{ display: 'block', fontSize: '10px', fontWeight: 600, color: '#64748B', marginBottom: '3px' }}>
+                                    Hours
+                                  </label>
+                                  <input
+                                    type="number"
+                                    step="0.5"
+                                    min="1"
+                                    max="24"
+                                    value={currentHours}
+                                    onChange={(e) => handleEmpDayHoursChange(d.key, parseFloat(e.target.value) || 0)}
+                                    style={{
+                                      width: '100%',
+                                      padding: '5px 6px',
+                                      borderRadius: '6px',
+                                      border: `1.5px solid ${isCustom ? '#4F46E5' : '#CBD5E1'}`,
+                                      fontSize: '12px',
+                                      fontWeight: 800,
+                                      textAlign: 'center',
+                                      backgroundColor: isCustom ? '#FFFFFF' : '#FFFFFF',
+                                      color: isCustom ? '#4338CA' : '#0F172A',
+                                    }}
+                                  />
+                                </div>
+                              </div>
+                            </div>
+                          )
+                        })}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '16px' }}>
+                <button
+                  type="button"
+                  onClick={() => setIsEditingSchedule(false)}
+                  className="btn btn-outline"
+                  style={{ padding: '8px 14px', fontSize: '12px', fontWeight: 600 }}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={handleSaveSchedule}
+                  disabled={isSavingSchedule || scheduleSaveSuccess}
+                  className="btn btn-primary"
+                  style={{
+                    padding: '8px 20px',
+                    fontSize: '13px',
+                    fontWeight: 700,
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '6px',
+                    backgroundColor: '#4F46E5',
+                    boxShadow: '0 4px 12px rgba(79, 70, 229, 0.25)',
+                  }}
+                >
+                  {isSavingSchedule ? 'Saving...' : scheduleSaveSuccess ? '✓ Schedule Saved!' : 'Save Shift Schedule'}
+                </button>
+              </div>
+            </div>
+          )}
 
           {/* Today's Verification Evidence (if punched) */}
           {todayLog && (
@@ -513,205 +1417,145 @@ export default function EmployeeAttendanceDetailModal({
               }}
             >
               <h3 style={{ fontSize: '14px', fontWeight: 700, color: '#0F172A', margin: '0 0 12px 0' }}>
-                Today's Verification & GPS Snapshot
+                Today's Verification &amp; GPS Snapshot
               </h3>
 
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '16px' }}>
-                {/* Punch In Proof */}
+                {/* Punch In Details */}
                 {todayLog.punch_in_at && (
-                  <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
-                    {todayLog.punch_in_selfie_url ? (
-                      <div
-                        onClick={() =>
-                          setSelectedSelfie({
-                            url: todayLog.punch_in_selfie_url!,
-                            title: `${employee.name} • Punch In Snapshot (${todayLog.date})`,
-                          })
-                        }
-                        style={{
-                          position: 'relative',
-                          width: '64px',
-                          height: '64px',
-                          borderRadius: '10px',
-                          overflow: 'hidden',
-                          border: '2px solid #CBD5E1',
-                          cursor: 'pointer',
-                          flexShrink: 0,
-                          boxShadow: '0 2px 4px rgba(0,0,0,0.08)',
-                        }}
-                        title="Click to view enlarged snapshot"
-                      >
-                        <img
-                          src={todayLog.punch_in_selfie_url}
-                          alt="Punch in selfie"
-                          style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-                        />
-                        <div
-                          style={{
-                            position: 'absolute',
-                            bottom: 0,
-                            left: 0,
-                            right: 0,
-                            backgroundColor: 'rgba(15, 23, 42, 0.75)',
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            padding: '2px 0',
-                            color: '#FFFFFF',
-                            fontSize: '9px',
-                            fontWeight: 700,
-                          }}
-                        >
-                          <Maximize2 size={9} style={{ marginRight: 2 }} /> Zoom
-                        </div>
-                      </div>
-                    ) : (
-                      <div
-                        style={{
-                          width: '64px',
-                          height: '64px',
-                          borderRadius: '10px',
-                          background: '#F1F5F9',
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          color: '#94A3B8',
-                          flexShrink: 0,
-                        }}
-                      >
-                        <Camera size={24} />
-                      </div>
-                    )}
-                    <div>
-                      <div style={{ fontSize: '13px', fontWeight: 600, color: '#0F172A' }}>
+                  <div
+                    style={{
+                      padding: '14px',
+                      borderRadius: '10px',
+                      backgroundColor: '#F8FAFC',
+                      border: '1px solid #E2E8F0',
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' }}>
+                      <div style={{ fontSize: '13px', fontWeight: 700, color: '#0F172A' }}>
                         Punch In at{' '}
                         {new Date(todayLog.punch_in_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                       </div>
-                      <div style={{ fontSize: '12px', color: '#64748B' }}>
-                        📍 {formatDistance(todayLog.punch_in_distance_m || 0)} from Jeddah HQ
-                      </div>
-                      {todayLog.punch_in_reason && (
-                        <div style={{ fontSize: '12px', color: '#D97706', marginTop: '2px' }}>
-                          Reason: {todayLog.punch_in_reason}
-                        </div>
-                      )}
-                      {todayLog.punch_in_lat && todayLog.punch_in_lng && (
-                        <a
-                          href={getGoogleMapsUrl(todayLog.punch_in_lat, todayLog.punch_in_lng)}
-                          target="_blank"
-                          rel="noreferrer"
-                          style={{
-                            fontSize: '11px',
-                            color: '#2563EB',
-                            display: 'inline-flex',
-                            alignItems: 'center',
-                            gap: '3px',
-                            marginTop: '2px',
-                          }}
-                        >
-                          View Map <ExternalLink size={10} />
-                        </a>
-                      )}
+                      <span
+                        style={{
+                          fontSize: '10px',
+                          fontWeight: 700,
+                          padding: '1px 6px',
+                          borderRadius: '4px',
+                          backgroundColor: todayLog.punch_in_status === 'APPROVED' ? '#DCFCE7' : todayLog.punch_in_status === 'FLAGGED' ? '#FEE2E2' : '#FEF3C7',
+                          color: todayLog.punch_in_status === 'APPROVED' ? '#15803D' : todayLog.punch_in_status === 'FLAGGED' ? '#DC2626' : '#B45309',
+                        }}
+                      >
+                        {todayLog.punch_in_status || 'PENDING'}
+                      </span>
                     </div>
+
+                    <div style={{ fontSize: '12px', color: '#64748B' }}>
+                      📍 {formatDistance(todayLog.punch_in_distance_m || 0)} from Jeddah HQ
+                    </div>
+                    {todayLog.punch_in_reason && (
+                      <div style={{ fontSize: '12px', color: '#D97706', marginTop: '3px' }}>
+                        Reason: {todayLog.punch_in_reason}
+                      </div>
+                    )}
+                    {todayLog.punch_in_device_info && (
+                      <div style={{ fontSize: '11px', color: '#475569', marginTop: '4px' }}>
+                        💻 {todayLog.punch_in_device_info.deviceName || todayLog.punch_in_device_info.os} · {todayLog.punch_in_device_info.browser}
+                      </div>
+                    )}
+                    {todayLog.punch_in_ip && (
+                      <div style={{ fontSize: '11px', color: '#7C3AED', marginTop: '2px' }}>
+                        🌐 IP: {todayLog.punch_in_ip}
+                      </div>
+                    )}
+                    {todayLog.punch_in_lat && todayLog.punch_in_lng && (
+                      <a
+                        href={getGoogleMapsUrl(todayLog.punch_in_lat, todayLog.punch_in_lng)}
+                        target="_blank"
+                        rel="noreferrer"
+                        style={{
+                          fontSize: '11px',
+                          color: '#2563EB',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '3px',
+                          marginTop: '4px',
+                          textDecoration: 'none',
+                          fontWeight: 600,
+                        }}
+                      >
+                        View Map <ExternalLink size={10} />
+                      </a>
+                    )}
                   </div>
                 )}
 
-                {/* Punch Out Proof */}
+                {/* Punch Out Details */}
                 {todayLog.punch_out_at && (
-                  <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
-                    {todayLog.punch_out_selfie_url ? (
-                      <div
-                        onClick={() =>
-                          setSelectedSelfie({
-                            url: todayLog.punch_out_selfie_url!,
-                            title: `${employee.name} • Punch Out Snapshot (${todayLog.date})`,
-                          })
-                        }
-                        style={{
-                          position: 'relative',
-                          width: '64px',
-                          height: '64px',
-                          borderRadius: '10px',
-                          overflow: 'hidden',
-                          border: '2px solid #CBD5E1',
-                          cursor: 'pointer',
-                          flexShrink: 0,
-                          boxShadow: '0 2px 4px rgba(0,0,0,0.08)',
-                        }}
-                        title="Click to view enlarged snapshot"
-                      >
-                        <img
-                          src={todayLog.punch_out_selfie_url}
-                          alt="Punch out selfie"
-                          style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-                        />
-                        <div
-                          style={{
-                            position: 'absolute',
-                            bottom: 0,
-                            left: 0,
-                            right: 0,
-                            backgroundColor: 'rgba(15, 23, 42, 0.75)',
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            padding: '2px 0',
-                            color: '#FFFFFF',
-                            fontSize: '9px',
-                            fontWeight: 700,
-                          }}
-                        >
-                          <Maximize2 size={9} style={{ marginRight: 2 }} /> Zoom
-                        </div>
-                      </div>
-                    ) : (
-                      <div
-                        style={{
-                          width: '64px',
-                          height: '64px',
-                          borderRadius: '10px',
-                          background: '#F1F5F9',
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          color: '#94A3B8',
-                          flexShrink: 0,
-                        }}
-                      >
-                        <Camera size={24} />
-                      </div>
-                    )}
-                    <div>
-                      <div style={{ fontSize: '13px', fontWeight: 600, color: '#0F172A' }}>
+                  <div
+                    style={{
+                      padding: '14px',
+                      borderRadius: '10px',
+                      backgroundColor: '#F8FAFC',
+                      border: '1px solid #E2E8F0',
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' }}>
+                      <div style={{ fontSize: '13px', fontWeight: 700, color: '#0F172A' }}>
                         Punch Out at{' '}
                         {new Date(todayLog.punch_out_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                       </div>
-                      <div style={{ fontSize: '12px', color: '#64748B' }}>
-                        📍 {formatDistance(todayLog.punch_out_distance_m || 0)} from Jeddah HQ
-                      </div>
-                      {todayLog.punch_out_reason && (
-                        <div style={{ fontSize: '12px', color: '#D97706', marginTop: '2px' }}>
-                          Reason: {todayLog.punch_out_reason}
-                        </div>
-                      )}
-                      {todayLog.punch_out_lat && todayLog.punch_out_lng && (
-                        <a
-                          href={getGoogleMapsUrl(todayLog.punch_out_lat, todayLog.punch_out_lng)}
-                          target="_blank"
-                          rel="noreferrer"
-                          style={{
-                            fontSize: '11px',
-                            color: '#2563EB',
-                            display: 'inline-flex',
-                            alignItems: 'center',
-                            gap: '3px',
-                            marginTop: '2px',
-                          }}
-                        >
-                          View Map <ExternalLink size={10} />
-                        </a>
-                      )}
+                      <span
+                        style={{
+                          fontSize: '10px',
+                          fontWeight: 700,
+                          padding: '1px 6px',
+                          borderRadius: '4px',
+                          backgroundColor: todayLog.punch_out_status === 'APPROVED' ? '#DCFCE7' : todayLog.punch_out_status === 'FLAGGED' ? '#FEE2E2' : '#FEF3C7',
+                          color: todayLog.punch_out_status === 'APPROVED' ? '#15803D' : todayLog.punch_out_status === 'FLAGGED' ? '#DC2626' : '#B45309',
+                        }}
+                      >
+                        {todayLog.punch_out_status || 'PENDING'}
+                      </span>
                     </div>
+
+                    <div style={{ fontSize: '12px', color: '#64748B' }}>
+                      📍 {formatDistance(todayLog.punch_out_distance_m || 0)} from Jeddah HQ
+                    </div>
+                    {todayLog.punch_out_reason && (
+                      <div style={{ fontSize: '12px', color: '#D97706', marginTop: '3px' }}>
+                        Reason: {todayLog.punch_out_reason}
+                      </div>
+                    )}
+                    {todayLog.punch_out_device_info && (
+                      <div style={{ fontSize: '11px', color: '#475569', marginTop: '4px' }}>
+                        💻 {todayLog.punch_out_device_info.deviceName || todayLog.punch_out_device_info.os} · {todayLog.punch_out_device_info.browser}
+                      </div>
+                    )}
+                    {todayLog.punch_out_ip && (
+                      <div style={{ fontSize: '11px', color: '#7C3AED', marginTop: '2px' }}>
+                        🌐 IP: {todayLog.punch_out_ip}
+                      </div>
+                    )}
+                    {todayLog.punch_out_lat && todayLog.punch_out_lng && (
+                      <a
+                        href={getGoogleMapsUrl(todayLog.punch_out_lat, todayLog.punch_out_lng)}
+                        target="_blank"
+                        rel="noreferrer"
+                        style={{
+                          fontSize: '11px',
+                          color: '#2563EB',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '3px',
+                          marginTop: '4px',
+                          textDecoration: 'none',
+                          fontWeight: 600,
+                        }}
+                      >
+                        View Map <ExternalLink size={10} />
+                      </a>
+                    )}
                   </div>
                 )}
               </div>
@@ -756,7 +1600,15 @@ export default function EmployeeAttendanceDetailModal({
                   </tr>
                 </thead>
                 <tbody>
-                  {history.length === 0 ? (
+                  {loading && history.length === 0 ? (
+                    <tr>
+                      <td colSpan={6} style={{ textAlign: 'center', padding: '36px', color: '#6366F1' }}>
+                        <div style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', fontSize: '13px', fontWeight: 600 }}>
+                          <Loader2 size={18} className="animate-spin" /> Loading attendance timesheets...
+                        </div>
+                      </td>
+                    </tr>
+                  ) : history.length === 0 ? (
                     <tr>
                       <td colSpan={6} style={{ textAlign: 'center', padding: '30px', color: '#94A3B8' }}>
                         No historical attendance records logged yet for this employee.
@@ -843,60 +1695,6 @@ export default function EmployeeAttendanceDetailModal({
                               >
                                 <Edit3 size={12} /> Adjust
                               </button>
-                              {log.punch_in_selfie_url && (
-                                <button
-                                  type="button"
-                                  onClick={() =>
-                                    setSelectedSelfie({
-                                      url: log.punch_in_selfie_url!,
-                                      title: `${employee.name} • Punch In (${log.date} ${inTime})`,
-                                    })
-                                  }
-                                  style={{
-                                    border: '1px solid #BFDBFE',
-                                    background: '#EFF6FF',
-                                    color: '#2563EB',
-                                    padding: '4px 8px',
-                                    borderRadius: '6px',
-                                    cursor: 'pointer',
-                                    fontSize: '11px',
-                                    fontWeight: 600,
-                                    display: 'inline-flex',
-                                    alignItems: 'center',
-                                    gap: '3px',
-                                  }}
-                                  title="View Punch In selfie snapshot"
-                                >
-                                  <Camera size={12} /> In Selfie
-                                </button>
-                              )}
-                              {log.punch_out_selfie_url && (
-                                <button
-                                  type="button"
-                                  onClick={() =>
-                                    setSelectedSelfie({
-                                      url: log.punch_out_selfie_url!,
-                                      title: `${employee.name} • Punch Out (${log.date} ${outTime})`,
-                                    })
-                                  }
-                                  style={{
-                                    border: '1px solid #FDE68A',
-                                    background: '#FFFBEB',
-                                    color: '#D97706',
-                                    padding: '4px 8px',
-                                    borderRadius: '6px',
-                                    cursor: 'pointer',
-                                    fontSize: '11px',
-                                    fontWeight: 600,
-                                    display: 'inline-flex',
-                                    alignItems: 'center',
-                                    gap: '3px',
-                                  }}
-                                  title="View Punch Out selfie snapshot"
-                                >
-                                  <Camera size={12} /> Out Selfie
-                                </button>
-                              )}
                             </div>
                           </td>
                         </tr>
@@ -1046,151 +1844,33 @@ export default function EmployeeAttendanceDetailModal({
         }}
       />
 
-      {/* Selfie Preview Lightbox Modal Mounted via Portal to document.body */}
-      {selectedSelfie && typeof document !== 'undefined' && createPortal(
-        <div
-          style={{
-            position: 'fixed',
-            inset: 0,
-            top: 0,
-            left: 0,
-            right: 0,
-            bottom: 0,
-            width: '100vw',
-            height: '100vh',
-            backgroundColor: 'rgba(15, 23, 42, 0.94)',
-            zIndex: 9999999,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            padding: '24px',
-            backdropFilter: 'blur(10px)',
-          }}
-          onClick={() => setSelectedSelfie(null)}
-        >
-          <div
-            style={{
-              maxWidth: '480px',
-              width: '100%',
-              backgroundColor: '#FFFFFF',
-              borderRadius: '16px',
-              overflow: 'hidden',
-              boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.5)',
-              border: '1px solid #E2E8F0',
-              position: 'relative',
-              animation: 'fadeIn 150ms ease',
-            }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div
-              style={{
-                padding: '16px 20px',
-                display: 'flex',
-                justifyContent: 'space-between',
-                alignItems: 'center',
-                borderBottom: '1px solid #E2E8F0',
-                backgroundColor: '#F8FAFC',
-              }}
-            >
-              <div>
-                <h4 style={{ fontSize: '15px', fontWeight: 700, color: '#0F172A', margin: 0 }}>
-                  {selectedSelfie.title}
-                </h4>
-                <p style={{ fontSize: '11px', color: '#64748B', margin: '2px 0 0 0' }}>
-                  Biometric Facial Snapshot Verification
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={() => setSelectedSelfie(null)}
-                style={{
-                  border: 'none',
-                  background: '#E2E8F0',
-                  padding: '6px',
-                  borderRadius: '8px',
-                  cursor: 'pointer',
-                  color: '#475569',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                }}
-                title="Close (Esc)"
-              >
-                <X size={18} />
-              </button>
+      {/* Delete Record In-App Modal */}
+      <ConfirmModal
+        isOpen={deleteConfirmModal.isOpen}
+        variant="danger"
+        title="Delete Shift / Attendance Log"
+        message={
+          deleteConfirmModal.record ? (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              <p style={{ margin: 0, fontSize: '14px', color: '#334155' }}>
+                Are you sure you want to permanently delete the attendance record for{' '}
+                <strong style={{ color: '#0F172A', fontWeight: 700 }}>{employee.name}</strong> on{' '}
+                <strong style={{ color: '#0F172A', fontWeight: 700 }}>{deleteConfirmModal.record.date}</strong>?
+              </p>
+              <p style={{ margin: 0, fontSize: '12px', color: '#64748B' }}>
+                ⚠️ This will permanently remove this shift from monthly hours calculations, deficit audits, and timesheets.
+              </p>
             </div>
-
-            <div
-              style={{
-                width: '100%',
-                maxHeight: '440px',
-                backgroundColor: '#0F172A',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                padding: '12px',
-              }}
-            >
-              <img
-                src={selectedSelfie.url}
-                alt="Verification selfie proof"
-                style={{
-                  maxWidth: '100%',
-                  maxHeight: '420px',
-                  borderRadius: '8px',
-                  objectFit: 'contain',
-                  boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
-                }}
-              />
-            </div>
-
-            <div
-              style={{
-                padding: '14px 20px',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                backgroundColor: '#F8FAFC',
-                borderTop: '1px solid #E2E8F0',
-              }}
-            >
-              <span
-                style={{
-                  fontSize: '12px',
-                  fontWeight: 600,
-                  color: '#15803D',
-                  backgroundColor: '#DCFCE7',
-                  padding: '4px 12px',
-                  borderRadius: '999px',
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: '4px',
-                }}
-              >
-                <ShieldCheck size={14} /> GPS &amp; Facial Identity Logged
-              </span>
-
-              <a
-                href={selectedSelfie.url}
-                target="_blank"
-                rel="noreferrer"
-                style={{
-                  fontSize: '12px',
-                  color: '#2563EB',
-                  textDecoration: 'none',
-                  fontWeight: 600,
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: '4px',
-                }}
-              >
-                Full Resolution <ExternalLink size={12} />
-              </a>
-            </div>
-          </div>
-        </div>,
-        document.body
-      )}
+          ) : (
+            'Are you sure you want to permanently delete this record?'
+          )
+        }
+        confirmLabel="Yes, Delete Permanently"
+        cancelLabel="Cancel"
+        loading={isDeletingRecord}
+        onConfirm={handleConfirmDeleteLog}
+        onCancel={() => setDeleteConfirmModal({ isOpen: false, record: null })}
+      />
     </div>
   )
 

@@ -4,13 +4,18 @@ import { useState, useEffect } from 'react'
 import {
   X,
   MapPin,
-  Camera,
   CheckCircle2,
   AlertTriangle,
   ExternalLink,
   Loader2,
   User,
   ShieldCheck,
+  Monitor,
+  Smartphone,
+  Globe,
+  Server,
+  Wifi,
+  Edit3,
 } from 'lucide-react'
 import { AttendanceLog } from '@/types/attendance'
 import { formatDistance, getGoogleMapsUrl } from '@/lib/geoUtils'
@@ -23,6 +28,7 @@ interface ExceptionReviewModalProps {
   punchType: 'IN' | 'OUT'
   adminId: string
   onReviewed: () => void
+  onOpenAdjustHours?: (log: AttendanceLog) => void
 }
 
 export default function ExceptionReviewModal({
@@ -32,6 +38,7 @@ export default function ExceptionReviewModal({
   punchType,
   adminId,
   onReviewed,
+  onOpenAdjustHours,
 }: ExceptionReviewModalProps) {
   const [activePunchType, setActivePunchType] = useState<'IN' | 'OUT'>(punchType)
   const [adminNotes, setAdminNotes] = useState('')
@@ -60,6 +67,9 @@ export default function ExceptionReviewModal({
   const accuracy = isPunchIn ? log.punch_in_accuracy : log.punch_out_accuracy
   const time = isPunchIn ? log.punch_in_at : log.punch_out_at
   const matchScore = isPunchIn ? log.punch_in_face_match_score : log.punch_out_face_match_score
+  const deviceInfo = isPunchIn ? log.punch_in_device_info : log.punch_out_device_info
+  const networkInfo = isPunchIn ? log.punch_in_network_info : log.punch_out_network_info
+  const ipAddress = isPunchIn ? log.punch_in_ip : log.punch_out_ip
 
   async function handleAction(action: 'APPROVED' | 'FLAGGED') {
     if (!log) return
@@ -279,24 +289,6 @@ export default function ExceptionReviewModal({
               <div style={{ fontSize: '11px', color: '#64748B', marginTop: '2px' }}>
                 {log.employee_role || 'AGENT'}
               </div>
-              {matchScore !== undefined && matchScore !== null && (
-                <div
-                  style={{
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: '4px',
-                    fontSize: '11px',
-                    fontWeight: 700,
-                    color: '#16A34A',
-                    backgroundColor: '#DCFCE7',
-                    padding: '2px 6px',
-                    borderRadius: '4px',
-                    marginTop: '6px',
-                  }}
-                >
-                  <ShieldCheck size={12} /> Face Match: {matchScore}%
-                </div>
-              )}
             </div>
 
             <div
@@ -361,30 +353,27 @@ export default function ExceptionReviewModal({
             </div>
           </div>
 
-          {/* Selfie Snapshot */}
-          <div style={{ marginBottom: '16px' }}>
+          {/* Device & Network Telemetry */}
+          <div
+            style={{
+              padding: '14px',
+              borderRadius: '10px',
+              backgroundColor: '#F8FAFC',
+              border: '1px solid #E2E8F0',
+              marginBottom: '16px',
+            }}
+          >
             <div
               style={{
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'space-between',
-                marginBottom: '8px',
+                marginBottom: '10px',
               }}
             >
-              <div
-                style={{
-                  fontSize: '11px',
-                  fontWeight: 600,
-                  color: '#64748B',
-                  textTransform: 'uppercase',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '6px',
-                }}
-              >
-                <Camera size={14} /> Biometric Selfie Snapshot
+              <div style={{ fontSize: '11px', color: '#64748B', textTransform: 'uppercase', fontWeight: 700 }}>
+                Device &amp; Network Telemetry
               </div>
-
               {lat && lng && (
                 <a
                   href={getGoogleMapsUrl(lat, lng)}
@@ -397,37 +386,64 @@ export default function ExceptionReviewModal({
                     display: 'inline-flex',
                     alignItems: 'center',
                     gap: '4px',
+                    fontWeight: 600,
                   }}
                 >
-                  Inspect on Map <ExternalLink size={11} />
+                  Inspect GPS on Map <ExternalLink size={11} />
                 </a>
               )}
             </div>
 
-            <div
-              style={{
-                width: '100%',
-                maxHeight: '220px',
-                borderRadius: '10px',
-                overflow: 'hidden',
-                backgroundColor: '#F1F5F9',
-                border: '1px solid #CBD5E1',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-              }}
-            >
-              {selfieUrl ? (
-                <img
-                  src={selfieUrl}
-                  alt="Selfie evidence"
-                  style={{ width: '100%', maxHeight: '220px', objectFit: 'contain' }}
-                />
-              ) : (
-                <div style={{ padding: '30px', color: '#94A3B8', fontSize: '12px' }}>
-                  No selfie snapshot recorded for this punch.
-                </div>
-              )}
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+              <div
+                style={{
+                  backgroundColor: '#FFFFFF',
+                  padding: '8px 10px',
+                  borderRadius: '6px',
+                  border: '1px solid #E2E8F0',
+                  fontSize: '11.5px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                }}
+              >
+                <Monitor size={14} color="#2563EB" />
+                <span style={{ color: '#0F172A', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {deviceInfo?.deviceName || deviceInfo?.os || 'Desktop OS'} ({deviceInfo?.browser || 'Browser'})
+                </span>
+              </div>
+
+              <div
+                style={{
+                  backgroundColor: '#FFFFFF',
+                  padding: '8px 10px',
+                  borderRadius: '6px',
+                  border: '1px solid #E2E8F0',
+                  fontSize: '11.5px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                }}
+              >
+                <Server size={14} color="#7C3AED" />
+                <span style={{ color: '#0F172A', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  IP: {ipAddress || networkInfo?.ip || 'N/A'}
+                </span>
+              </div>
+
+              <div
+                style={{
+                  backgroundColor: '#FFFFFF',
+                  padding: '8px 10px',
+                  borderRadius: '6px',
+                  border: '1px solid #E2E8F0',
+                  fontSize: '11px',
+                  color: '#64748B',
+                  gridColumn: 'span 2',
+                }}
+              >
+                Network: <strong>{networkInfo?.effectiveType || 'Broadband'}</strong> · Latency: <strong>{networkInfo?.rttMs || '<50ms'}</strong> · Cores: <strong>{deviceInfo?.hardwareConcurrency || 'N/A'}</strong> · RAM: <strong>{deviceInfo?.deviceMemoryGb || 'N/A'}</strong>
+              </div>
             </div>
           </div>
 
@@ -473,22 +489,49 @@ export default function ExceptionReviewModal({
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'space-between',
+            flexWrap: 'wrap',
+            gap: '10px',
           }}
         >
           <button
             onClick={onClose}
             className="btn btn-outline"
-            style={{ padding: '8px 16px', fontSize: '13px' }}
+            style={{ padding: '8px 14px', fontSize: '13px' }}
           >
             Close
           </button>
 
-          <div style={{ display: 'flex', gap: '10px' }}>
+          <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+            {onOpenAdjustHours && (
+              <button
+                type="button"
+                onClick={() => {
+                  onOpenAdjustHours(log)
+                  onClose()
+                }}
+                className="btn btn-outline"
+                style={{
+                  padding: '8px 14px',
+                  fontSize: '13px',
+                  fontWeight: 600,
+                  backgroundColor: '#FFFFFF',
+                  borderColor: '#93C5FD',
+                  color: '#1E40AF',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                }}
+                title="Adjust punch times and granted work hours"
+              >
+                <Edit3 size={15} /> Adjust Work Hours
+              </button>
+            )}
+
             <button
               onClick={() => handleAction('FLAGGED')}
               disabled={isProcessing}
               style={{
-                padding: '8px 16px',
+                padding: '8px 14px',
                 borderRadius: '8px',
                 backgroundColor: '#FEF2F2',
                 color: '#DC2626',
@@ -509,7 +552,7 @@ export default function ExceptionReviewModal({
               disabled={isProcessing}
               className="btn btn-primary"
               style={{
-                padding: '8px 20px',
+                padding: '8px 18px',
                 fontSize: '13px',
                 fontWeight: 600,
                 backgroundColor: '#16A34A',

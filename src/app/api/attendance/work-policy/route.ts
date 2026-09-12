@@ -17,6 +17,15 @@ export async function GET() {
 
     let policyObj = data ? { ...data } : null
     if (policyObj) {
+      policyObj.exempt_employee_ids =
+        policyObj.custom_day_hours?._exempt_ids || policyObj.exempt_employee_ids || []
+      policyObj.custom_employee_schedules =
+        policyObj.custom_day_hours?._employee_schedules || policyObj.custom_employee_schedules || {}
+      policyObj.custom_day_schedules =
+        policyObj.custom_day_hours?._schedules || policyObj.custom_day_schedules || {}
+      policyObj.tracking_start_date =
+        policyObj.custom_day_hours?._tracking_start_date || policyObj.tracking_start_date || null
+
       try {
         const { data: holidaysData } = await serviceClient
           .from('company_holidays')
@@ -75,9 +84,28 @@ export async function POST(req: Request) {
       .maybeSingle()
 
     const holidays = body.official_holidays || body.custom_day_hours?._holidays
+    const exemptIds = body.exempt_employee_ids || body.custom_day_hours?._exempt_ids
+    const empSchedules = body.custom_employee_schedules || body.custom_day_hours?._employee_schedules
+    const daySchedules = body.custom_day_schedules || body.custom_day_hours?._schedules
+    const trackingStartDate = body.tracking_start_date !== undefined ? body.tracking_start_date : (body.custom_day_hours?._tracking_start_date || null)
     const customDayHours = body.custom_day_hours || {}
+
     if (holidays && Array.isArray(holidays)) {
       customDayHours['_holidays'] = holidays
+    }
+    if (exemptIds && Array.isArray(exemptIds)) {
+      customDayHours['_exempt_ids'] = exemptIds
+    }
+    if (empSchedules && typeof empSchedules === 'object') {
+      customDayHours['_employee_schedules'] = empSchedules
+    }
+    if (daySchedules && typeof daySchedules === 'object') {
+      customDayHours['_schedules'] = daySchedules
+    }
+    if (trackingStartDate) {
+      customDayHours['_tracking_start_date'] = trackingStartDate
+    } else {
+      delete customDayHours['_tracking_start_date']
     }
 
     const payload = {
@@ -138,6 +166,9 @@ export async function POST(req: Request) {
 
     const returnObj = {
       ...savedData,
+      exempt_employee_ids: exemptIds || savedData?.custom_day_hours?._exempt_ids || [],
+      custom_employee_schedules: empSchedules || savedData?.custom_day_hours?._employee_schedules || {},
+      custom_day_schedules: daySchedules || savedData?.custom_day_hours?._schedules || {},
       official_holidays: holidays || savedData?.custom_day_hours?._holidays || [],
     }
 

@@ -11,9 +11,11 @@ import {
   Loader2,
   Sliders,
   Briefcase,
-  Sparkles,
   Plus,
   Trash2,
+  Rocket,
+  Zap,
+  RotateCcw,
 } from 'lucide-react'
 import { CompanyWorkPolicy, CompanyHoliday } from '@/types/attendance'
 import { saveCompanyWorkPolicy, fetchOfficialHolidays, DEFAULT_OFFICIAL_HOLIDAYS } from '@/lib/attendanceService'
@@ -50,6 +52,9 @@ export default function WorkPolicyModal({
   const [graceMins, setGraceMins] = useState<number>(currentPolicy.grace_period_mins ?? 15)
   const [annualQuota, setAnnualQuota] = useState<number>(currentPolicy.default_annual_leave_quota || 21)
   const [sickQuota, setSickQuota] = useState<number>(currentPolicy.default_sick_leave_quota || 30)
+  const [trackingStartDate, setTrackingStartDate] = useState<string>(
+    currentPolicy.tracking_start_date || ''
+  )
 
   // Custom per-day hours & shift timings
   const [customDayHours, setCustomDayHours] = useState<Record<string, number>>({})
@@ -76,6 +81,7 @@ export default function WorkPolicyModal({
       setGraceMins(currentPolicy.grace_period_mins ?? 15)
       setAnnualQuota(currentPolicy.default_annual_leave_quota || 21)
       setSickQuota(currentPolicy.default_sick_leave_quota || 30)
+      setTrackingStartDate(currentPolicy.tracking_start_date || '')
 
       // Clean custom day hours (filter out internal properties)
       const cleanCustomHours: Record<string, number> = {}
@@ -208,6 +214,15 @@ export default function WorkPolicyModal({
     })
   }
 
+  function handleMainPolicyTimingChange(field: 'start' | 'end', val: string) {
+    const newStart = field === 'start' ? val : shiftStart
+    const newEnd = field === 'end' ? val : shiftEnd
+    const autoHours = computeHours(newStart, newEnd)
+    if (field === 'start') setShiftStart(val)
+    if (field === 'end') setShiftEnd(val)
+    setDailyHours(autoHours)
+  }
+
   // Calculate live weekly total expected hours
   const totalWeeklyHours = workDays.reduce((sum, d) => {
     const h =
@@ -233,6 +248,8 @@ export default function WorkPolicyModal({
         custom_day_hours: customPayload,
         custom_day_schedules: customSchedulesPayload,
         official_holidays: officialHolidays,
+        exempt_employee_ids: currentPolicy.exempt_employee_ids || [],
+        tracking_start_date: trackingStartDate.trim() || null,
       })
       onUpdated(updated)
       setSavedSuccess(true)
@@ -247,6 +264,16 @@ export default function WorkPolicyModal({
     }
   }
 
+  function getTomorrowDateStr() {
+    const d = new Date()
+    d.setDate(d.getDate() + 1)
+    return d.toISOString().split('T')[0]
+  }
+
+  function getTodayDateStr() {
+    return new Date().toISOString().split('T')[0]
+  }
+
   if (typeof document === 'undefined') return null
 
   return createPortal(
@@ -256,6 +283,9 @@ export default function WorkPolicyModal({
         style={{
           width: '100%',
           maxWidth: '580px',
+          maxHeight: '90vh',
+          display: 'flex',
+          flexDirection: 'column',
           backgroundColor: '#FFFFFF',
           borderRadius: '16px',
           border: '1px solid #E2E8F0',
@@ -273,6 +303,7 @@ export default function WorkPolicyModal({
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'space-between',
+            flexShrink: 0,
           }}
         >
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
@@ -316,7 +347,127 @@ export default function WorkPolicyModal({
         </div>
 
         {/* Body */}
-        <div style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: '20px', maxHeight: '76vh', overflowY: 'auto' }}>
+        <div style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: '20px', flex: 1, overflowY: 'auto', minHeight: 0 }}>
+          {/* Tracking Launch / Go-Live Date Card */}
+          <div
+            style={{
+              padding: '16px',
+              backgroundColor: '#F0FDF4',
+              borderRadius: '12px',
+              border: '1px solid #BBF7D0',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <Rocket size={18} style={{ color: '#16A34A' }} />
+                <label style={{ fontSize: '13px', fontWeight: 700, color: '#14532D', margin: 0 }}>
+                  Attendance Tracking Effective Start Date (Go-Live Date)
+                </label>
+              </div>
+              {trackingStartDate && (
+                <span
+                  style={{
+                    fontSize: '11px',
+                    fontWeight: 700,
+                    padding: '2px 8px',
+                    borderRadius: '20px',
+                    backgroundColor: '#DCFCE7',
+                    color: '#15803D',
+                    border: '1px solid #86EFAC',
+                  }}
+                >
+                  Active from: {trackingStartDate}
+                </span>
+              )}
+            </div>
+
+            <p style={{ fontSize: '11px', color: '#166534', margin: '0 0 12px 0', lineHeight: 1.4 }}>
+              Working hours, deficit audit, late penalties, and pay deductions will strictly begin calculating from this date onwards. Days prior to this start date will have <strong>0h expected, 0h deficit, and 100% adherence</strong> without requiring any fake backfill!
+            </p>
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+              <input
+                type="date"
+                value={trackingStartDate}
+                onChange={(e) => setTrackingStartDate(e.target.value)}
+                style={{
+                  padding: '7px 12px',
+                  borderRadius: '8px',
+                  border: '1px solid #86EFAC',
+                  backgroundColor: '#FFFFFF',
+                  color: '#0F172A',
+                  fontSize: '13px',
+                  fontWeight: 600,
+                  outline: 'none',
+                }}
+              />
+
+              <button
+                type="button"
+                onClick={() => setTrackingStartDate(getTomorrowDateStr())}
+                style={{
+                  padding: '7px 12px',
+                  borderRadius: '8px',
+                  border: '1px solid #16A34A',
+                  backgroundColor: '#16A34A',
+                  color: '#FFFFFF',
+                  fontSize: '12px',
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '5px',
+                  boxShadow: '0 1px 3px rgba(22, 163, 74, 0.2)',
+                }}
+              >
+                <Rocket size={13} /> Start from Tomorrow ({getTomorrowDateStr()})
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setTrackingStartDate(getTodayDateStr())}
+                style={{
+                  padding: '7px 12px',
+                  borderRadius: '8px',
+                  border: '1px solid #CBD5E1',
+                  backgroundColor: '#FFFFFF',
+                  color: '#15803D',
+                  fontSize: '12px',
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '5px',
+                }}
+              >
+                <Zap size={13} /> Start from Today
+              </button>
+
+              {trackingStartDate && (
+                <button
+                  type="button"
+                  onClick={() => setTrackingStartDate('')}
+                  style={{
+                    padding: '7px 10px',
+                    borderRadius: '8px',
+                    border: '1px solid #E2E8F0',
+                    backgroundColor: '#FFFFFF',
+                    color: '#64748B',
+                    fontSize: '12px',
+                    fontWeight: 500,
+                    cursor: 'pointer',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '4px',
+                  }}
+                  title="Clear start date to track full month"
+                >
+                  <RotateCcw size={12} /> Clear
+                </button>
+              )}
+            </div>
+          </div>
+
           {/* Working Days Checkbox Grid */}
           <div>
             <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: '#334155', marginBottom: '8px' }}>
@@ -391,7 +542,7 @@ export default function WorkPolicyModal({
                 <input
                   type="time"
                   value={shiftStart}
-                  onChange={(e) => setShiftStart(e.target.value)}
+                  onChange={(e) => handleMainPolicyTimingChange('start', e.target.value)}
                   style={{
                     width: '100%',
                     padding: '8px 10px',
@@ -412,7 +563,7 @@ export default function WorkPolicyModal({
                 <input
                   type="time"
                   value={shiftEnd}
-                  onChange={(e) => setShiftEnd(e.target.value)}
+                  onChange={(e) => handleMainPolicyTimingChange('end', e.target.value)}
                   style={{
                     width: '100%',
                     padding: '8px 10px',
@@ -759,7 +910,7 @@ export default function WorkPolicyModal({
             </div>
 
             {/* List of existing holidays */}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', maxHeight: '180px', overflowY: 'auto', marginBottom: '12px', paddingRight: '4px' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '12px' }}>
               {officialHolidays.length === 0 ? (
                 <div style={{ fontSize: '12px', color: '#94A3B8', textAlign: 'center', padding: '12px' }}>
                   No official holidays added yet.
@@ -873,6 +1024,7 @@ export default function WorkPolicyModal({
             alignItems: 'center',
             justifyContent: 'flex-end',
             gap: '10px',
+            flexShrink: 0,
           }}
         >
           <button

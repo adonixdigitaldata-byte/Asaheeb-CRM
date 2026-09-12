@@ -1153,6 +1153,9 @@ create table if not exists public.attendance_logs (
   punch_in_status text default 'APPROVED' check (punch_in_status in ('APPROVED', 'PENDING_REVIEW', 'FLAGGED')),
   punch_in_reason text,
   punch_in_explanation text,
+  punch_in_device_info jsonb,
+  punch_in_network_info jsonb,
+  punch_in_ip text,
   
   -- Punch Out
   punch_out_at timestamptz,
@@ -1164,6 +1167,9 @@ create table if not exists public.attendance_logs (
   punch_out_status text check (punch_out_status in ('APPROVED', 'PENDING_REVIEW', 'FLAGGED')),
   punch_out_reason text,
   punch_out_explanation text,
+  punch_out_device_info jsonb,
+  punch_out_network_info jsonb,
+  punch_out_ip text,
 
   -- Work Time & Review
   total_working_minutes integer default 0,

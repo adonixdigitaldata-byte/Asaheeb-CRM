@@ -10,6 +10,7 @@ import {
   CompanyWorkPolicy,
   MonthlyWorkHoursAudit,
 } from '@/types/attendance'
+import { DeviceSpecs, NetworkSpecs } from '@/lib/deviceTelemetry'
 import { DEFAULT_JEDDAH_HQ } from '@/lib/geoUtils'
 
 const LOCAL_OFFICE_KEY = 'asaheeb_crm_office_location_v1'
@@ -50,7 +51,7 @@ function saveLocalOffice(loc: CompanyLocation) {
   }
 }
 
-function getLocalAttendance(): AttendanceLog[] {
+export function getLocalAttendance(): AttendanceLog[] {
   if (typeof window === 'undefined') return []
   try {
     const raw = localStorage.getItem(LOCAL_ATTENDANCE_KEY)
@@ -61,7 +62,7 @@ function getLocalAttendance(): AttendanceLog[] {
   return []
 }
 
-function saveLocalAttendance(logs: AttendanceLog[]) {
+export function saveLocalAttendance(logs: AttendanceLog[]) {
   if (typeof window === 'undefined') return
   try {
     localStorage.setItem(LOCAL_ATTENDANCE_KEY, JSON.stringify(logs))
@@ -222,15 +223,18 @@ export async function submitPunchIn(params: {
   accuracy?: number
   distanceMeters: number
   isInsideGeofence: boolean
-  selfieUrl: string | null
+  selfieUrl?: string | null
   reason?: string
   explanation?: string
   faceMatchScore?: number
+  deviceInfo?: DeviceSpecs | null
+  networkInfo?: NetworkSpecs | null
+  ipAddress?: string | null
 }): Promise<AttendanceLog> {
   const todayStr = new Date().toISOString().split('T')[0]
   const punchStatus: AttendancePunchStatus = params.isInsideGeofence ? 'APPROVED' : 'PENDING_REVIEW'
 
-  const recordPayload = {
+  const recordPayload: Record<string, any> = {
     user_id: params.userId,
     date: todayStr,
     punch_in_at: new Date().toISOString(),
@@ -238,11 +242,14 @@ export async function submitPunchIn(params: {
     punch_in_lng: params.longitude,
     punch_in_accuracy: params.accuracy || null,
     punch_in_distance_m: params.distanceMeters,
-    punch_in_selfie_url: params.selfieUrl,
+    punch_in_selfie_url: params.selfieUrl || null,
     punch_in_status: punchStatus,
     punch_in_reason: params.reason || null,
     punch_in_explanation: params.explanation || null,
-    punch_in_face_match_score: params.faceMatchScore ?? 95,
+    punch_in_device_info: params.deviceInfo || null,
+    punch_in_network_info: params.networkInfo || null,
+    punch_in_ip: params.ipAddress || null,
+    punch_in_face_match_score: params.faceMatchScore ?? null,
     total_working_minutes: 0,
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
@@ -276,10 +283,13 @@ export async function submitPunchIn(params: {
     punch_out_status: null,
     punch_out_reason: null,
     punch_out_explanation: null,
+    punch_out_device_info: null,
+    punch_out_network_info: null,
+    punch_out_ip: null,
     review_notes: null,
     reviewed_by: null,
     reviewed_at: null,
-  }
+  } as AttendanceLog
   updateLocalLog(localLog)
   return localLog
 }
@@ -291,10 +301,13 @@ export async function submitPunchOut(params: {
   accuracy?: number
   distanceMeters: number
   isInsideGeofence: boolean
-  selfieUrl: string | null
+  selfieUrl?: string | null
   reason?: string
   explanation?: string
   faceMatchScore?: number
+  deviceInfo?: DeviceSpecs | null
+  networkInfo?: NetworkSpecs | null
+  ipAddress?: string | null
 }): Promise<AttendanceLog> {
   const todayStr = new Date().toISOString().split('T')[0]
   const punchStatus: AttendancePunchStatus = params.isInsideGeofence ? 'APPROVED' : 'PENDING_REVIEW'
@@ -307,17 +320,20 @@ export async function submitPunchOut(params: {
     minutes = Math.max(1, Math.round((outTime - inTime) / (1000 * 60)))
   }
 
-  const updatePayload = {
+  const updatePayload: Record<string, any> = {
     punch_out_at: new Date().toISOString(),
     punch_out_lat: params.latitude,
     punch_out_lng: params.longitude,
     punch_out_accuracy: params.accuracy || null,
     punch_out_distance_m: params.distanceMeters,
-    punch_out_selfie_url: params.selfieUrl,
+    punch_out_selfie_url: params.selfieUrl || null,
     punch_out_status: punchStatus,
     punch_out_reason: params.reason || null,
     punch_out_explanation: params.explanation || null,
-    punch_out_face_match_score: params.faceMatchScore ?? 95,
+    punch_out_device_info: params.deviceInfo || null,
+    punch_out_network_info: params.networkInfo || null,
+    punch_out_ip: params.ipAddress || null,
+    punch_out_face_match_score: params.faceMatchScore ?? null,
     total_working_minutes: minutes,
     updated_at: new Date().toISOString(),
   }
@@ -400,8 +416,8 @@ export async function fetchUserAttendanceHistory(userId: string): Promise<Attend
         const statusNote = req.status === 'APPROVED'
           ? `Regularized: ${req.reason}`
           : req.status === 'REJECTED'
-          ? `REJECTED REGULARIZATION: ${req.admin_notes || req.reason}`
-          : `REGULARIZATION REQUEST: ${req.reason} [Requested: In ${inDisp}, Out ${outDisp}, Duration ${durHours}h]`
+            ? `REJECTED REGULARIZATION: ${req.admin_notes || req.reason}`
+            : `REGULARIZATION REQUEST: ${req.reason} [Requested: In ${inDisp}, Out ${outDisp}, Duration ${durHours}h]`
 
         if (matchLog) {
           if (req.status === 'PENDING') {
@@ -441,11 +457,15 @@ export async function fetchUserAttendanceHistory(userId: string): Promise<Attend
 
   // Post-process logs: handle active shift and past unclosed shift fallback
   return rawLogs.map((log) => {
+    const isFlagged = log.punch_in_status === 'FLAGGED' || log.punch_out_status === 'FLAGGED'
+
     // If punch in exists but no punch out:
     if (log.punch_in_at && !log.punch_out_at) {
       if (log.date === todayStr) {
-        // Active shift today: calculate live running elapsed minutes
-        const elapsedMins = Math.max(1, Math.round((Date.now() - new Date(log.punch_in_at).getTime()) / (1000 * 60)))
+        // Active shift today: calculate live running elapsed minutes (unless flagged by admin)
+        const elapsedMins = isFlagged
+          ? 0
+          : Math.max(1, Math.round((Date.now() - new Date(log.punch_in_at).getTime()) / (1000 * 60)))
         return {
           ...log,
           total_working_minutes: elapsedMins,
@@ -453,6 +473,13 @@ export async function fetchUserAttendanceHistory(userId: string): Promise<Attend
       } else if (log.date < todayStr) {
         // Past shift where employee forgot to punch out:
         // Calculate duration from punch_in_at up to shift end time (17:00 EOD)
+        if (isFlagged) {
+          return {
+            ...log,
+            total_working_minutes: 0,
+            review_notes: log.review_notes || '⚠️ Flagged by Admin: Shift not counted',
+          }
+        }
         const inDate = new Date(log.punch_in_at)
         const inMinutes = inDate.getHours() * 60 + inDate.getMinutes()
         const endMinutes = 17 * 60
@@ -540,7 +567,7 @@ export async function regularizeAttendanceLog(params: {
         .eq('id', params.logId)
         .maybeSingle()
       if (data) currentLog = data as AttendanceLog
-    } catch (e) {}
+    } catch (e) { }
   }
 
   if (!currentLog && params.userId && dateStr) {
@@ -552,7 +579,7 @@ export async function regularizeAttendanceLog(params: {
         .eq('date', dateStr)
         .maybeSingle()
       if (data) currentLog = data as AttendanceLog
-    } catch (e) {}
+    } catch (e) { }
   }
 
   if (!currentLog) {
@@ -681,7 +708,7 @@ export async function requestAttendanceRegularization(params: {
         .eq('id', params.logId)
         .maybeSingle()
       if (data?.id) existingId = data.id
-    } catch (e) {}
+    } catch (e) { }
   }
 
   if (!existingId && params.userId && dateStr) {
@@ -693,7 +720,7 @@ export async function requestAttendanceRegularization(params: {
         .eq('date', dateStr)
         .maybeSingle()
       if (data?.id) existingId = data.id
-    } catch (e) {}
+    } catch (e) { }
   }
 
   if (existingId) {
@@ -857,7 +884,7 @@ export async function rejectRegularizationRequest(
         updateLocalLog(data as AttendanceLog)
         return true
       }
-    } catch (e) {}
+    } catch (e) { }
   }
 
   if (userId && dateStr) {
@@ -873,7 +900,7 @@ export async function rejectRegularizationRequest(
         updateLocalLog(res.data as AttendanceLog)
         return true
       }
-    } catch (e) {}
+    } catch (e) { }
   }
 
   const local = getLocalAttendance().find((l) => l.id === logId || (l.user_id === userId && l.date === dateStr))
@@ -893,6 +920,22 @@ export async function deleteAttendanceLog(params: {
   date?: string
   isDedicatedRequest?: boolean
 }): Promise<boolean> {
+  // Always clean local storage cache
+  try {
+    const logs = getLocalAttendance()
+    const updated = logs.filter((l) => {
+      if (params.logId && l.id === params.logId) return false
+      if (params.userId && params.date && l.user_id === params.userId && (l.date === params.date || l.created_at?.startsWith(params.date))) return false
+      return true
+    })
+    saveLocalAttendance(updated)
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('asaheeb_attendance_updated'))
+    }
+  } catch (localErr) {
+    console.warn('Error updating local attendance state:', localErr)
+  }
+
   try {
     const res = await fetch('/api/attendance/regularize', {
       method: 'POST',
@@ -908,13 +951,6 @@ export async function deleteAttendanceLog(params: {
     if (res.ok) {
       const json = await res.json()
       if (json.success) {
-        if (params.logId) {
-          const logs = getLocalAttendance()
-          const updated = logs.filter((l) => l.id !== params.logId)
-          if (typeof window !== 'undefined') {
-            localStorage.setItem('crm_attendance_logs', JSON.stringify(updated))
-          }
-        }
         return true
       }
     }
@@ -934,6 +970,11 @@ export async function deleteAttendanceLog(params: {
         .delete()
         .eq('user_id', params.userId)
         .eq('shift_date', params.date)
+      await supabase
+        .from('attendance_logs')
+        .delete()
+        .eq('user_id', params.userId)
+        .eq('date', params.date)
     }
     return true
   } catch (err) {
@@ -1067,7 +1108,7 @@ export async function fetchAdminDailyRoster(dateStr: string): Promise<RosterEmpl
 
     if (!pErr && profiles) {
       const logsMap = new Map<string, AttendanceLog>()
-      ;(logs || []).forEach((l: AttendanceLog) => logsMap.set(l.user_id, l))
+        ; (logs || []).forEach((l: AttendanceLog) => logsMap.set(l.user_id, l))
 
       return profiles.map((p) => {
         const log = logsMap.get(p.id) || null
@@ -1077,7 +1118,11 @@ export async function fetchAdminDailyRoster(dateStr: string): Promise<RosterEmpl
         if (p.work_status === 'ON_LEAVE') {
           liveStatus = 'ON_LEAVE'
         } else if (log?.punch_in_at) {
-          if (log.punch_out_at) {
+          const isFlagged = log.punch_in_status === 'FLAGGED' || log.punch_out_status === 'FLAGGED'
+          if (isFlagged) {
+            liveStatus = 'FLAGGED'
+            activeMinutes = 0
+          } else if (log.punch_out_at) {
             // Finished day
             liveStatus = log.punch_in_status === 'APPROVED' ? 'PRESENT_HQ' : 'PRESENT_REMOTE'
             activeMinutes = log.total_working_minutes
@@ -1284,6 +1329,59 @@ export async function fetchLeaveBalances(userId: string, year?: number): Promise
   return def
 }
 
+export async function updateEmployeeLeaveBalance(
+  userId: string,
+  updates: Partial<LeaveBalance>,
+  year?: number
+): Promise<LeaveBalance> {
+  const targetYear = year || new Date().getFullYear()
+  const current = await fetchLeaveBalances(userId, targetYear)
+  const updated: LeaveBalance = {
+    ...current,
+    ...updates,
+    user_id: userId,
+    year: targetYear,
+    updated_at: new Date().toISOString(),
+  }
+
+  // Try Supabase upsert
+  try {
+    const supabase = createClient()
+    const { data, error } = await supabase
+      .from('employee_leave_balances')
+      .upsert(
+        {
+          user_id: userId,
+          year: targetYear,
+          annual_leave_total: Number(updated.annual_leave_total),
+          annual_leave_used: Number(updated.annual_leave_used),
+          sick_leave_total: Number(updated.sick_leave_total),
+          sick_leave_used: Number(updated.sick_leave_used),
+          emergency_leave_used: Number(updated.emergency_leave_used || 0),
+          unpaid_leave_used: Number(updated.unpaid_leave_used || 0),
+          updated_at: new Date().toISOString(),
+        },
+        { onConflict: 'user_id,year' }
+      )
+      .select()
+      .maybeSingle()
+
+    if (!error && data) {
+      const balances = getLocalLeaveBalances().filter((b) => !(b.user_id === userId && b.year === targetYear))
+      balances.push(data as LeaveBalance)
+      saveLocalLeaveBalances(balances)
+      return data as LeaveBalance
+    }
+  } catch (err) {
+    console.warn('Supabase leave balance update failed, using local:', err)
+  }
+
+  const balances = getLocalLeaveBalances().filter((b) => !(b.user_id === userId && b.year === targetYear))
+  balances.push(updated)
+  saveLocalLeaveBalances(balances)
+  return updated
+}
+
 export async function fetchUserLeaveRequests(userId: string): Promise<LeaveRequest[]> {
   try {
     const supabase = createClient()
@@ -1436,7 +1534,7 @@ export async function uploadSelfieSnapshot(
   try {
     const supabase = createClient()
     const filename = `${userId}/${Date.now()}_${type}.jpg`
-    
+
     // Convert base64 dataUrl to blob
     const res = await fetch(dataUrl)
     const blob = await res.blob()
@@ -1482,7 +1580,7 @@ export const DEFAULT_OFFICIAL_HOLIDAYS: import('@/types/attendance').CompanyHoli
 export const DEFAULT_WORK_POLICY: CompanyWorkPolicy = {
   id: 'default-policy',
   company_name: 'Asaheeb Real Estate',
-  work_days: ['SUNDAY', 'MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY'],
+  work_days: ['SUNDAY', 'MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'SATURDAY'],
   daily_expected_hours: 8.0,
   shift_start_time: '09:00:00',
   shift_end_time: '17:00:00',
@@ -1491,6 +1589,7 @@ export const DEFAULT_WORK_POLICY: CompanyWorkPolicy = {
   default_sick_leave_quota: 30,
   custom_day_hours: {},
   official_holidays: DEFAULT_OFFICIAL_HOLIDAYS,
+  tracking_start_date: null,
 }
 
 export async function fetchOfficialHolidays(): Promise<import('@/types/attendance').CompanyHoliday[]> {
@@ -1551,7 +1650,7 @@ export async function saveOfficialHolidays(
               cached.official_holidays = json.holidays
               if (cached.custom_day_hours) cached.custom_day_hours._holidays = json.holidays
               localStorage.setItem(LOCAL_POLICY_KEY, JSON.stringify(cached))
-            } catch (e) {}
+            } catch (e) { }
           }
           return json.holidays
         }
@@ -1580,10 +1679,22 @@ export async function fetchCompanyWorkPolicy(): Promise<CompanyWorkPolicy> {
             (data.custom_day_hours as any)?._holidays ||
             DEFAULT_OFFICIAL_HOLIDAYS
           const schedules = (data.custom_day_hours as any)?._schedules || data.custom_day_schedules || {}
+          const empSchedules = (data.custom_day_hours as any)?._employee_schedules || data.custom_employee_schedules || {}
+          const exemptIds =
+            data.exempt_employee_ids ||
+            (data.custom_day_hours as any)?._exempt_ids ||
+            []
+          const trackingStartDate =
+            data.tracking_start_date ||
+            (data.custom_day_hours as any)?._tracking_start_date ||
+            null
           const fullPolicy: CompanyWorkPolicy = {
             ...data,
             custom_day_schedules: schedules,
+            custom_employee_schedules: empSchedules,
             official_holidays: holidays,
+            exempt_employee_ids: exemptIds,
+            tracking_start_date: trackingStartDate,
           }
           localStorage.setItem(LOCAL_POLICY_KEY, JSON.stringify(fullPolicy))
           return fullPolicy
@@ -1614,12 +1725,23 @@ export async function fetchCompanyWorkPolicy(): Promise<CompanyWorkPolicy> {
             date: typeof h.date === 'string' ? h.date.slice(0, 10) : h.date,
           }))
         }
-      } catch (e) {}
+      } catch (e) { }
 
+      const exemptIds =
+        (data.custom_day_hours as any)?._exempt_ids ||
+        (data as any).exempt_employee_ids ||
+        []
+      const trackingStartDate =
+        (data as any).tracking_start_date ||
+        (data.custom_day_hours as any)?._tracking_start_date ||
+        null
       const parsedPolicy: CompanyWorkPolicy = {
         ...data,
         custom_day_schedules: (data.custom_day_hours as any)?._schedules || (data as any).custom_day_schedules || {},
+        custom_employee_schedules: (data.custom_day_hours as any)?._employee_schedules || (data as any).custom_employee_schedules || {},
         official_holidays: holidays,
+        exempt_employee_ids: exemptIds,
+        tracking_start_date: trackingStartDate,
       }
       if (typeof window !== 'undefined') {
         localStorage.setItem(LOCAL_POLICY_KEY, JSON.stringify(parsedPolicy))
@@ -1636,7 +1758,10 @@ export async function fetchCompanyWorkPolicy(): Promise<CompanyWorkPolicy> {
       if (raw) {
         const parsed = JSON.parse(raw)
         parsed.custom_day_schedules = parsed.custom_day_hours?._schedules || parsed.custom_day_schedules || {}
+        parsed.custom_employee_schedules = parsed.custom_day_hours?._employee_schedules || parsed.custom_employee_schedules || {}
         parsed.official_holidays = parsed.custom_day_hours?._holidays || parsed.official_holidays || DEFAULT_OFFICIAL_HOLIDAYS
+        parsed.exempt_employee_ids = parsed.custom_day_hours?._exempt_ids || parsed.exempt_employee_ids || []
+        parsed.tracking_start_date = parsed.custom_day_hours?._tracking_start_date || parsed.tracking_start_date || null
         return parsed
       }
     } catch (e) {
@@ -1651,7 +1776,7 @@ export async function saveCompanyWorkPolicy(
 ): Promise<CompanyWorkPolicy> {
   const current = await fetchCompanyWorkPolicy()
 
-  // Merge numeric hours, schedules, and holidays into custom_day_hours payload
+  // Merge numeric hours, schedules, employee custom schedules, holidays, and tracking_start_date into custom_day_hours payload
   const rawCustomHours = policy.custom_day_hours !== undefined ? { ...policy.custom_day_hours } : { ...(current.custom_day_hours || {}) }
   const schedules = policy.custom_day_schedules || current.custom_day_schedules || {}
   if (Object.keys(schedules).length > 0) {
@@ -1660,8 +1785,25 @@ export async function saveCompanyWorkPolicy(
     delete rawCustomHours['_schedules']
   }
 
+  const empSchedules = policy.custom_employee_schedules || current.custom_employee_schedules || {}
+  if (Object.keys(empSchedules).length > 0) {
+    rawCustomHours['_employee_schedules'] = empSchedules as any
+  } else {
+    delete rawCustomHours['_employee_schedules']
+  }
+
   const holidays = policy.official_holidays !== undefined ? policy.official_holidays : (current.official_holidays || DEFAULT_OFFICIAL_HOLIDAYS)
   rawCustomHours['_holidays'] = holidays as any
+
+  const exemptIds = policy.exempt_employee_ids !== undefined ? policy.exempt_employee_ids : (current.exempt_employee_ids || [])
+  rawCustomHours['_exempt_ids'] = exemptIds as any
+
+  const trackingStartDate = policy.tracking_start_date !== undefined ? policy.tracking_start_date : (current.tracking_start_date || null)
+  if (trackingStartDate) {
+    rawCustomHours['_tracking_start_date'] = trackingStartDate as any
+  } else {
+    delete rawCustomHours['_tracking_start_date']
+  }
 
   const payload = {
     company_name: policy.company_name || current.company_name,
@@ -1673,6 +1815,7 @@ export async function saveCompanyWorkPolicy(
     default_annual_leave_quota: Number(policy.default_annual_leave_quota || current.default_annual_leave_quota),
     default_sick_leave_quota: Number(policy.default_sick_leave_quota || current.default_sick_leave_quota),
     custom_day_hours: rawCustomHours,
+    tracking_start_date: trackingStartDate,
     updated_at: new Date().toISOString(),
   }
 
@@ -1682,7 +1825,14 @@ export async function saveCompanyWorkPolicy(
       const res = await fetch('/api/attendance/work-policy', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...payload, official_holidays: holidays }),
+        body: JSON.stringify({
+          ...payload,
+          official_holidays: holidays,
+          exempt_employee_ids: exemptIds,
+          custom_employee_schedules: empSchedules,
+          custom_day_schedules: schedules,
+          tracking_start_date: trackingStartDate,
+        }),
       })
       if (res.ok) {
         const json = await res.json()
@@ -1690,9 +1840,15 @@ export async function saveCompanyWorkPolicy(
           const parsedSaved: CompanyWorkPolicy = {
             ...json.policy,
             custom_day_schedules: json.policy.custom_day_hours?._schedules || schedules,
+            custom_employee_schedules: json.policy.custom_day_hours?._employee_schedules || empSchedules,
             official_holidays: json.policy.official_holidays || json.policy.custom_day_hours?._holidays || holidays,
+            exempt_employee_ids: json.policy.exempt_employee_ids || json.policy.custom_day_hours?._exempt_ids || exemptIds,
+            tracking_start_date: json.policy.tracking_start_date || json.policy.custom_day_hours?._tracking_start_date || trackingStartDate,
           }
           localStorage.setItem(LOCAL_POLICY_KEY, JSON.stringify(parsedSaved))
+          if (typeof window !== 'undefined') {
+            window.dispatchEvent(new CustomEvent('asaheeb_attendance_updated'))
+          }
           return parsedSaved
         }
       }
@@ -1725,10 +1881,13 @@ export async function saveCompanyWorkPolicy(
       const parsedSaved: CompanyWorkPolicy = {
         ...saved,
         custom_day_schedules: saved.custom_day_hours?._schedules || {},
+        custom_employee_schedules: saved.custom_day_hours?._employee_schedules || empSchedules,
         official_holidays: saved.custom_day_hours?._holidays || holidays,
+        exempt_employee_ids: saved.custom_day_hours?._exempt_ids || exemptIds,
       }
       if (typeof window !== 'undefined') {
         localStorage.setItem(LOCAL_POLICY_KEY, JSON.stringify(parsedSaved))
+        window.dispatchEvent(new CustomEvent('asaheeb_attendance_updated'))
       }
       return parsedSaved
     }
@@ -1740,12 +1899,71 @@ export async function saveCompanyWorkPolicy(
     id: current.id || 'default-policy',
     ...payload,
     custom_day_schedules: schedules,
+    custom_employee_schedules: empSchedules,
     official_holidays: holidays,
+    exempt_employee_ids: exemptIds,
   }
   if (typeof window !== 'undefined') {
     localStorage.setItem(LOCAL_POLICY_KEY, JSON.stringify(localRes))
+    window.dispatchEvent(new CustomEvent('asaheeb_attendance_updated'))
   }
   return localRes
+}
+
+export async function saveEmployeeCustomSchedule(
+  employeeId: string,
+  schedule: import('@/types/attendance').EmployeeShiftSchedule | null
+): Promise<CompanyWorkPolicy> {
+  const current = await fetchCompanyWorkPolicy()
+  const customEmp = { ...(current.custom_employee_schedules || {}) }
+  let exemptIds = [...(current.exempt_employee_ids || [])]
+
+  if (schedule) {
+    customEmp[employeeId] = schedule
+    if (schedule.is_exempt_from_tracking) {
+      if (!exemptIds.includes(employeeId)) exemptIds.push(employeeId)
+    } else {
+      exemptIds = exemptIds.filter((id) => id !== employeeId)
+    }
+  } else {
+    delete customEmp[employeeId]
+    exemptIds = exemptIds.filter((id) => id !== employeeId)
+  }
+
+  return await saveCompanyWorkPolicy({
+    custom_employee_schedules: customEmp,
+    exempt_employee_ids: exemptIds,
+  })
+}
+
+export async function toggleEmployeeTrackingExemption(
+  employeeId: string,
+  isExempt: boolean
+): Promise<CompanyWorkPolicy> {
+  const current = await fetchCompanyWorkPolicy()
+  const customEmp = { ...(current.custom_employee_schedules || {}) }
+  let exemptIds = [...(current.exempt_employee_ids || [])]
+
+  if (isExempt) {
+    if (!exemptIds.includes(employeeId)) exemptIds.push(employeeId)
+    customEmp[employeeId] = {
+      ...(customEmp[employeeId] || {}),
+      is_exempt_from_tracking: true,
+    }
+  } else {
+    exemptIds = exemptIds.filter((id) => id !== employeeId)
+    if (customEmp[employeeId]) {
+      customEmp[employeeId] = {
+        ...customEmp[employeeId],
+        is_exempt_from_tracking: false,
+      }
+    }
+  }
+
+  return await saveCompanyWorkPolicy({
+    custom_employee_schedules: customEmp,
+    exempt_employee_ids: exemptIds,
+  })
 }
 
 // ==========================================
@@ -1777,63 +1995,63 @@ export function calculateExpectedHoursInMonth(
   defaultHours: number,
   customDayHours?: Record<string, number>,
   holidays?: import('@/types/attendance').CompanyHoliday[],
-  upToDayParam?: number
+  upToDayParam?: number,
+  trackingStartDate?: string | null
 ): {
   count: number
   totalHours: number
   elapsedCount: number
   elapsedHours: number
-  holidaysCount: number
 } {
   const dayNames = ['SUNDAY', 'MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY']
   const targetDayIndices = workDays.map((w) => dayNames.indexOf(w.toUpperCase())).filter((i) => i >= 0)
+  const holidayDates = new Set((holidays || []).map((h) => h.date))
+
+  const now = new Date()
+  const isCurrentMonth = now.getFullYear() === year && now.getMonth() + 1 === month
+  const isFutureMonth =
+    now.getFullYear() < year || (now.getFullYear() === year && now.getMonth() + 1 < month)
 
   const daysInMonth = new Date(year, month, 0).getDate()
-  const today = new Date()
-  const isCurrentMonth = today.getFullYear() === year && today.getMonth() + 1 === month
-  const isPastMonth = year < today.getFullYear() || (year === today.getFullYear() && month < today.getMonth() + 1)
-
-  const effectiveUpToDay =
-    upToDayParam !== undefined
-      ? upToDayParam
-      : isCurrentMonth
-      ? Math.min(today.getDate(), daysInMonth)
-      : isPastMonth
-      ? daysInMonth
-      : 0
-
-  const holidayDateSet = new Set((holidays || []).map((h) => h.date))
-
   let count = 0
   let totalHours = 0
   let elapsedCount = 0
   let elapsedHours = 0
-  let holidaysCount = 0
+
+  const todayDay = now.getDate()
 
   for (let day = 1; day <= daysInMonth; day++) {
-    const dateStr = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`
     const d = new Date(year, month - 1, day)
-    const dayIndex = d.getDay()
-    const isWorkday = targetDayIndices.includes(dayIndex)
-    const isHoliday = holidayDateSet.has(dateStr)
+    const dayOfWeekIndex = d.getDay()
+    const dayName = dayNames[dayOfWeekIndex]
+    const dateStr = `${year}-${month.toString().padStart(2, '0')}-${day.toString().padStart(2, '0')}`
 
-    if (isHoliday && isWorkday) {
-      holidaysCount++
-    }
+    const isTargetWorkDay = targetDayIndices.includes(dayOfWeekIndex)
+    const isHoliday = holidayDates.has(dateStr)
+    const isAfterTrackingStart = !trackingStartDate || dateStr >= trackingStartDate
 
-    // Only count as expected working day if it is a scheduled workday AND NOT an official holiday!
-    if (isWorkday && !isHoliday) {
-      count++
-      const dayName = dayNames[dayIndex]
-      const hoursForDay =
-        customDayHours && customDayHours[dayName] !== undefined && customDayHours[dayName] !== null
-          ? Number(customDayHours[dayName])
+    if (isTargetWorkDay && !isHoliday) {
+      const dayHours =
+        customDayHours && customDayHours[dayName] !== undefined
+          ? customDayHours[dayName]
           : defaultHours
-      totalHours += hoursForDay
 
-      if (day <= effectiveUpToDay) {
-        elapsedCount++
-        elapsedHours += hoursForDay
+      count++
+      totalHours += dayHours
+
+      if (isAfterTrackingStart) {
+        if (isFutureMonth) {
+          // Future month: 0 elapsed
+        } else if (isCurrentMonth) {
+          if (day <= todayDay) {
+            elapsedCount++
+            elapsedHours += dayHours
+          }
+        } else {
+          // Past month: all elapsed
+          elapsedCount++
+          elapsedHours += dayHours
+        }
       }
     }
   }
@@ -1843,7 +2061,6 @@ export function calculateExpectedHoursInMonth(
     totalHours: Math.round(totalHours * 10) / 10,
     elapsedCount,
     elapsedHours: Math.round(elapsedHours * 10) / 10,
-    holidaysCount,
   }
 }
 
@@ -1872,7 +2089,9 @@ export async function fetchMonthlyWorkHoursAudit(
     policy.work_days,
     policy.daily_expected_hours,
     policy.custom_day_hours,
-    policy.official_holidays
+    policy.official_holidays,
+    undefined,
+    policy.tracking_start_date
   )
 
   const startDateStr = `${yearMonthStr}-01`
@@ -1915,44 +2134,82 @@ export async function fetchMonthlyWorkHoursAudit(
       .is('end_date', null)
 
     const salMap = new Map<string, { base_salary: number; currency: string }>()
-    ;(salaryHistory || []).forEach((sh: any) => {
-      if (sh.profile_id && Number(sh.base_salary) > 0) {
-        salMap.set(sh.profile_id, {
-          base_salary: Number(sh.base_salary),
-          currency: sh.currency || 'SAR',
-        })
-      }
-    })
-    ;(salaryProfiles || []).forEach((sp: any) => {
-      if (sp.profile_id && Number(sp.base_salary) > 0) {
-        salMap.set(sp.profile_id, {
-          base_salary: Number(sp.base_salary),
-          currency: sp.currency || 'SAR',
-        })
-      }
-    })
+      ; (salaryHistory || []).forEach((sh: any) => {
+        if (sh.profile_id && Number(sh.base_salary) > 0) {
+          salMap.set(sh.profile_id, {
+            base_salary: Number(sh.base_salary),
+            currency: sh.currency || 'SAR',
+          })
+        }
+      })
+      ; (salaryProfiles || []).forEach((sp: any) => {
+        if (sp.profile_id && Number(sp.base_salary) > 0) {
+          salMap.set(sp.profile_id, {
+            base_salary: Number(sp.base_salary),
+            currency: sp.currency || 'SAR',
+          })
+        }
+      })
 
     if (profiles) {
       const logsByStaff = new Map<string, AttendanceLog[]>()
-      ;(logs || []).forEach((l: AttendanceLog) => {
-        const arr = logsByStaff.get(l.user_id) || []
-        arr.push(l)
-        logsByStaff.set(l.user_id, arr)
-      })
+        ; (logs || []).forEach((l: AttendanceLog) => {
+          const arr = logsByStaff.get(l.user_id) || []
+          arr.push(l)
+          logsByStaff.set(l.user_id, arr)
+        })
 
       const leavesByStaff = new Map<string, LeaveRequest[]>()
-      ;(leaves || []).forEach((r: LeaveRequest) => {
-        const arr = leavesByStaff.get(r.user_id) || []
-        arr.push(r)
-        leavesByStaff.set(r.user_id, arr)
-      })
+        ; (leaves || []).forEach((r: LeaveRequest) => {
+          const arr = leavesByStaff.get(r.user_id) || []
+          arr.push(r)
+          leavesByStaff.set(r.user_id, arr)
+        })
 
       const auditList = profiles.map((p) => {
         const staffLogs = logsByStaff.get(p.id) || []
         const staffLeaves = leavesByStaff.get(p.id) || []
 
-        // Total active worked minutes (with auto-EOD fallback for past unclosed shifts up to shift_end_time)
+        // Check if employee has a personalized schedule or tracking exemption
+        const empSchedule = policy.custom_employee_schedules?.[p.id]
+        const isExempt =
+          (policy.exempt_employee_ids || []).includes(p.id) ||
+          Boolean(empSchedule?.is_exempt_from_tracking)
+
+        const empShiftStart = empSchedule?.shift_start_time || policy.shift_start_time
+        const empGrace = empSchedule?.grace_period_mins ?? policy.grace_period_mins
+        const empDailyHours = empSchedule?.daily_expected_hours ?? policy.daily_expected_hours
+        const empWorkDays = empSchedule?.work_days || policy.work_days
+        const empCustomDayHours = empSchedule?.custom_day_hours || policy.custom_day_hours
+        const empCustomDaySchedules = empSchedule?.custom_day_schedules || policy.custom_day_schedules
+
+        let empExpectedHours = expectedHours
+        let empExpectedToDateHours = expectedToDateHours
+        let empWorkingDaysCount = workingDaysCount
+        let empElapsedWorkingDays = elapsedWorkingDays
+
+        if (empSchedule && !isExempt) {
+          const empCalc = calculateExpectedHoursInMonth(
+            year,
+            month,
+            empWorkDays,
+            empDailyHours,
+            empCustomDayHours,
+            policy.official_holidays,
+            undefined,
+            policy.tracking_start_date
+          )
+          empExpectedHours = empCalc.totalHours
+          empExpectedToDateHours = empCalc.elapsedHours
+          empWorkingDaysCount = empCalc.count
+          empElapsedWorkingDays = empCalc.elapsedCount
+        }
+
+        // Total active worked minutes (excluding flagged / rejected punches)
         const totalWorkedMins = staffLogs.reduce((acc, curr) => {
+          if (curr.punch_in_status === 'FLAGGED' || curr.punch_out_status === 'FLAGGED') {
+            return acc
+          }
           let mins = curr.total_working_minutes || 0
           if (curr.punch_in_at && !curr.punch_out_at) {
             if (curr.date < todayStr) {
@@ -1982,14 +2239,14 @@ export async function fetchMonthlyWorkHoursAudit(
 
             if (dYear === year && dMonth === month) {
               const dayName = d.toLocaleDateString('en-US', { weekday: 'long' }).toUpperCase()
-              const isWorkDay = policy.work_days.includes(dayName)
+              const isWorkDay = empWorkDays.includes(dayName)
               const isHoliday = (policy.official_holidays || []).some((h) => h.date === dDateStr)
 
               if (isWorkDay && !isHoliday && dDateStr <= todayStr) {
                 elapsedLeaveDays++
-                const dayHrs = (policy.custom_day_hours && policy.custom_day_hours[dayName] !== undefined)
-                  ? policy.custom_day_hours[dayName]
-                  : policy.daily_expected_hours
+                const dayHrs = (empCustomDayHours && empCustomDayHours[dayName] !== undefined)
+                  ? empCustomDayHours[dayName]
+                  : empDailyHours
                 elapsedLeaveHours += dayHrs
               }
             }
@@ -1997,26 +2254,55 @@ export async function fetchMonthlyWorkHoursAudit(
         })
         const leaveHours = Math.round(elapsedLeaveHours * 10) / 10
 
+        // IF EXEMPT FROM ATTENDANCE TRACKING:
+        if (isExempt) {
+          return {
+            employee_id: p.id,
+            employee_name: p.name,
+            employee_email: p.email,
+            employee_role: p.role,
+            month: yearMonthStr,
+            expected_working_days: 0,
+            expected_total_hours: 0,
+            expected_to_date_hours: 0,
+            elapsed_working_days: 0,
+            actual_worked_hours: actualHours,
+            approved_leave_hours: leaveHours,
+            non_working_hours: 0,
+            month_to_date_deficit: 0,
+            overtime_hours: 0,
+            attendance_adherence_percent: 100,
+            hourly_rate: 0,
+            estimated_pay_cut: 0,
+            currency: 'SAR',
+            days_present: staffLogs.length,
+            days_remote: 0,
+            days_late: 0,
+            days_absent: 0,
+            is_exempt: true,
+          }
+        }
+
         // Month-To-Date Non-working shortfall (based on elapsed expected hours so far, never future days!)
         const monthToDateDeficit = Math.max(
           0,
-          Math.round((expectedToDateHours - actualHours - leaveHours) * 10) / 10
+          Math.round((empExpectedToDateHours - actualHours - leaveHours) * 10) / 10
         )
-        const overtimeHours = Math.max(0, Math.round((actualHours - expectedToDateHours) * 10) / 10)
+        const overtimeHours = Math.max(0, Math.round((actualHours - empExpectedToDateHours) * 10) / 10)
 
         // Adherence based on elapsed days:
         const totalAccounted = actualHours + leaveHours
         const adherence =
-          expectedToDateHours > 0
-            ? Math.min(100, Math.round((totalAccounted / expectedToDateHours) * 100))
+          empExpectedToDateHours > 0
+            ? Math.min(100, Math.round((totalAccounted / empExpectedToDateHours) * 100))
             : 100
 
         // Financial pay cut deduction calculation strictly based on REAL salary profile:
         const sal = salMap.get(p.id)
         const baseSalary = sal?.base_salary || 0
         const currency = sal?.currency || 'SAR'
-        const hourlyRate = (expectedHours > 0 && baseSalary > 0)
-          ? Math.round((baseSalary / expectedHours) * 100) / 100
+        const hourlyRate = (empExpectedHours > 0 && baseSalary > 0)
+          ? Math.round((baseSalary / empExpectedHours) * 100) / 100
           : 0
         const estimatedPayCut = (hourlyRate > 0 && monthToDateDeficit > 0)
           ? Math.round(monthToDateDeficit * hourlyRate * 10) / 10
@@ -2027,20 +2313,27 @@ export async function fetchMonthlyWorkHoursAudit(
           (l) => l.punch_in_status === 'PENDING_REVIEW' || l.punch_out_status === 'PENDING_REVIEW'
         ).length
 
-        // Late days calculation based on policy shift_start_time + grace_period_mins
-        const [shiftH, shiftM] = policy.shift_start_time.split(':').map(Number)
-        const cutoffMinutes = shiftH * 60 + shiftM + policy.grace_period_mins
-
+        // Late days calculation based on personalized shift start time + grace period (with per-day schedule support)
         let daysLate = 0
         staffLogs.forEach((l) => {
-          if (l.punch_in_at) {
+          if (l.punch_in_at && l.date) {
             const punchDate = new Date(l.punch_in_at)
+            const dObj = new Date(l.date + 'T00:00:00')
+            const dayName = dObj.toLocaleDateString('en-US', { weekday: 'long' }).toUpperCase()
+            const daySched = empCustomDaySchedules?.[dayName]
+            const dayShiftStart = daySched?.startTime || empShiftStart
+
+            const [shiftH, shiftM] = dayShiftStart.split(':').map(Number)
+            const validShiftH = isNaN(shiftH) ? 9 : shiftH
+            const validShiftM = isNaN(shiftM) ? 0 : shiftM
+            const cutoffMinutes = validShiftH * 60 + validShiftM + empGrace
+
             const punchMins = punchDate.getHours() * 60 + punchDate.getMinutes()
             if (punchMins > cutoffMinutes) daysLate++
           }
         })
 
-        const daysAbsent = Math.max(0, elapsedWorkingDays - staffLogs.length - Math.round(elapsedLeaveDays))
+        const daysAbsent = Math.max(0, empElapsedWorkingDays - staffLogs.length - Math.round(elapsedLeaveDays))
 
         return {
           employee_id: p.id,
@@ -2048,10 +2341,10 @@ export async function fetchMonthlyWorkHoursAudit(
           employee_email: p.email,
           employee_role: p.role,
           month: yearMonthStr,
-          expected_working_days: workingDaysCount,
-          expected_total_hours: expectedHours,
-          expected_to_date_hours: expectedToDateHours,
-          elapsed_working_days: elapsedWorkingDays,
+          expected_working_days: empWorkingDaysCount,
+          expected_total_hours: empExpectedHours,
+          expected_to_date_hours: empExpectedToDateHours,
+          elapsed_working_days: empElapsedWorkingDays,
           actual_worked_hours: actualHours,
           approved_leave_hours: leaveHours,
           non_working_hours: monthToDateDeficit,
@@ -2065,6 +2358,7 @@ export async function fetchMonthlyWorkHoursAudit(
           days_remote: daysRemote,
           days_late: daysLate,
           days_absent: daysAbsent,
+          is_exempt: false,
         }
       })
 
@@ -2144,4 +2438,3 @@ export async function fetchUserSalaryProfile(userId: string): Promise<{ base_sal
   }
   return null
 }
-

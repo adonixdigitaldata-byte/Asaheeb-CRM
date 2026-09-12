@@ -1,6 +1,6 @@
 'use client'
 
-import React, { useState, useEffect, useMemo } from 'react'
+import React, { useState, useEffect, useMemo, useRef } from 'react'
 import {
   Clock,
   MapPin,
@@ -11,6 +11,7 @@ import {
   FileSpreadsheet,
   Building,
   CheckCircle2,
+  ChevronLeft,
   ChevronRight,
   Sparkles,
   Download,
@@ -78,7 +79,8 @@ import FaceEnrollmentModal from '@/components/attendance/FaceEnrollmentModal'
 import BiometricManagementModal from '@/components/attendance/BiometricManagementModal'
 import TestBiometricModal from '@/components/attendance/TestBiometricModal'
 import Pagination from '@/components/Pagination'
-import { getEmployeeFaceEnrollment, loadBiometricModels } from '@/lib/biometricEngine'
+import ConfirmModal from '@/components/ConfirmModal'
+import { getEmployeeFaceEnrollment } from '@/lib/biometricEngine'
 import type { Profile } from '@/types/database'
 
 interface AttendanceClientProps {
@@ -95,6 +97,16 @@ export default function AttendanceClient({ profile }: AttendanceClientProps) {
   // Tab State
   type TabType = 'ROSTER' | 'EXCEPTIONS' | 'REGULARIZATIONS' | 'LEAVES' | 'HOURS_AUDIT' | 'MY_LOGS' | 'MY_LEAVES'
   const [activeTab, setActiveTab] = useState<TabType>(canManage ? 'ROSTER' : 'MY_LOGS')
+  const tabsContainerRef = useRef<HTMLDivElement>(null)
+
+  const scrollTabs = (direction: 'left' | 'right') => {
+    if (tabsContainerRef.current) {
+      tabsContainerRef.current.scrollBy({
+        left: direction === 'left' ? -260 : 260,
+        behavior: 'smooth',
+      })
+    }
+  }
 
   // Core Data States
   const [office, setOffice] = useState<CompanyLocation>({
@@ -172,11 +184,22 @@ export default function AttendanceClient({ profile }: AttendanceClientProps) {
 
   // Filters & Search
   const [searchQuery, setSearchQuery] = useState('')
-  const [rosterFilter, setRosterFilter] = useState<'ALL' | 'HQ' | 'REMOTE' | 'LEAVE' | 'ABSENT'>('ALL')
+  const [rosterFilter, setRosterFilter] = useState<'ALL' | 'HQ' | 'REMOTE' | 'LEAVE' | 'ABSENT' | 'FLAGGED'>('ALL')
   const [exceptionsFilter, setExceptionsFilter] = useState<'ALL' | 'ACTION_NEEDED' | 'FLAGGED' | 'APPROVED'>('ACTION_NEEDED')
   const [regularizationsFilter, setRegularizationsFilter] = useState<'ALL' | 'PENDING' | 'APPROVED' | 'REJECTED'>('PENDING')
   const [regularizeFeedbackMsg, setRegularizeFeedbackMsg] = useState<{ id: string; type: 'success' | 'error'; message: string } | null>(null)
   const [isProcessingRegularizeId, setIsProcessingRegularizeId] = useState<string | null>(null)
+
+  // In-app Delete Confirmation Modal State
+  const [deleteConfirmModal, setDeleteConfirmModal] = useState<{
+    isOpen: boolean
+    record: AttendanceLog | null
+    isDedicatedReq: boolean
+  }>({
+    isOpen: false,
+    record: null,
+    isDedicatedReq: false,
+  })
 
   // Pagination states for all tables
   const [rosterPage, setRosterPage] = useState(1)
@@ -225,8 +248,6 @@ export default function AttendanceClient({ profile }: AttendanceClientProps) {
   // Initial Load
   useEffect(() => {
     loadInitialData()
-    // Preload neural biometric models into browser memory / cache
-    loadBiometricModels().catch(() => {})
     const timer = setInterval(() => {
       const now = new Date()
       setCurrentTime(
@@ -263,6 +284,22 @@ export default function AttendanceClient({ profile }: AttendanceClientProps) {
       loadMonthlyAudit(selectedAuditMonth)
     }
   }, [selectedAuditMonth, activeTab, canManage])
+
+  // Live auto-refresh when attendance or policy updates occur
+  useEffect(() => {
+    const handleAttendanceUpdated = () => {
+      loadInitialData()
+      if (canManage) {
+        loadMonthlyAudit(selectedAuditMonth)
+      }
+    }
+    if (typeof window !== 'undefined') {
+      window.addEventListener('asaheeb_attendance_updated', handleAttendanceUpdated)
+      return () => {
+        window.removeEventListener('asaheeb_attendance_updated', handleAttendanceUpdated)
+      }
+    }
+  }, [canManage, selectedAuditMonth])
 
   // Personal Monthly Work Hours, Punctuality, Deficit & Pay Cut Statistics
   const myMonthlyStats = useMemo(() => {
@@ -442,10 +479,6 @@ export default function AttendanceClient({ profile }: AttendanceClientProps) {
 
   async function loadInitialData() {
     try {
-      const loc = await fetchOfficeLocation()
-      const pol = await fetchCompanyWorkPolicy()
-      setWorkPolicy(pol)
-
       if (userId && userId !== 'guest-user') {
         getEmployeeFaceEnrollment(userId).then((res) => {
           setHasFaceId(Boolean(res.descriptor && res.descriptor.length === 128))
@@ -455,29 +488,43 @@ export default function AttendanceClient({ profile }: AttendanceClientProps) {
         fetchUserSalaryProfile(userId).then(setMySalary)
       }
 
-      const tLog = await fetchTodayAttendance(userId)
-      setTodayLog(tLog)
+      const todayStr = new Date().toISOString().split('T')[0]
 
-      const hist = await fetchUserAttendanceHistory(userId)
-      setMyHistory(hist)
+      const promises: [
+        Promise<CompanyLocation>,
+        Promise<CompanyWorkPolicy>,
+        Promise<AttendanceLog | null>,
+        Promise<AttendanceLog[]>,
+        Promise<LeaveBalance>,
+        Promise<LeaveRequest[]>,
+        Promise<RosterEmployee[]> | Promise<never[]>,
+        Promise<AttendanceLog[]> | Promise<never[]>,
+        Promise<LeaveRequest[]> | Promise<never[]>
+      ] = [
+          fetchOfficeLocation(),
+          fetchCompanyWorkPolicy(),
+          fetchTodayAttendance(userId),
+          fetchUserAttendanceHistory(userId),
+          fetchLeaveBalances(userId),
+          fetchUserLeaveRequests(userId),
+          canManage ? fetchAdminDailyRoster(todayStr) : Promise.resolve([]),
+          canManage ? fetchPendingExceptions() : Promise.resolve([]),
+          canManage ? fetchAllLeaveRequests() : Promise.resolve([]),
+        ]
 
-      const bal = await fetchLeaveBalances(userId)
-      setLeaveBalances(bal)
+      const [loc, pol, tLog, hist, bal, userReqs, roster, ex, allLeaves] = await Promise.all(promises)
 
-      const userReqs = await fetchUserLeaveRequests(userId)
-      setMyLeaveRequests(userReqs)
+      if (loc) setOffice(loc)
+      if (pol) setWorkPolicy(pol)
+      if (tLog !== undefined) setTodayLog(tLog)
+      if (hist) setMyHistory(hist)
+      if (bal) setLeaveBalances(bal)
+      if (userReqs) setMyLeaveRequests(userReqs)
 
       if (canManage) {
-        const todayStr = new Date().toISOString().split('T')[0]
-        const roster = await fetchAdminDailyRoster(todayStr)
-        setAdminRoster(roster)
-
-        const ex = await fetchPendingExceptions()
-        setPendingExceptions(ex)
-
-        const allLeaves = await fetchAllLeaveRequests()
-        setAllLeaveRequests(allLeaves)
-
+        if (roster) setAdminRoster(roster)
+        if (ex) setPendingExceptions(ex)
+        if (allLeaves) setAllLeaveRequests(allLeaves)
         loadMonthlyAudit(selectedAuditMonth)
       }
     } catch (e) {
@@ -525,12 +572,12 @@ export default function AttendanceClient({ profile }: AttendanceClientProps) {
           prev.map((item) =>
             item.id === log.id
               ? {
-                  ...item,
-                  ...res,
-                  punch_in_status: 'APPROVED',
-                  punch_out_status: 'APPROVED',
-                  review_notes: res.review_notes || 'Regularized by Admin',
-                }
+                ...item,
+                ...res,
+                punch_in_status: 'APPROVED',
+                punch_out_status: 'APPROVED',
+                review_notes: res.review_notes || 'Regularized by Admin',
+              }
               : item
           )
         )
@@ -569,11 +616,11 @@ export default function AttendanceClient({ profile }: AttendanceClientProps) {
           prev.map((item) =>
             item.id === log.id
               ? {
-                  ...item,
-                  punch_in_status: 'FLAGGED',
-                  punch_out_status: 'FLAGGED',
-                  review_notes: `REJECTED REGULARIZATION: ${promptReason}`,
-                }
+                ...item,
+                punch_in_status: 'FLAGGED',
+                punch_out_status: 'FLAGGED',
+                review_notes: `REJECTED REGULARIZATION: ${promptReason}`,
+              }
               : item
           )
         )
@@ -587,48 +634,69 @@ export default function AttendanceClient({ profile }: AttendanceClientProps) {
     }
   }
 
-  async function handleAdminDeleteRecord(log: AttendanceLog, isDedicatedReq: boolean = false) {
-    const confirmDelete = window.confirm(
-      `Are you sure you want to permanently delete this ${isDedicatedReq ? 'regularization request' : 'attendance log / punch'} for ${log.employee_name || 'this employee'} on ${log.date}? This action cannot be undone.`
-    )
-    if (!confirmDelete) return
+  function handleAdminDeleteRecord(log: AttendanceLog, isDedicatedReq: boolean = false) {
+    setDeleteConfirmModal({
+      isOpen: true,
+      record: log,
+      isDedicatedReq,
+    })
+  }
 
-    setIsProcessingRegularizeId(log.id)
+  async function confirmAdminDeleteRecord() {
+    const { record, isDedicatedReq } = deleteConfirmModal
+    if (!record) return
+
+    setIsProcessingRegularizeId(record.id)
     try {
       const ok = await deleteAttendanceLog({
-        logId: log.id,
-        userId: log.user_id,
-        date: log.date,
+        logId: record.id,
+        userId: record.user_id,
+        date: record.date,
         isDedicatedRequest: isDedicatedReq,
       })
 
       if (ok) {
         setRegularizeFeedbackMsg({
-          id: log.id,
+          id: record.id,
           type: 'success',
-          message: `Record successfully deleted for ${log.employee_name || 'employee'}.`,
+          message: `Record successfully deleted for ${record.employee_name || 'employee'}.`,
         })
-        setPendingExceptions((prev) => prev.filter((item) => item.id !== log.id))
+        // Optimistically clean state immediately across pending exceptions and roster
+        setPendingExceptions((prev) =>
+          prev.filter((item) => item.id !== record.id && !(item.user_id === record.user_id && item.date === record.date))
+        )
+        setAdminRoster((prev) =>
+          prev.map((emp) => {
+            if (emp.profile_id === record.user_id && (emp.today_log?.id === record.id || emp.today_log?.date === record.date)) {
+              return { ...emp, today_log: null, attendance_status: 'ABSENT' }
+            }
+            return emp
+          })
+        )
+        setDeleteConfirmModal({ isOpen: false, record: null, isDedicatedReq: false })
+        await loadInitialData()
+      } else {
+        setRegularizeFeedbackMsg({
+          id: record.id,
+          type: 'error',
+          message: 'Could not delete record from server. Please try again.',
+        })
       }
-      await loadInitialData()
     } catch (e) {
       console.error('Error deleting record:', e)
       setRegularizeFeedbackMsg({
-        id: log.id,
+        id: record.id,
         type: 'error',
         message: 'Could not delete record. Please check server logs and try again.',
       })
     } finally {
       setIsProcessingRegularizeId(null)
+      setDeleteConfirmModal({ isOpen: false, record: null, isDedicatedReq: false })
       setTimeout(() => setRegularizeFeedbackMsg(null), 4000)
     }
   }
 
   function handleOpenPunch() {
-    if (!hasFaceId) {
-      setFaceEnrollModalOpen(true)
-      return
-    }
     if (!todayLog?.punch_in_at) {
       setPunchType('IN')
       setPunchModalOpen(true)
@@ -710,6 +778,7 @@ export default function AttendanceClient({ profile }: AttendanceClientProps) {
   const countRemote = adminRoster.filter((r) => r.live_status === 'PRESENT_REMOTE').length
   const countLeave = adminRoster.filter((r) => r.live_status === 'ON_LEAVE').length
   const countAbsent = adminRoster.filter((r) => r.live_status === 'NOT_PUNCHED').length
+  const countFlagged = adminRoster.filter((r) => r.live_status === 'FLAGGED').length
 
   const filteredRoster = adminRoster.filter((r) => {
     const matchesSearch =
@@ -720,6 +789,7 @@ export default function AttendanceClient({ profile }: AttendanceClientProps) {
     if (rosterFilter === 'REMOTE') return r.live_status === 'PRESENT_REMOTE'
     if (rosterFilter === 'LEAVE') return r.live_status === 'ON_LEAVE'
     if (rosterFilter === 'ABSENT') return r.live_status === 'NOT_PUNCHED'
+    if (rosterFilter === 'FLAGGED') return r.live_status === 'FLAGGED'
     return true
   })
 
@@ -871,12 +941,13 @@ export default function AttendanceClient({ profile }: AttendanceClientProps) {
   }, [myLeaveRequests, myLeavesPage, myLeavesPageSize])
 
   // Cumulative Audit Totals
+  const nonExemptAudits = useMemo(() => monthlyAuditList.filter((c) => !c.is_exempt), [monthlyAuditList])
   const totalActualCompanyHours = Math.round(monthlyAuditList.reduce((acc, c) => acc + c.actual_worked_hours, 0) * 10) / 10
-  const totalCompanyNonWorkingHours = Math.round(monthlyAuditList.reduce((acc, c) => acc + (c.month_to_date_deficit ?? c.non_working_hours), 0) * 10) / 10
+  const totalCompanyNonWorkingHours = Math.round(nonExemptAudits.reduce((acc, c) => acc + (c.month_to_date_deficit ?? c.non_working_hours), 0) * 10) / 10
   const totalCompanyLeaveHours = Math.round(monthlyAuditList.reduce((acc, c) => acc + c.approved_leave_hours, 0) * 10) / 10
-  const totalCompanyPayCuts = Math.round(monthlyAuditList.reduce((acc, c) => acc + (c.estimated_pay_cut || 0), 0))
-  const averageCompanyAdherence = monthlyAuditList.length > 0
-    ? Math.round(monthlyAuditList.reduce((acc, c) => acc + c.attendance_adherence_percent, 0) / monthlyAuditList.length)
+  const totalCompanyPayCuts = Math.round(nonExemptAudits.reduce((acc, c) => acc + (c.estimated_pay_cut || 0), 0))
+  const averageCompanyAdherence = nonExemptAudits.length > 0
+    ? Math.round(nonExemptAudits.reduce((acc, c) => acc + c.attendance_adherence_percent, 0) / nonExemptAudits.length)
     : 100
 
   const remainingAnnualLeave = Math.max(
@@ -884,8 +955,12 @@ export default function AttendanceClient({ profile }: AttendanceClientProps) {
     leaveBalances.annual_leave_total - leaveBalances.annual_leave_used
   )
 
-  const isPunchedIn = Boolean(todayLog?.punch_in_at && !todayLog?.punch_out_at)
-  const isPunchedOut = Boolean(todayLog?.punch_in_at && todayLog?.punch_out_at)
+  const isFlaggedToday = Boolean(todayLog?.punch_in_status === 'FLAGGED' || todayLog?.punch_out_status === 'FLAGGED')
+  const hasPunchedIn = Boolean(todayLog?.punch_in_at)
+  const hasPunchedOut = Boolean(todayLog?.punch_out_at)
+  const isPunchedIn = Boolean(hasPunchedIn && !hasPunchedOut)
+  const isPunchedOut = Boolean(hasPunchedIn && hasPunchedOut)
+
   if (pageInitialLoading) {
     return (
       <div
@@ -941,7 +1016,7 @@ export default function AttendanceClient({ profile }: AttendanceClientProps) {
           </div>
           <h1 className="text-page-title">Attendance &amp; Workforce Tracking</h1>
           <p className="text-meta" style={{ marginTop: 2 }}>
-            Biometric attendance verification, active vs non-working hours tracking, and annual leave management.
+            GPS geofence &amp; automated device telemetry verification, working hours audit, and annual leave management.
           </p>
         </div>
 
@@ -1016,47 +1091,6 @@ export default function AttendanceClient({ profile }: AttendanceClientProps) {
             <Plus size={15} style={{ color: '#059669' }} /> Request Leave
           </button>
 
-          {/* Live Test Biometric Face ID Scanner */}
-          <button
-            onClick={() => setTestScannerOpen(true)}
-            className="btn btn-outline"
-            style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: 6,
-              fontWeight: 600,
-              backgroundColor: '#F0FDF4',
-              borderColor: '#86EFAC',
-              color: '#15803D',
-            }}
-            title="Open live camera test to test facial recognition and verify proxy face mismatch"
-          >
-            <Scan size={15} style={{ color: '#16A34A' }} /> Test Face Scanner
-          </button>
-
-          {/* Biometric Face ID Management CTA */}
-          <button
-            onClick={() => {
-              if (hasFaceId) {
-                setBiometricHubOpen(true)
-              } else {
-                setFaceEnrollModalOpen(true)
-              }
-            }}
-            className="btn btn-outline"
-            style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: 6,
-              fontWeight: 600,
-              backgroundColor: '#FFFFFF',
-              borderColor: hasFaceId ? '#BBF7D0' : '#FDE68A',
-            }}
-            title={hasFaceId ? 'View Face ID status, test camera, or securely re-calibrate' : 'Enroll your Biometric Face ID for quick attendance punching'}
-          >
-            <ShieldCheck size={15} style={{ color: hasFaceId ? '#16A34A' : '#D97706' }} />
-            <span>{hasFaceId ? 'Biometric Face ID (Active)' : 'Set Up Face ID'}</span>
-          </button>
         </div>
       </div>
 
@@ -1124,12 +1158,14 @@ export default function AttendanceClient({ profile }: AttendanceClientProps) {
                     fontWeight: 700,
                     textTransform: 'uppercase',
                     letterSpacing: '0.04em',
-                    backgroundColor: isPunchedIn
-                      ? 'rgba(34, 197, 94, 0.2)'
-                      : isPunchedOut
-                      ? 'rgba(148, 163, 184, 0.2)'
-                      : 'rgba(239, 68, 68, 0.2)',
-                    color: isPunchedIn ? '#4ADE80' : isPunchedOut ? '#CBD5E1' : '#F87171',
+                    backgroundColor: isFlaggedToday
+                      ? 'rgba(239, 68, 68, 0.3)'
+                      : isPunchedIn
+                        ? 'rgba(34, 197, 94, 0.2)'
+                        : isPunchedOut
+                          ? 'rgba(148, 163, 184, 0.2)'
+                          : 'rgba(239, 68, 68, 0.2)',
+                    color: isFlaggedToday ? '#FCA5A5' : isPunchedIn ? '#4ADE80' : isPunchedOut ? '#CBD5E1' : '#F87171',
                   }}
                 >
                   <span
@@ -1137,14 +1173,20 @@ export default function AttendanceClient({ profile }: AttendanceClientProps) {
                       width: '7px',
                       height: '7px',
                       borderRadius: '50%',
-                      backgroundColor: isPunchedIn ? '#22C55E' : isPunchedOut ? '#94A3B8' : '#EF4444',
+                      backgroundColor: isFlaggedToday ? '#EF4444' : isPunchedIn ? '#22C55E' : isPunchedOut ? '#94A3B8' : '#EF4444',
                     }}
                   />
-                  {isPunchedIn
-                    ? 'Active Workday'
-                    : isPunchedOut
-                    ? 'Workday Completed'
-                    : 'Not Punched In Today'}
+                  {isFlaggedToday
+                    ? isPunchedIn
+                      ? '🚩 Flagged • Shift in Progress'
+                      : isPunchedOut
+                        ? '🚩 Flagged • Pending Adjustment'
+                        : '🚩 Punch Flagged by Admin'
+                    : isPunchedIn
+                      ? 'Active Workday'
+                      : isPunchedOut
+                        ? 'Workday Completed'
+                        : 'Not Punched In Today'}
                 </span>
 
                 {todayLog?.punch_in_distance_m != null && (
@@ -1157,82 +1199,100 @@ export default function AttendanceClient({ profile }: AttendanceClientProps) {
               </div>
 
               <div style={{ fontSize: '32px', fontWeight: 800, letterSpacing: '-0.02em', color: '#F8FAFC' }}>
-                {activeWorkDuration}
+                {isFlaggedToday ? '00h 00m (Flagged)' : activeWorkDuration}
               </div>
               <div style={{ fontSize: '13px', color: '#94A3B8', marginTop: '2px' }}>
-                {todayLog?.punch_in_at
-                  ? `Punched in at ${new Date(todayLog.punch_in_at).toLocaleTimeString([], {
+                {isFlaggedToday
+                  ? `Notice: ${todayLog?.review_notes || 'Attendance record flagged • Use Adjust Hours to regularize'}`
+                  : todayLog?.punch_in_at
+                    ? `Punched in at ${new Date(todayLog.punch_in_at).toLocaleTimeString([], {
                       hour: '2-digit',
                       minute: '2-digit',
                     })}`
-                  : 'Ready to punch in with GPS and facial verification'}
+                    : 'Ready to punch in with GPS Geofence & Device Telemetry'}
               </div>
             </div>
 
             {/* Tactile Punch Action CTA */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
               <button
-                onClick={handleOpenPunch}
-                disabled={isPunchedOut}
+                onClick={() => {
+                  if (isFlaggedToday && isPunchedOut) {
+                    setRegularizeLog(todayLog)
+                    setRegularizeEmployeeName(profile?.name || 'Staff Member')
+                    setRegularizeModalOpen(true)
+                  } else {
+                    handleOpenPunch()
+                  }
+                }}
+                disabled={isPunchedOut && !isFlaggedToday}
                 style={{
                   width: '100%',
                   padding: '16px 24px',
                   borderRadius: '12px',
-                  backgroundColor: !hasFaceId
-                    ? '#D97706'
+                  backgroundColor: isFlaggedToday
+                    ? isPunchedIn
+                      ? '#DC2626'
+                      : '#991B1B'
                     : isPunchedIn
-                    ? '#DC2626'
-                    : isPunchedOut
-                    ? '#475569'
-                    : '#16A34A',
+                      ? '#DC2626'
+                      : isPunchedOut
+                        ? '#475569'
+                        : '#16A34A',
                   color: '#FFFFFF',
                   border: 'none',
                   fontSize: '16px',
                   fontWeight: 700,
-                  cursor: isPunchedOut ? 'not-allowed' : 'pointer',
-                  opacity: isPunchedOut ? 0.8 : 1,
+                  cursor: isPunchedOut && !isFlaggedToday ? 'not-allowed' : 'pointer',
+                  opacity: isPunchedOut && !isFlaggedToday ? 0.8 : 1,
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
                   gap: '10px',
-                  boxShadow: !hasFaceId
-                    ? '0 4px 16px rgba(217, 119, 6, 0.4)'
+                  boxShadow: isFlaggedToday
+                    ? isPunchedIn
+                      ? '0 4px 16px rgba(220, 38, 38, 0.4)'
+                      : 'none'
                     : isPunchedIn
-                    ? '0 4px 16px rgba(220, 38, 38, 0.4)'
-                    : isPunchedOut
-                    ? 'none'
-                    : '0 4px 16px rgba(22, 163, 74, 0.4)',
+                      ? '0 4px 16px rgba(220, 38, 38, 0.4)'
+                      : isPunchedOut
+                        ? 'none'
+                        : '0 4px 16px rgba(22, 163, 74, 0.4)',
                   transition: 'transform 0.1s ease',
                 }}
                 onMouseDown={(e) => {
-                  if (!isPunchedOut) e.currentTarget.style.transform = 'scale(0.98)'
+                  if (!isPunchedOut || isFlaggedToday) e.currentTarget.style.transform = 'scale(0.98)'
                 }}
                 onMouseUp={(e) => {
-                  if (!isPunchedOut) e.currentTarget.style.transform = 'scale(1)'
+                  if (!isPunchedOut || isFlaggedToday) e.currentTarget.style.transform = 'scale(1)'
                 }}
               >
-                {isPunchedOut ? (
+                {isPunchedOut && !isFlaggedToday ? (
                   <CheckCircle2 size={22} />
                 ) : (
                   <ShieldCheck size={22} />
                 )}
-                {!hasFaceId
-                  ? 'Register Face ID to Punch In'
+                {isFlaggedToday
+                  ? isPunchedIn
+                    ? 'Punch Out (Shift Flagged • Capture Time)'
+                    : 'Shift Flagged • Adjust Work Hours'
                   : isPunchedIn
-                  ? 'Punch Out & Confirm'
-                  : isPunchedOut
-                  ? 'Day Completed (Punched Out)'
-                  : 'Punch In (GPS + Face)'}
+                    ? 'Punch Out & Confirm'
+                    : isPunchedOut
+                      ? 'Day Completed (Punched Out)'
+                      : 'Punch In (GPS + Device Telemetry)'}
               </button>
               <div style={{ fontSize: '11px', color: '#94A3B8', textAlign: 'center' }}>
-                {!hasFaceId
-                  ? 'Manual 10-second biometric registration is required before your first punch in'
+                {isFlaggedToday
+                  ? isPunchedIn
+                    ? 'Shift is flagged. Punch out when leaving to record departure time, then adjust hours.'
+                    : 'Shift is flagged. Click above to adjust or regularize approved shift hours.'
                   : isPunchedOut
-                  ? 'Attendance successfully recorded for today'
-                  : `Verified against ${office.name} (${office.radius_meters}m geofence perimeter)`}
+                    ? 'Attendance successfully recorded for today'
+                    : `Verified against ${office.name} (${office.radius_meters}m geofence perimeter)`}
               </div>
 
-              {/* Biometric Status Pill & Action links */}
+              {/* Hardware Telemetry Pill & Action links */}
               <div
                 style={{
                   display: 'flex',
@@ -1244,30 +1304,34 @@ export default function AttendanceClient({ profile }: AttendanceClientProps) {
                   flexWrap: 'wrap',
                 }}
               >
-                {hasFaceId ? (
+                <span
+                  style={{
+                    color: '#38BDF8',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '4px',
+                    fontWeight: 600,
+                  }}
+                >
+                  <ShieldCheck size={13} /> GPS &amp; Hardware Telemetry Verified
+                </span>
+                {isFlaggedToday && (
                   <>
-                    <span
-                      style={{
-                        color: '#34D399',
-                        display: 'inline-flex',
-                        alignItems: 'center',
-                        gap: '4px',
-                        fontWeight: 600,
-                      }}
-                    >
-                      <ShieldCheck size={13} /> Biometric Face ID Active
-                    </span>
                     <span style={{ color: '#475569' }}>·</span>
                     <button
                       type="button"
-                      onClick={() => setTestScannerOpen(true)}
+                      onClick={() => {
+                        setRegularizeLog(todayLog)
+                        setRegularizeEmployeeName(profile?.name || 'Staff Member')
+                        setRegularizeModalOpen(true)
+                      }}
                       style={{
                         background: 'none',
                         border: 'none',
                         padding: 0,
-                        color: '#38BDF8',
+                        color: '#FDE047',
                         fontSize: '11.5px',
-                        fontWeight: 600,
+                        fontWeight: 700,
                         cursor: 'pointer',
                         textDecoration: 'underline',
                         display: 'inline-flex',
@@ -1275,55 +1339,7 @@ export default function AttendanceClient({ profile }: AttendanceClientProps) {
                         gap: '3px',
                       }}
                     >
-                      <Scan size={12} /> Test Face Scanner
-                    </button>
-                    <span style={{ color: '#475569' }}>·</span>
-                    <button
-                      type="button"
-                      onClick={() => setBiometricHubOpen(true)}
-                      style={{
-                        background: 'none',
-                        border: 'none',
-                        padding: 0,
-                        color: '#CBD5E1',
-                        fontSize: '11.5px',
-                        fontWeight: 500,
-                        cursor: 'pointer',
-                        textDecoration: 'underline',
-                      }}
-                    >
-                      Manage / Re-calibrate
-                    </button>
-                  </>
-                ) : (
-                  <>
-                    <span
-                      style={{
-                        color: '#FBBF24',
-                        display: 'inline-flex',
-                        alignItems: 'center',
-                        gap: '4px',
-                        fontWeight: 600,
-                      }}
-                    >
-                      <Sparkles size={13} /> Auto-enrolls on 1st punch
-                    </span>
-                    <span style={{ color: '#475569' }}>·</span>
-                    <button
-                      type="button"
-                      onClick={() => setFaceEnrollModalOpen(true)}
-                      style={{
-                        background: 'none',
-                        border: 'none',
-                        padding: 0,
-                        color: '#FBBF24',
-                        fontSize: '11.5px',
-                        fontWeight: 700,
-                        cursor: 'pointer',
-                        textDecoration: 'underline',
-                      }}
-                    >
-                      Enroll Now (3D Calibration)
+                      <Edit3 size={12} /> Adjust Work Hours
                     </button>
                   </>
                 )}
@@ -1512,7 +1528,7 @@ export default function AttendanceClient({ profile }: AttendanceClientProps) {
         )}
 
         {/* ======================================================= */}
-        {/* 4. TABS NAVIGATION TOOLBAR */}
+        {/* 4. TABS NAVIGATION TOOLBAR (HORIZONTAL SCROLLING) */}
         {/* ======================================================= */}
         <div
           style={{
@@ -1520,178 +1536,289 @@ export default function AttendanceClient({ profile }: AttendanceClientProps) {
             alignItems: 'center',
             justifyContent: 'space-between',
             gap: 12,
-            flexWrap: 'wrap',
-            marginBottom: 16,
+            marginBottom: 20,
+            width: '100%',
           }}
+          className="attendance-tabs-toolbar"
         >
-          <div className="attendance-tabs-scroll" style={{ display: 'flex', gap: 8, overflowX: 'auto', paddingBottom: 4 }}>
-            {canManage && (
-              <>
-                <button
-                  type="button"
-                  onClick={() => setActiveTab('ROSTER')}
-                  className={activeTab === 'ROSTER' ? 'btn btn-primary' : 'btn btn-outline'}
-                  style={{ fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: 6 }}
-                >
-                  <Users size={15} /> Live Daily Roster ({adminRoster.length})
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => setActiveTab('EXCEPTIONS')}
-                  className={activeTab === 'EXCEPTIONS' ? 'btn btn-primary' : 'btn btn-outline'}
-                  style={{
-                    fontWeight: 600,
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: 6,
-                    backgroundColor: activeTab === 'EXCEPTIONS' ? '#D97706' : '#FFFFFF',
-                    borderColor: activeTab === 'EXCEPTIONS' ? '#D97706' : 'var(--border)',
-                    color: activeTab === 'EXCEPTIONS' ? '#FFFFFF' : 'var(--text-primary)',
-                  }}
-                >
-                  <AlertTriangle size={15} /> Punch Approvals ({punchApprovalList.length})
-                  {countPunchActionNeeded > 0 && (
-                    <span
-                      style={{
-                        backgroundColor: '#DC2626',
-                        color: '#FFF',
-                        fontSize: '11px',
-                        fontWeight: 700,
-                        padding: '1px 6px',
-                        borderRadius: '999px',
-                      }}
-                      title={`${countPunchActionNeeded} remote punches need review`}
-                    >
-                      {countPunchActionNeeded}
-                    </span>
-                  )}
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => setActiveTab('REGULARIZATIONS')}
-                  className={activeTab === 'REGULARIZATIONS' ? 'btn btn-primary' : 'btn btn-outline'}
-                  style={{
-                    fontWeight: 600,
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: 6,
-                    backgroundColor: activeTab === 'REGULARIZATIONS' ? '#7C3AED' : '#FFFFFF',
-                    borderColor: activeTab === 'REGULARIZATIONS' ? '#7C3AED' : 'var(--border)',
-                    color: activeTab === 'REGULARIZATIONS' ? '#FFFFFF' : 'var(--text-primary)',
-                  }}
-                >
-                  <FileSpreadsheet size={15} /> Regularization Requests ({allRegularizations.length})
-                  {countRegPending > 0 && (
-                    <span
-                      style={{
-                        backgroundColor: '#F59E0B',
-                        color: '#FFF',
-                        fontSize: '11px',
-                        fontWeight: 700,
-                        padding: '1px 6px',
-                        borderRadius: '999px',
-                        display: 'inline-flex',
-                        alignItems: 'center',
-                        gap: 2,
-                      }}
-                      title={`${countRegPending} shift regularizations pending approval`}
-                    >
-                      ⏳ {countRegPending}
-                    </span>
-                  )}
-                </button>
-
-                {/* NEW 5TH TAB: MONTHLY HOURS & DEFICIT AUDIT */}
-                <button
-                  type="button"
-                  onClick={() => setActiveTab('HOURS_AUDIT')}
-                  className={activeTab === 'HOURS_AUDIT' ? 'btn btn-primary' : 'btn btn-outline'}
-                  style={{
-                    fontWeight: 600,
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: 6,
-                    backgroundColor: activeTab === 'HOURS_AUDIT' ? '#4338CA' : '#FFFFFF',
-                    borderColor: activeTab === 'HOURS_AUDIT' ? '#4338CA' : 'var(--border)',
-                    color: activeTab === 'HOURS_AUDIT' ? '#FFFFFF' : 'var(--text-primary)',
-                  }}
-                >
-                  <TrendingDown size={15} /> Monthly Hours &amp; Deficit Audit
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => setActiveTab('LEAVES')}
-                  className={activeTab === 'LEAVES' ? 'btn btn-primary' : 'btn btn-outline'}
-                  style={{
-                    fontWeight: 600,
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: 6,
-                    backgroundColor: activeTab === 'LEAVES' ? '#059669' : '#FFFFFF',
-                    borderColor: activeTab === 'LEAVES' ? '#059669' : 'var(--border)',
-                    color: activeTab === 'LEAVES' ? '#FFFFFF' : 'var(--text-primary)',
-                  }}
-                >
-                  <Calendar size={15} /> Leave Management
-                  {allLeaveRequests.filter((r) => r.status === 'PENDING').length > 0 && (
-                    <span
-                      style={{
-                        backgroundColor: '#10B981',
-                        color: '#FFF',
-                        fontSize: '11px',
-                        fontWeight: 700,
-                        padding: '1px 6px',
-                        borderRadius: '999px',
-                      }}
-                    >
-                      {allLeaveRequests.filter((r) => r.status === 'PENDING').length}
-                    </span>
-                  )}
-                </button>
-              </>
-            )}
-
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, flex: 1, minWidth: 0 }}>
+            {/* Scroll Left Button */}
             <button
               type="button"
-              onClick={() => setActiveTab('MY_LOGS')}
-              className={activeTab === 'MY_LOGS' ? 'btn btn-primary' : 'btn btn-outline'}
-              style={{ fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: 6 }}
+              onClick={() => scrollTabs('left')}
+              className="btn btn-outline"
+              style={{
+                padding: '6px 8px',
+                minWidth: '32px',
+                height: '38px',
+                borderRadius: '8px',
+                backgroundColor: '#FFFFFF',
+                borderColor: '#CBD5E1',
+                color: '#475569',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                flexShrink: 0,
+                cursor: 'pointer',
+              }}
+              title="Scroll tabs left"
             >
-              <Clock size={15} /> My Attendance &amp; Timesheet
+              <ChevronLeft size={16} />
             </button>
 
-            <button
-              type="button"
-              onClick={() => setActiveTab('MY_LEAVES')}
-              className={activeTab === 'MY_LEAVES' ? 'btn btn-primary' : 'btn btn-outline'}
+            {/* Horizontal Scrollable Tabs Strip */}
+            <div
+              ref={tabsContainerRef}
+              onWheel={(e) => {
+                if (e.deltaY !== 0 && tabsContainerRef.current) {
+                  tabsContainerRef.current.scrollLeft += e.deltaY * 1.5
+                }
+              }}
+              className="attendance-tabs-scroll"
               style={{
-                fontWeight: 600,
-                display: 'inline-flex',
+                display: 'flex',
+                gap: 8,
+                flexWrap: 'nowrap',
                 alignItems: 'center',
-                gap: 6,
-                backgroundColor: activeTab === 'MY_LEAVES' ? '#059669' : '#FFFFFF',
-                borderColor: activeTab === 'MY_LEAVES' ? '#059669' : 'var(--border)',
-                color: activeTab === 'MY_LEAVES' ? '#FFFFFF' : 'var(--text-primary)',
+                overflowX: 'auto',
+                whiteSpace: 'nowrap',
+                WebkitOverflowScrolling: 'touch',
+                padding: '4px 2px',
+                flex: 1,
+                minWidth: 0,
+                scrollbarWidth: 'thin',
               }}
             >
-              <Calendar size={15} /> My Leaves &amp; Requests ({myLeaveRequests.length})
-              {myMonthlyStats.pendingLeaveCount > 0 && (
-                <span
-                  style={{
-                    backgroundColor: '#F59E0B',
-                    color: '#FFF',
-                    fontSize: '11px',
-                    fontWeight: 700,
-                    padding: '1px 6px',
-                    borderRadius: '999px',
-                  }}
-                >
-                  {myMonthlyStats.pendingLeaveCount} Pending
-                </span>
+              {canManage && (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => setActiveTab('ROSTER')}
+                    className={activeTab === 'ROSTER' ? 'btn btn-primary' : 'btn btn-outline'}
+                    style={{
+                      fontWeight: 600,
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 6,
+                      flexShrink: 0,
+                      whiteSpace: 'nowrap',
+                      borderRadius: '10px',
+                      transition: 'all 0.15s ease',
+                    }}
+                  >
+                    <Users size={15} /> Live Daily Roster ({adminRoster.length})
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setActiveTab('EXCEPTIONS')}
+                    className={activeTab === 'EXCEPTIONS' ? 'btn btn-primary' : 'btn btn-outline'}
+                    style={{
+                      fontWeight: 600,
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 6,
+                      flexShrink: 0,
+                      whiteSpace: 'nowrap',
+                      borderRadius: '10px',
+                      transition: 'all 0.15s ease',
+                      backgroundColor: activeTab === 'EXCEPTIONS' ? '#D97706' : '#FFFFFF',
+                      borderColor: activeTab === 'EXCEPTIONS' ? '#D97706' : 'var(--border)',
+                      color: activeTab === 'EXCEPTIONS' ? '#FFFFFF' : 'var(--text-primary)',
+                    }}
+                  >
+                    <AlertTriangle size={15} /> Punch Approvals ({punchApprovalList.length})
+                    {countPunchActionNeeded > 0 && (
+                      <span
+                        style={{
+                          backgroundColor: '#DC2626',
+                          color: '#FFF',
+                          fontSize: '11px',
+                          fontWeight: 700,
+                          padding: '1px 6px',
+                          borderRadius: '999px',
+                        }}
+                        title={`${countPunchActionNeeded} remote punches need review`}
+                      >
+                        {countPunchActionNeeded}
+                      </span>
+                    )}
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setActiveTab('REGULARIZATIONS')}
+                    className={activeTab === 'REGULARIZATIONS' ? 'btn btn-primary' : 'btn btn-outline'}
+                    style={{
+                      fontWeight: 600,
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 6,
+                      flexShrink: 0,
+                      whiteSpace: 'nowrap',
+                      borderRadius: '10px',
+                      transition: 'all 0.15s ease',
+                      backgroundColor: activeTab === 'REGULARIZATIONS' ? '#7C3AED' : '#FFFFFF',
+                      borderColor: activeTab === 'REGULARIZATIONS' ? '#7C3AED' : 'var(--border)',
+                      color: activeTab === 'REGULARIZATIONS' ? '#FFFFFF' : 'var(--text-primary)',
+                    }}
+                  >
+                    <FileSpreadsheet size={15} /> Regularization Requests ({allRegularizations.length})
+                    {countRegPending > 0 && (
+                      <span
+                        style={{
+                          backgroundColor: '#F59E0B',
+                          color: '#FFF',
+                          fontSize: '11px',
+                          fontWeight: 700,
+                          padding: '1px 6px',
+                          borderRadius: '999px',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: 2,
+                        }}
+                        title={`${countRegPending} shift regularizations pending approval`}
+                      >
+                        ⏳ {countRegPending}
+                      </span>
+                    )}
+                  </button>
+
+                  {/* 4TH TAB: MONTHLY HOURS & DEFICIT AUDIT */}
+                  <button
+                    type="button"
+                    onClick={() => setActiveTab('HOURS_AUDIT')}
+                    className={activeTab === 'HOURS_AUDIT' ? 'btn btn-primary' : 'btn btn-outline'}
+                    style={{
+                      fontWeight: 600,
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 6,
+                      flexShrink: 0,
+                      whiteSpace: 'nowrap',
+                      borderRadius: '10px',
+                      transition: 'all 0.15s ease',
+                      backgroundColor: activeTab === 'HOURS_AUDIT' ? '#4338CA' : '#FFFFFF',
+                      borderColor: activeTab === 'HOURS_AUDIT' ? '#4338CA' : 'var(--border)',
+                      color: activeTab === 'HOURS_AUDIT' ? '#FFFFFF' : 'var(--text-primary)',
+                    }}
+                  >
+                    <TrendingDown size={15} /> Monthly Hours &amp; Deficit Audit
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setActiveTab('LEAVES')}
+                    className={activeTab === 'LEAVES' ? 'btn btn-primary' : 'btn btn-outline'}
+                    style={{
+                      fontWeight: 600,
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 6,
+                      flexShrink: 0,
+                      whiteSpace: 'nowrap',
+                      borderRadius: '10px',
+                      transition: 'all 0.15s ease',
+                      backgroundColor: activeTab === 'LEAVES' ? '#059669' : '#FFFFFF',
+                      borderColor: activeTab === 'LEAVES' ? '#059669' : 'var(--border)',
+                      color: activeTab === 'LEAVES' ? '#FFFFFF' : 'var(--text-primary)',
+                    }}
+                  >
+                    <Calendar size={15} /> Leave Management
+                    {allLeaveRequests.filter((r) => r.status === 'PENDING').length > 0 && (
+                      <span
+                        style={{
+                          backgroundColor: '#10B981',
+                          color: '#FFF',
+                          fontSize: '11px',
+                          fontWeight: 700,
+                          padding: '1px 6px',
+                          borderRadius: '999px',
+                        }}
+                      >
+                        {allLeaveRequests.filter((r) => r.status === 'PENDING').length}
+                      </span>
+                    )}
+                  </button>
+                </>
               )}
+
+              <button
+                type="button"
+                onClick={() => setActiveTab('MY_LOGS')}
+                className={activeTab === 'MY_LOGS' ? 'btn btn-primary' : 'btn btn-outline'}
+                style={{
+                  fontWeight: 600,
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  flexShrink: 0,
+                  whiteSpace: 'nowrap',
+                  borderRadius: '10px',
+                  transition: 'all 0.15s ease',
+                }}
+              >
+                <Clock size={15} /> My Attendance &amp; Timesheet
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setActiveTab('MY_LEAVES')}
+                className={activeTab === 'MY_LEAVES' ? 'btn btn-primary' : 'btn btn-outline'}
+                style={{
+                  fontWeight: 600,
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  flexShrink: 0,
+                  whiteSpace: 'nowrap',
+                  borderRadius: '10px',
+                  transition: 'all 0.15s ease',
+                  backgroundColor: activeTab === 'MY_LEAVES' ? '#059669' : '#FFFFFF',
+                  borderColor: activeTab === 'MY_LEAVES' ? '#059669' : 'var(--border)',
+                  color: activeTab === 'MY_LEAVES' ? '#FFFFFF' : 'var(--text-primary)',
+                }}
+              >
+                <Calendar size={15} /> My Leaves &amp; Requests ({myLeaveRequests.length})
+                {myMonthlyStats.pendingLeaveCount > 0 && (
+                  <span
+                    style={{
+                      backgroundColor: '#F59E0B',
+                      color: '#FFF',
+                      fontSize: '11px',
+                      fontWeight: 700,
+                      padding: '1px 6px',
+                      borderRadius: '999px',
+                    }}
+                  >
+                    {myMonthlyStats.pendingLeaveCount} Pending
+                  </span>
+                )}
+              </button>
+            </div>
+
+            {/* Scroll Right Button */}
+            <button
+              type="button"
+              onClick={() => scrollTabs('right')}
+              className="btn btn-outline"
+              style={{
+                padding: '6px 8px',
+                minWidth: '32px',
+                height: '38px',
+                borderRadius: '8px',
+                backgroundColor: '#FFFFFF',
+                borderColor: '#CBD5E1',
+                color: '#475569',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                flexShrink: 0,
+                cursor: 'pointer',
+              }}
+              title="Scroll tabs right"
+            >
+              <ChevronRight size={16} />
             </button>
           </div>
 
@@ -1775,26 +1902,26 @@ export default function AttendanceClient({ profile }: AttendanceClientProps) {
 
             {/* Main Roster Table */}
             <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
-              <div className="table-responsive-wrapper" style={{ overflowX: 'auto', width: '100%' }}>
-                <table className="table" style={{ width: '100%', minWidth: '850px', tableLayout: 'fixed', fontSize: '13px' }}>
+              <div className="table-responsive-wrapper" style={{ width: '100%' }}>
+                <table className="table" style={{ width: '100%', tableLayout: 'auto', fontSize: '13px' }}>
                   <thead>
                     <tr>
-                      <th style={{ width: '28%', padding: '10px 14px', fontSize: '11px', textTransform: 'uppercase', color: 'var(--text-secondary)' }}>
+                      <th style={{ padding: '10px 14px', fontSize: '11px', textTransform: 'uppercase', color: 'var(--text-secondary)' }}>
                         Employee
                       </th>
-                      <th style={{ width: '14%', padding: '10px 14px', fontSize: '11px', textTransform: 'uppercase', color: 'var(--text-secondary)' }}>
+                      <th style={{ padding: '10px 14px', fontSize: '11px', textTransform: 'uppercase', color: 'var(--text-secondary)' }}>
                         Role
                       </th>
-                      <th style={{ width: '14%', padding: '10px 14px', fontSize: '11px', textTransform: 'uppercase', color: 'var(--text-secondary)' }}>
+                      <th style={{ padding: '10px 14px', fontSize: '11px', textTransform: 'uppercase', color: 'var(--text-secondary)' }}>
                         Login Time (In)
                       </th>
-                      <th style={{ width: '14%', padding: '10px 14px', fontSize: '11px', textTransform: 'uppercase', color: 'var(--text-secondary)' }}>
+                      <th style={{ padding: '10px 14px', fontSize: '11px', textTransform: 'uppercase', color: 'var(--text-secondary)' }}>
                         Logout Time (Out)
                       </th>
-                      <th style={{ width: '12%', padding: '10px 14px', fontSize: '11px', textTransform: 'uppercase', color: 'var(--text-secondary)' }}>
+                      <th style={{ padding: '10px 14px', fontSize: '11px', textTransform: 'uppercase', color: 'var(--text-secondary)' }}>
                         Working Hours
                       </th>
-                      <th style={{ width: '18%', padding: '10px 14px', fontSize: '11px', textTransform: 'uppercase', color: 'var(--text-secondary)', textAlign: 'right' }}>
+                      <th style={{ padding: '10px 14px', fontSize: '11px', textTransform: 'uppercase', color: 'var(--text-secondary)', textAlign: 'right' }}>
                         Attendance Status &amp; Action
                       </th>
                     </tr>
@@ -1821,10 +1948,11 @@ export default function AttendanceClient({ profile }: AttendanceClientProps) {
                           PRESENT_HQ: { bg: '#DCFCE7', text: '#15803D', label: '🟢 In Office (HQ)' },
                           PRESENT_REMOTE: { bg: '#FEF08A', text: '#854D0E', label: '🟡 Remote / Field' },
                           ON_LEAVE: { bg: '#E0F2FE', text: '#0369A1', label: '🔵 On Leave' },
+                          FLAGGED: { bg: '#FEE2E2', text: '#DC2626', label: '🚩 Flagged Shift' },
                           NOT_PUNCHED: todayHoliday
                             ? { bg: '#FEF3C7', text: '#B45309', label: `🎉 Holiday (${todayHoliday.name})` }
                             : { bg: '#F1F5F9', text: '#475569', label: '⚪ Not Punched' },
-                        }[emp.live_status]
+                        }[emp.live_status] || { bg: '#F1F5F9', text: '#475569', label: '⚪ Not Punched' }
 
                         return (
                           <tr
@@ -1983,18 +2111,40 @@ export default function AttendanceClient({ profile }: AttendanceClientProps) {
                 </div>
 
                 <div style={{ display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap' }}>
-                  <div style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
-                    Policy Target:{' '}
-                    {workPolicy.custom_day_hours && Object.keys(workPolicy.custom_day_hours).length > 0 ? (
-                      <>
-                        <strong>{auditExpectedDays} business days</strong> (custom day schedule){' = '}
-                        <strong style={{ color: '#2563EB' }}>{auditExpectedHours} hours expected per employee</strong>
-                      </>
-                    ) : (
-                      <>
-                        <strong>{auditExpectedDays} business days</strong> × <strong>{workPolicy.daily_expected_hours}h</strong> ={' '}
-                        <strong style={{ color: '#2563EB' }}>{auditExpectedHours} hours expected per employee</strong>
-                      </>
+                  <div style={{ fontSize: '12px', color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                    <span>
+                      Policy Target:{' '}
+                      {workPolicy.custom_day_hours && Object.keys(workPolicy.custom_day_hours).length > 0 ? (
+                        <>
+                          <strong>{auditExpectedDays} business days</strong> (custom day schedule){' = '}
+                          <strong style={{ color: '#2563EB' }}>{auditExpectedHours} hours expected per employee</strong>
+                        </>
+                      ) : (
+                        <>
+                          <strong>{auditExpectedDays} business days</strong> × <strong>{workPolicy.daily_expected_hours}h</strong> ={' '}
+                          <strong style={{ color: '#2563EB' }}>{auditExpectedHours} hours expected per employee</strong>
+                        </>
+                      )}
+                    </span>
+
+                    {workPolicy.tracking_start_date && (
+                      <span
+                        style={{
+                          fontSize: '11px',
+                          fontWeight: 700,
+                          padding: '2px 8px',
+                          borderRadius: '20px',
+                          backgroundColor: '#DCFCE7',
+                          color: '#15803D',
+                          border: '1px solid #86EFAC',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '4px',
+                        }}
+                        title={`Live attendance tracking officially begins on ${workPolicy.tracking_start_date}. Past days are grace days (0h deficit).`}
+                      >
+                        🚀 Go-Live Date: {workPolicy.tracking_start_date}
+                      </span>
                     )}
                   </div>
 
@@ -2155,13 +2305,31 @@ export default function AttendanceClient({ profile }: AttendanceClientProps) {
                       </tr>
                     ) : (
                       paginatedAudit.map((aud) => {
-                        const mtdDeficit = aud.month_to_date_deficit ?? aud.non_working_hours
-                        const hasDeficit = mtdDeficit > 0
+                        const isExempt = Boolean(aud.is_exempt)
+                        const mtdDeficit = isExempt ? 0 : (aud.month_to_date_deficit ?? aud.non_working_hours)
+                        const hasDeficit = !isExempt && mtdDeficit > 0
                         return (
                           <tr key={aud.employee_id}>
                             {/* Employee */}
                             <td style={{ padding: '12px 14px' }}>
-                              <div style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{aud.employee_name}</div>
+                              <div style={{ fontWeight: 600, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: 6 }}>
+                                <span>{aud.employee_name}</span>
+                                {isExempt && (
+                                  <span
+                                    style={{
+                                      fontSize: 10,
+                                      fontWeight: 700,
+                                      padding: '1px 6px',
+                                      borderRadius: 4,
+                                      backgroundColor: '#F1F5F9',
+                                      color: '#475569',
+                                      border: '1px solid #CBD5E1',
+                                    }}
+                                  >
+                                    🛡️ Exempt
+                                  </span>
+                                )}
+                              </div>
                               <div style={{ fontSize: 11, color: 'var(--text-secondary)' }}>
                                 {aud.employee_role} • {aud.employee_email}
                               </div>
@@ -2169,12 +2337,21 @@ export default function AttendanceClient({ profile }: AttendanceClientProps) {
 
                             {/* Expected */}
                             <td style={{ padding: '12px 14px' }}>
-                              <div style={{ fontWeight: 700, color: 'var(--text-primary)' }}>
-                                {aud.expected_to_date_hours ?? aud.expected_total_hours}h
-                              </div>
-                              <div style={{ fontSize: 11, color: 'var(--text-secondary)' }}>
-                                To date ({aud.expected_total_hours}h full mo)
-                              </div>
+                              {isExempt ? (
+                                <div>
+                                  <div style={{ fontWeight: 700, color: '#64748B' }}>0h (Exempt)</div>
+                                  <div style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>No hours required</div>
+                                </div>
+                              ) : (
+                                <div>
+                                  <div style={{ fontWeight: 700, color: 'var(--text-primary)' }}>
+                                    {aud.expected_to_date_hours ?? aud.expected_total_hours}h
+                                  </div>
+                                  <div style={{ fontSize: 11, color: 'var(--text-secondary)' }}>
+                                    To date ({aud.expected_total_hours}h full mo)
+                                  </div>
+                                </div>
+                              )}
                             </td>
 
                             {/* Actual Worked */}
@@ -2189,7 +2366,24 @@ export default function AttendanceClient({ profile }: AttendanceClientProps) {
 
                             {/* Non-Working Hours (Deficit) */}
                             <td style={{ padding: '12px 14px' }}>
-                              {hasDeficit ? (
+                              {isExempt ? (
+                                <span
+                                  style={{
+                                    padding: '3px 8px',
+                                    borderRadius: 6,
+                                    fontSize: 11.5,
+                                    fontWeight: 700,
+                                    backgroundColor: '#F1F5F9',
+                                    color: '#475569',
+                                    border: '1px solid #E2E8F0',
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: 4,
+                                  }}
+                                >
+                                  <ShieldCheck size={12} /> 0h (Exempt)
+                                </span>
+                              ) : hasDeficit ? (
                                 <span
                                   style={{
                                     padding: '3px 8px',
@@ -2226,7 +2420,11 @@ export default function AttendanceClient({ profile }: AttendanceClientProps) {
 
                             {/* Estimated Pay Cut */}
                             <td style={{ padding: '12px 14px' }}>
-                              {(aud.estimated_pay_cut || 0) > 0 ? (
+                              {isExempt ? (
+                                <span style={{ fontSize: 12, fontWeight: 600, color: '#16A34A' }}>
+                                  0 {aud.currency || 'SAR'}
+                                </span>
+                              ) : (aud.estimated_pay_cut || 0) > 0 ? (
                                 <span
                                   style={{
                                     padding: '3px 8px',
@@ -2254,26 +2452,32 @@ export default function AttendanceClient({ profile }: AttendanceClientProps) {
                             </td>
 
                             {/* Late Days */}
-                            <td style={{ padding: '12px 14px', color: aud.days_late > 0 ? '#DC2626' : 'var(--text-tertiary)', fontWeight: aud.days_late > 0 ? 600 : 400 }}>
-                              {aud.days_late > 0 ? `${aud.days_late} Days Late` : 'None'}
+                            <td style={{ padding: '12px 14px', color: isExempt ? 'var(--text-tertiary)' : aud.days_late > 0 ? '#DC2626' : 'var(--text-tertiary)', fontWeight: !isExempt && aud.days_late > 0 ? 600 : 400 }}>
+                              {isExempt ? 'Exempt' : aud.days_late > 0 ? `${aud.days_late} Days Late` : 'None'}
                             </td>
 
                             {/* Adherence Rate */}
                             <td style={{ padding: '12px 14px' }}>
-                              <div style={{ display: 'inline-flex', flexDirection: 'column', alignItems: 'flex-start', gap: 3 }}>
-                                <span style={{ fontWeight: 700, color: aud.attendance_adherence_percent >= 90 ? '#16A34A' : '#D97706' }}>
-                                  {aud.attendance_adherence_percent}%
+                              {isExempt ? (
+                                <span style={{ fontSize: 11.5, fontWeight: 600, color: '#64748B' }}>
+                                  -- (Exempt)
                                 </span>
-                                <div style={{ width: 70, height: 4, backgroundColor: '#E2E8F0', borderRadius: 999, overflow: 'hidden' }}>
-                                  <div
-                                    style={{
-                                      width: `${aud.attendance_adherence_percent}%`,
-                                      height: '100%',
-                                      backgroundColor: aud.attendance_adherence_percent >= 90 ? '#16A34A' : '#D97706',
-                                    }}
-                                  />
+                              ) : (
+                                <div style={{ display: 'inline-flex', flexDirection: 'column', alignItems: 'flex-start', gap: 3 }}>
+                                  <span style={{ fontWeight: 700, color: aud.attendance_adherence_percent >= 90 ? '#16A34A' : '#D97706' }}>
+                                    {aud.attendance_adherence_percent}%
+                                  </span>
+                                  <div style={{ width: 70, height: 4, backgroundColor: '#E2E8F0', borderRadius: 999, overflow: 'hidden' }}>
+                                    <div
+                                      style={{
+                                        width: `${aud.attendance_adherence_percent}%`,
+                                        height: '100%',
+                                        backgroundColor: aud.attendance_adherence_percent >= 90 ? '#16A34A' : '#D97706',
+                                      }}
+                                    />
+                                  </div>
                                 </div>
-                              </div>
+                              )}
                             </td>
 
                             {/* Actions */}
@@ -2619,20 +2823,6 @@ export default function AttendanceClient({ profile }: AttendanceClientProps) {
                             gap: 12,
                           }}
                         >
-                          {item.punch_in_selfie_url && (
-                            <img
-                              src={item.punch_in_selfie_url}
-                              alt="Punch In Selfie"
-                              style={{
-                                width: 56,
-                                height: 56,
-                                borderRadius: 8,
-                                objectFit: 'cover',
-                                border: '2px solid #CBD5E1',
-                                flexShrink: 0,
-                              }}
-                            />
-                          )}
                           <div style={{ flex: 1, minWidth: 0 }}>
                             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6 }}>
                               <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-primary)' }}>
@@ -2648,14 +2838,14 @@ export default function AttendanceClient({ profile }: AttendanceClientProps) {
                                     item.punch_in_status === 'FLAGGED'
                                       ? '#FEE2E2'
                                       : item.punch_in_status === 'APPROVED'
-                                      ? '#DCFCE7'
-                                      : '#FEF3C7',
+                                        ? '#DCFCE7'
+                                        : '#FEF3C7',
                                   color:
                                     item.punch_in_status === 'FLAGGED'
                                       ? '#DC2626'
                                       : item.punch_in_status === 'APPROVED'
-                                      ? '#15803D'
-                                      : '#B45309',
+                                        ? '#15803D'
+                                        : '#B45309',
                                 }}
                               >
                                 {item.punch_in_status || 'PENDING'}
@@ -2673,9 +2863,10 @@ export default function AttendanceClient({ profile }: AttendanceClientProps) {
                               </div>
                             )}
 
-                            {item.punch_in_face_match_score !== undefined && item.punch_in_face_match_score !== null && (
-                              <div style={{ fontSize: 11, color: '#16A34A', fontWeight: 600, marginTop: 3 }}>
-                                🛡️ Biometric Face Match: {item.punch_in_face_match_score}%
+                            {item.punch_in_device_info && (
+                              <div style={{ fontSize: 11, color: '#475569', marginTop: 3 }}>
+                                💻 {item.punch_in_device_info.deviceName || item.punch_in_device_info.os} · {item.punch_in_device_info.browser}
+                                {item.punch_in_ip ? ` • 🌐 ${item.punch_in_ip}` : ''}
                               </div>
                             )}
                           </div>
@@ -2693,20 +2884,6 @@ export default function AttendanceClient({ profile }: AttendanceClientProps) {
                               gap: 12,
                             }}
                           >
-                            {item.punch_out_selfie_url && (
-                              <img
-                                src={item.punch_out_selfie_url}
-                                alt="Punch Out Selfie"
-                                style={{
-                                  width: 56,
-                                  height: 56,
-                                  borderRadius: 8,
-                                  objectFit: 'cover',
-                                  border: '2px solid #CBD5E1',
-                                  flexShrink: 0,
-                                }}
-                              />
-                            )}
                             <div style={{ flex: 1, minWidth: 0 }}>
                               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6 }}>
                                 <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-primary)' }}>
@@ -2722,14 +2899,14 @@ export default function AttendanceClient({ profile }: AttendanceClientProps) {
                                       item.punch_out_status === 'FLAGGED'
                                         ? '#FEE2E2'
                                         : item.punch_out_status === 'APPROVED'
-                                        ? '#DCFCE7'
-                                        : '#FEF3C7',
+                                          ? '#DCFCE7'
+                                          : '#FEF3C7',
                                     color:
                                       item.punch_out_status === 'FLAGGED'
                                         ? '#DC2626'
                                         : item.punch_out_status === 'APPROVED'
-                                        ? '#15803D'
-                                        : '#B45309',
+                                          ? '#15803D'
+                                          : '#B45309',
                                   }}
                                 >
                                   {item.punch_out_status || 'PENDING'}
@@ -2747,9 +2924,10 @@ export default function AttendanceClient({ profile }: AttendanceClientProps) {
                                 </div>
                               )}
 
-                              {item.punch_out_face_match_score !== undefined && item.punch_out_face_match_score !== null && (
-                                <div style={{ fontSize: 11, color: '#16A34A', fontWeight: 600, marginTop: 3 }}>
-                                  🛡️ Biometric Face Match: {item.punch_out_face_match_score}%
+                              {item.punch_out_device_info && (
+                                <div style={{ fontSize: 11, color: '#475569', marginTop: 3 }}>
+                                  💻 {item.punch_out_device_info.deviceName || item.punch_out_device_info.os} · {item.punch_out_device_info.browser}
+                                  {item.punch_out_ip ? ` • 🌐 ${item.punch_out_ip}` : ''}
                                 </div>
                               )}
                             </div>
@@ -2827,27 +3005,6 @@ export default function AttendanceClient({ profile }: AttendanceClientProps) {
                               Inspect Punch Out Proof <ChevronRight size={13} />
                             </button>
                           )}
-
-                          <button
-                            type="button"
-                            onClick={() => handleAdminDeleteRecord(item, false)}
-                            disabled={isProcessingRegularizeId === item.id}
-                            className="btn btn-outline"
-                            style={{
-                              padding: '6px 12px',
-                              fontSize: 12,
-                              fontWeight: 600,
-                              borderColor: '#FCA5A5',
-                              color: '#DC2626',
-                              backgroundColor: '#FEF2F2',
-                              display: 'inline-flex',
-                              alignItems: 'center',
-                              gap: 6,
-                            }}
-                            title="Delete this punch log record permanently"
-                          >
-                            <Trash2 size={13} /> Delete Punch
-                          </button>
                         </div>
                       </div>
                     </div>
@@ -3347,27 +3504,6 @@ export default function AttendanceClient({ profile }: AttendanceClientProps) {
                               <X size={14} /> Request declined
                             </span>
                           )}
-
-                          <button
-                            type="button"
-                            onClick={() => handleAdminDeleteRecord(item, true)}
-                            disabled={isProcessingRegularizeId === item.id}
-                            className="btn btn-outline"
-                            style={{
-                              padding: '7px 12px',
-                              fontSize: 12.5,
-                              fontWeight: 600,
-                              backgroundColor: '#FEF2F2',
-                              borderColor: '#FCA5A5',
-                              color: '#DC2626',
-                              display: 'inline-flex',
-                              alignItems: 'center',
-                              gap: 4,
-                            }}
-                            title="Delete this regularization request permanently"
-                          >
-                            <Trash2 size={14} /> Delete Request
-                          </button>
                         </div>
                       </div>
                     </div>
@@ -4193,9 +4329,8 @@ export default function AttendanceClient({ profile }: AttendanceClientProps) {
                         key={item.id}
                         className="attendance-mobile-card"
                         style={{
-                          borderLeft: `4px solid ${
-                            isRegPending ? '#7C3AED' : isRegApproved ? '#16A34A' : diff < 0 ? '#DC2626' : '#2563EB'
-                          }`,
+                          borderLeft: `4px solid ${isRegPending ? '#7C3AED' : isRegApproved ? '#16A34A' : diff < 0 ? '#DC2626' : '#2563EB'
+                            }`,
                         }}
                       >
                         {/* Top: Date + Location + Punctuality */}
@@ -4601,18 +4736,18 @@ export default function AttendanceClient({ profile }: AttendanceClientProps) {
                                   req.leave_type === 'ANNUAL'
                                     ? '#E0F2FE'
                                     : req.leave_type === 'SICK'
-                                    ? '#ECFDF5'
-                                    : req.leave_type === 'EMERGENCY'
-                                    ? '#FEF3C7'
-                                    : '#F1F5F9',
+                                      ? '#ECFDF5'
+                                      : req.leave_type === 'EMERGENCY'
+                                        ? '#FEF3C7'
+                                        : '#F1F5F9',
                                 color:
                                   req.leave_type === 'ANNUAL'
                                     ? '#0369A1'
                                     : req.leave_type === 'SICK'
-                                    ? '#047857'
-                                    : req.leave_type === 'EMERGENCY'
-                                    ? '#B45309'
-                                    : '#475569',
+                                      ? '#047857'
+                                      : req.leave_type === 'EMERGENCY'
+                                        ? '#B45309'
+                                        : '#475569',
                               }}
                             >
                               {req.leave_type} LEAVE
@@ -4669,9 +4804,8 @@ export default function AttendanceClient({ profile }: AttendanceClientProps) {
                       key={req.id}
                       className="attendance-mobile-card"
                       style={{
-                        borderLeft: `4px solid ${
-                          req.status === 'APPROVED' ? '#16A34A' : req.status === 'REJECTED' ? '#DC2626' : '#F59E0B'
-                        }`,
+                        borderLeft: `4px solid ${req.status === 'APPROVED' ? '#16A34A' : req.status === 'REJECTED' ? '#DC2626' : '#F59E0B'
+                          }`,
                       }}
                     >
                       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 6 }}>
@@ -4685,18 +4819,18 @@ export default function AttendanceClient({ profile }: AttendanceClientProps) {
                               req.leave_type === 'ANNUAL'
                                 ? '#E0F2FE'
                                 : req.leave_type === 'SICK'
-                                ? '#ECFDF5'
-                                : req.leave_type === 'EMERGENCY'
-                                ? '#FEF3C7'
-                                : '#F1F5F9',
+                                  ? '#ECFDF5'
+                                  : req.leave_type === 'EMERGENCY'
+                                    ? '#FEF3C7'
+                                    : '#F1F5F9',
                             color:
                               req.leave_type === 'ANNUAL'
                                 ? '#0369A1'
                                 : req.leave_type === 'SICK'
-                                ? '#047857'
-                                : req.leave_type === 'EMERGENCY'
-                                ? '#B45309'
-                                : '#475569',
+                                  ? '#047857'
+                                  : req.leave_type === 'EMERGENCY'
+                                    ? '#B45309'
+                                    : '#475569',
                           }}
                         >
                           {req.leave_type} LEAVE
@@ -4787,6 +4921,9 @@ export default function AttendanceClient({ profile }: AttendanceClientProps) {
         onUpdated={(newPol) => {
           setWorkPolicy(newPol)
           loadInitialData()
+          if (canManage) {
+            loadMonthlyAudit(selectedAuditMonth)
+          }
         }}
       />
 
@@ -4825,6 +4962,12 @@ export default function AttendanceClient({ profile }: AttendanceClientProps) {
         punchType={selectedExceptionType}
         adminId={userId}
         onReviewed={loadInitialData}
+        onOpenAdjustHours={(log) => {
+          setRegularizeLog(log)
+          const emp = adminRoster.find((r) => r.profile_id === log.user_id)
+          setRegularizeEmployeeName(emp?.name || log.employee_name || '')
+          setRegularizeModalOpen(true)
+        }}
       />
 
       {/* Detailed Employee Attendance Inspector Modal */}
@@ -4838,58 +4981,53 @@ export default function AttendanceClient({ profile }: AttendanceClientProps) {
         adminId={userId}
       />
 
-      {/* Biometric Face ID Management Hub Modal */}
-      <BiometricManagementModal
-        isOpen={biometricHubOpen}
-        userId={userId}
-        userName={profile?.name || 'Employee'}
-        hasFaceId={hasFaceId}
-        enrolledAt={faceEnrolledAt}
-        snapshotUrl={faceSnapshotUrl}
-        onClose={() => setBiometricHubOpen(false)}
-        onOpenTest={() => {
-          setBiometricHubOpen(false)
-          setTestScannerOpen(true)
-        }}
-        onOpenEnrollment={() => {
-          setBiometricHubOpen(false)
-          setFaceEnrollModalOpen(true)
-        }}
-        onFaceIdReset={() => {
-          setHasFaceId(false)
-          setFaceEnrolledAt(null)
-          setFaceSnapshotUrl(null)
-          loadInitialData()
-        }}
+      {/* Custom In-App Delete Confirmation Modal */}
+      <ConfirmModal
+        isOpen={deleteConfirmModal.isOpen}
+        variant="danger"
+        title={
+          deleteConfirmModal.isDedicatedReq
+            ? 'Delete Regularization Request'
+            : 'Delete Punch / Attendance Record'
+        }
+        message={
+          deleteConfirmModal.record ? (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+              <p style={{ margin: 0, fontSize: '14px', color: '#334155' }}>
+                Are you sure you want to permanently delete this {deleteConfirmModal.isDedicatedReq ? 'regularization request' : 'shift & punch record'} for{' '}
+                <strong style={{ color: '#0F172A', fontWeight: 700 }}>
+                  {deleteConfirmModal.record.employee_name || 'this employee'}
+                </strong>{' '}
+                on <strong style={{ color: '#0F172A', fontWeight: 700 }}>{deleteConfirmModal.record.date}</strong>?
+              </p>
+              {(deleteConfirmModal.record.review_notes || (deleteConfirmModal.record as any).reason) && (
+                <div
+                  style={{
+                    backgroundColor: '#FEF2F2',
+                    border: '1px solid #FECACA',
+                    padding: '8px 12px',
+                    borderRadius: '8px',
+                    fontSize: '12.5px',
+                    color: '#991B1B',
+                  }}
+                >
+                  <strong>Note:</strong> {deleteConfirmModal.record.review_notes || (deleteConfirmModal.record as any).reason}
+                </div>
+              )}
+              <p style={{ margin: 0, fontSize: '12px', color: '#64748B' }}>
+                ⚠️ This action cannot be undone. The record will be permanently deleted from daily rosters, timesheet history, and deficit audits.
+              </p>
+            </div>
+          ) : (
+            'Are you sure you want to permanently delete this record?'
+          )
+        }
+        confirmLabel="Yes, Delete Permanently"
+        cancelLabel="Cancel"
+        loading={isProcessingRegularizeId === deleteConfirmModal.record?.id}
+        onConfirm={confirmAdminDeleteRecord}
+        onCancel={() => setDeleteConfirmModal({ isOpen: false, record: null, isDedicatedReq: false })}
       />
-
-      {/* Dedicated Live Test Biometric Scanner Modal */}
-      <TestBiometricModal
-        isOpen={testScannerOpen}
-        userId={userId}
-        userName={profile?.name || 'Employee'}
-        onClose={() => setTestScannerOpen(false)}
-        onOpenEnrollment={() => {
-          setTestScannerOpen(false)
-          setFaceEnrollModalOpen(true)
-        }}
-      />
-
-      {/* Biometric Face ID Enrollment Modal */}
-      {faceEnrollModalOpen && (
-        <FaceEnrollmentModal
-          isOpen={faceEnrollModalOpen}
-          userId={userId}
-          userName={profile?.name || 'Employee'}
-          isReEnrollment={hasFaceId}
-          onClose={() => setFaceEnrollModalOpen(false)}
-          onSuccess={() => {
-            setHasFaceId(true)
-            setFaceEnrollModalOpen(false)
-            loadInitialData()
-          }}
-        />
-      )}
     </div>
   )
 }

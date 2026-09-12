@@ -166,7 +166,7 @@ export async function POST(req: Request) {
       outDisplay: bodyOutDisplay,
     } = body
 
-    if (!action || !['request', 'approve', 'reject', 'admin_adjust'].includes(action)) {
+    if (!action || !['request', 'approve', 'reject', 'admin_adjust', 'delete'].includes(action)) {
       return NextResponse.json({ error: 'Invalid action parameter' }, { status: 400 })
     }
 
@@ -483,7 +483,7 @@ export async function POST(req: Request) {
       let deletedLog = false
       let deletedReq = false
 
-      if (logId) {
+      if (logId && isValidUuid(logId)) {
         // Delete from attendance_logs if logId is valid
         const { error: logErr } = await supabase
           .from('attendance_logs')
@@ -493,8 +493,16 @@ export async function POST(req: Request) {
         if (!logErr) deletedLog = true
       }
 
-      // Also delete dedicated request if user_id and date or logId matches
       if (userId && dateStr) {
+        // Also delete from attendance_logs by (user_id, date)
+        const { error: logErr2 } = await supabase
+          .from('attendance_logs')
+          .delete()
+          .eq('user_id', userId)
+          .eq('date', dateStr)
+        if (!logErr2) deletedLog = true
+
+        // Delete dedicated request by user_id and shift_date
         const { error: reqErr } = await supabase
           .from('attendance_regularization_requests')
           .delete()
@@ -506,7 +514,7 @@ export async function POST(req: Request) {
         const { error: reqErr } = await supabase
           .from('attendance_regularization_requests')
           .delete()
-          .eq('id', logId)
+          .or(`id.eq.${logId},attendance_log_id.eq.${logId}`)
 
         if (!reqErr) deletedReq = true
       }

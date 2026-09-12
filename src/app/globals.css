@@ -514,6 +514,20 @@ textarea {
   z-index: 10000;
 }
 
+/* Attendance Tabs Scrollbar Removal & Horizontal Scroll Styling */
+.attendance-tabs-toolbar,
+.attendance-tabs-scroll {
+  scrollbar-width: none !important;
+  -ms-overflow-style: none !important;
+  -webkit-overflow-scrolling: touch !important;
+}
+.attendance-tabs-toolbar::-webkit-scrollbar,
+.attendance-tabs-scroll::-webkit-scrollbar {
+  display: none !important;
+  width: 0 !important;
+  height: 0 !important;
+}
+
 .modal-header {
   padding: 18px 24px;
   border-bottom: 1px solid var(--border);

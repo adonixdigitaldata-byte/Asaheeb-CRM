@@ -1,3 +1,5 @@
+import type { DeviceSpecs, NetworkSpecs } from '@/lib/deviceTelemetry'
+
 export interface CompanyLocation {
   id: string
   name: string
@@ -27,6 +29,9 @@ export interface AttendanceLog {
   punch_in_status: AttendancePunchStatus
   punch_in_reason: string | null
   punch_in_explanation: string | null
+  punch_in_device_info?: DeviceSpecs | null
+  punch_in_network_info?: NetworkSpecs | null
+  punch_in_ip?: string | null
 
   // Punch Out
   punch_out_at: string | null
@@ -38,6 +43,9 @@ export interface AttendanceLog {
   punch_out_status: AttendancePunchStatus | null
   punch_out_reason: string | null
   punch_out_explanation: string | null
+  punch_out_device_info?: DeviceSpecs | null
+  punch_out_network_info?: NetworkSpecs | null
+  punch_out_ip?: string | null
   punch_in_face_match_score?: number | null
   punch_out_face_match_score?: number | null
 
@@ -96,7 +104,7 @@ export interface LeaveRequest {
   employee_avatar?: string
 }
 
-export type LiveAttendanceStatus = 'PRESENT_HQ' | 'PRESENT_REMOTE' | 'ON_LEAVE' | 'NOT_PUNCHED'
+export type LiveAttendanceStatus = 'PRESENT_HQ' | 'PRESENT_REMOTE' | 'ON_LEAVE' | 'NOT_PUNCHED' | 'FLAGGED'
 
 export interface RosterEmployee {
   profile_id: string
@@ -110,6 +118,7 @@ export interface RosterEmployee {
   active_minutes: number
   face_enrolled_at?: string | null
   has_face_id?: boolean
+  is_exempt?: boolean
 }
 
 export const EXCEPTION_REASONS = [
@@ -135,6 +144,17 @@ export interface CompanyHoliday {
   date: string // 'YYYY-MM-DD'
 }
 
+export interface EmployeeShiftSchedule {
+  shift_start_time?: string // '11:00'
+  shift_end_time?: string // '19:00'
+  daily_expected_hours?: number // 8.0
+  grace_period_mins?: number // 15
+  work_days?: string[]
+  custom_day_hours?: Record<string, number> // e.g. { 'SATURDAY': 7.0, 'THURSDAY': 6.0 }
+  custom_day_schedules?: Record<string, DayShiftTiming>
+  is_exempt_from_tracking?: boolean
+}
+
 export interface CompanyWorkPolicy {
   id: string
   company_name: string
@@ -147,7 +167,10 @@ export interface CompanyWorkPolicy {
   default_sick_leave_quota: number // 30
   custom_day_hours?: Record<string, number> // e.g. { 'THURSDAY': 6.0, 'SATURDAY': 4.0 }
   custom_day_schedules?: Record<string, DayShiftTiming>
+  custom_employee_schedules?: Record<string, EmployeeShiftSchedule>
+  exempt_employee_ids?: string[]
   official_holidays?: CompanyHoliday[]
+  tracking_start_date?: string | null // e.g. '2026-09-13' (effective date when attendance tracking begins)
   updated_at?: string
 }
 
@@ -174,4 +197,5 @@ export interface MonthlyWorkHoursAudit {
   days_remote: number
   days_late: number
   days_absent: number
+  is_exempt?: boolean
 }

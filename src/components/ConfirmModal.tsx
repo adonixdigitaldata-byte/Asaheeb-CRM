@@ -1,6 +1,7 @@
 'use client'
 
-import React from 'react'
+import React, { useEffect, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { AlertTriangle, Trash2, X, Loader2 } from 'lucide-react'
 
 interface ConfirmModalProps {
@@ -26,14 +27,31 @@ export default function ConfirmModal({
   onConfirm,
   onCancel,
 }: ConfirmModalProps) {
-  if (!isOpen) return null
+  const [mounted, setMounted] = useState(false)
+
+  useEffect(() => {
+    setMounted(true)
+  }, [])
+
+  if (!isOpen || !mounted) return null
 
   const isDanger = variant === 'danger'
 
-  return (
+  const modalContent = (
     <div
       className="modal-overlay"
-      style={{ zIndex: 100 }}
+      style={{
+        position: 'fixed',
+        inset: 0,
+        backgroundColor: 'rgba(15, 23, 42, 0.6)',
+        backdropFilter: 'blur(8px)',
+        WebkitBackdropFilter: 'blur(8px)',
+        zIndex: 999999,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: '16px',
+      }}
       onClick={(e) => {
         if (e.target === e.currentTarget && !loading) {
           onCancel()
@@ -43,12 +61,16 @@ export default function ConfirmModal({
       <div
         className="modal-content"
         style={{
-          maxWidth: '460px',
-          borderRadius: '12px',
+          maxWidth: '480px',
+          width: '100%',
+          backgroundColor: '#FFFFFF',
+          borderRadius: '16px',
           border: '1px solid #E2E8F0',
-          boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04)',
-          animation: 'fadeIn 0.15s ease-out',
+          boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25)',
+          overflow: 'hidden',
+          animation: 'scaleIn 0.15s ease-out',
         }}
+        onClick={(e) => e.stopPropagation()}
       >
         <div style={{ padding: '24px 24px 16px 24px', display: 'flex', gap: '16px', alignItems: 'flex-start' }}>
           {/* Icon Badge */}
@@ -131,4 +153,6 @@ export default function ConfirmModal({
       </div>
     </div>
   )
+
+  return createPortal(modalContent, document.body)
 }
