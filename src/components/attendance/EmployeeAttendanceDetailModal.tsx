@@ -31,6 +31,7 @@ import {
   updateEmployeeLeaveBalance,
   deleteAttendanceLog,
   toggleEmployeeTrackingExemption,
+  getLocalDateString,
 } from '@/lib/attendanceService'
 import { formatDistance, getGoogleMapsUrl } from '@/lib/geoUtils'
 import RegularizeAttendanceModal from '@/components/attendance/RegularizeAttendanceModal'
@@ -1641,9 +1642,9 @@ export default function EmployeeAttendanceDetailModal({
                               <span style={{ display: 'inline-block', fontSize: '10px', fontWeight: 700, backgroundColor: '#F5F3FF', color: '#6D28D9', padding: '1px 6px', borderRadius: '4px', marginTop: '2px' }}>
                                 ⏳ Pending Review
                               </span>
-                            ) : log.is_auto_closed ? (
+                            ) : (log.is_auto_closed || (!log.punch_out_at && log.date < getLocalDateString())) ? (
                               <span style={{ display: 'inline-block', fontSize: '10px', fontWeight: 700, backgroundColor: '#FEF3C7', color: '#B45309', padding: '1px 6px', borderRadius: '4px', marginTop: '2px' }}>
-                                ⚠️ Auto-EOD
+                                ⚠️ Auto-Closed
                               </span>
                             ) : null}
                           </td>

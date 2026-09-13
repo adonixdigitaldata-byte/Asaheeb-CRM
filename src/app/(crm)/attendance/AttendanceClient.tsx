@@ -66,6 +66,7 @@ import {
   deleteAttendanceLog,
   formatTo24HourTime,
   formatDisplayTime,
+  getLocalDateString,
 } from '@/lib/attendanceService'
 import { formatDistance } from '@/lib/geoUtils'
 import PunchModal from '@/components/attendance/PunchModal'
@@ -223,7 +224,7 @@ export default function AttendanceClient({ profile }: AttendanceClientProps) {
   const [myLeavesPage, setMyLeavesPage] = useState(1)
   const [myLeavesPageSize, setMyLeavesPageSize] = useState(10)
 
-  const todayDateStr = useMemo(() => new Date().toISOString().split('T')[0], [])
+  const [todayDateStr, setTodayDateStr] = useState<string>(() => getLocalDateString())
   const todayHoliday = useMemo(() => {
     return (workPolicy.official_holidays || []).find((h) => h.date === todayDateStr)
   }, [workPolicy.official_holidays, todayDateStr])
@@ -245,7 +246,7 @@ export default function AttendanceClient({ profile }: AttendanceClientProps) {
     setAuditPage(1)
   }, [selectedAuditMonth])
 
-  // Initial Load
+  // Initial Load & Local Midnight Rollover Detection
   useEffect(() => {
     loadInitialData()
     const timer = setInterval(() => {
@@ -253,6 +254,16 @@ export default function AttendanceClient({ profile }: AttendanceClientProps) {
       setCurrentTime(
         now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
       )
+      // Check if local day has changed (midnight rollover in user's local timezone)
+      const currentLocal = getLocalDateString(now)
+      setTodayDateStr((prev) => {
+        if (prev !== currentLocal) {
+          // Local midnight passed: reload data so shifts auto-close and day resets
+          loadInitialData()
+          return currentLocal
+        }
+        return prev
+      })
     }, 1000)
     return () => clearInterval(timer)
   }, [userId])
@@ -314,7 +325,7 @@ export default function AttendanceClient({ profile }: AttendanceClientProps) {
     const currentMonth = now.getMonth() + 1
     const currentDay = now.getDate()
     const currentMonthStr = `${currentYear}-${currentMonth.toString().padStart(2, '0')}`
-    const todayDateStr = now.toISOString().split('T')[0]
+    const todayDateStr = getLocalDateString(now)
 
     // Check if user has personalized schedule or tracking exemption (identical to audit page)
     const empSchedule = workPolicy.custom_employee_schedules?.[userId]
@@ -323,6 +334,8 @@ export default function AttendanceClient({ profile }: AttendanceClientProps) {
       Boolean(empSchedule?.is_exempt_from_tracking)
 
     const empShiftStart = empSchedule?.shift_start_time || workPolicy.shift_start_time || '08:00'
+    const empShiftEnd = empSchedule?.shift_end_time || workPolicy.shift_end_time || '17:00'
+    const isShiftDoneToday = Boolean(todayLog?.punch_out_at)
     const empGrace = empSchedule?.grace_period_mins ?? workPolicy.grace_period_mins ?? 15
     const empDailyHours = empSchedule?.daily_expected_hours ?? workPolicy.daily_expected_hours ?? 8
     const empWorkDays = empSchedule?.work_days || workPolicy.work_days || ['SUNDAY', 'MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'SATURDAY']
@@ -352,7 +365,9 @@ export default function AttendanceClient({ profile }: AttendanceClientProps) {
       empCustomDayHours,
       workPolicy.official_holidays,
       undefined,
-      effectiveStartDate
+      effectiveStartDate,
+      empShiftEnd,
+      isShiftDoneToday
     )
 
     const [shiftH, shiftM] = empShiftStart.split(':').map(Number)
@@ -527,7 +542,7 @@ export default function AttendanceClient({ profile }: AttendanceClientProps) {
         fetchUserSalaryProfile(userId).then(setMySalary)
       }
 
-      const todayStr = new Date().toISOString().split('T')[0]
+      const todayStr = getLocalDateString()
 
       const promises: [
         Promise<CompanyLocation>,
@@ -736,7 +751,8 @@ export default function AttendanceClient({ profile }: AttendanceClientProps) {
   }
 
   function handleOpenPunch() {
-    if (!todayLog?.punch_in_at) {
+    const isToday = Boolean(todayLog?.date === todayDateStr)
+    if (!isToday || !todayLog?.punch_in_at) {
       setPunchType('IN')
       setPunchModalOpen(true)
     } else if (!todayLog?.punch_out_at) {
@@ -994,9 +1010,10 @@ export default function AttendanceClient({ profile }: AttendanceClientProps) {
     leaveBalances.annual_leave_total - leaveBalances.annual_leave_used
   )
 
-  const isFlaggedToday = Boolean(todayLog?.punch_in_status === 'FLAGGED' || todayLog?.punch_out_status === 'FLAGGED')
-  const hasPunchedIn = Boolean(todayLog?.punch_in_at)
-  const hasPunchedOut = Boolean(todayLog?.punch_out_at)
+  const isLogForToday = Boolean(todayLog?.date === todayDateStr)
+  const isFlaggedToday = Boolean(isLogForToday && (todayLog?.punch_in_status === 'FLAGGED' || todayLog?.punch_out_status === 'FLAGGED'))
+  const hasPunchedIn = Boolean(isLogForToday && todayLog?.punch_in_at)
+  const hasPunchedOut = Boolean(isLogForToday && todayLog?.punch_out_at)
   const isPunchedIn = Boolean(hasPunchedIn && !hasPunchedOut)
   const isPunchedOut = Boolean(hasPunchedIn && hasPunchedOut)
 
@@ -3933,7 +3950,7 @@ export default function AttendanceClient({ profile }: AttendanceClientProps) {
                       paginatedMyHistory.map((item) => {
                         const inTime = formatDisplayTime(item.punch_in_at)
                         const outTime = formatDisplayTime(item.punch_out_at)
-                        const isUnclosedPast = !item.punch_out_at && item.date < new Date().toISOString().split('T')[0]
+                        const isUnclosedPast = !item.punch_out_at && item.date < todayDateStr
                         const isAutoClosed = Boolean(item.is_auto_closed) || isUnclosedPast
                         let workingMinutes = item.total_working_minutes || 0
                         if (isUnclosedPast && workingMinutes === 0 && item.punch_in_at) {
@@ -4320,7 +4337,7 @@ export default function AttendanceClient({ profile }: AttendanceClientProps) {
                   paginatedMyHistory.map((item) => {
                     const inTime = formatDisplayTime(item.punch_in_at)
                     const outTime = formatDisplayTime(item.punch_out_at)
-                    const isUnclosedPast = !item.punch_out_at && item.date < new Date().toISOString().split('T')[0]
+                    const isUnclosedPast = !item.punch_out_at && item.date < todayDateStr
                     const isAutoClosed = Boolean(item.is_auto_closed) || isUnclosedPast
                     let workingMinutes = item.total_working_minutes || 0
                     if (isUnclosedPast && workingMinutes === 0 && item.punch_in_at) {

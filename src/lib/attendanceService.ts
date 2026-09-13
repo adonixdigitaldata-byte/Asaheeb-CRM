@@ -14,8 +14,19 @@ import { DeviceSpecs, NetworkSpecs } from '@/lib/deviceTelemetry'
 import { DEFAULT_JEDDAH_HQ } from '@/lib/geoUtils'
 
 // ==========================================
-// PURGE LEGACY CLIENT CACHE
+// PURGE LEGACY CLIENT CACHE & LOCAL DATE HELPER
 // ==========================================
+/**
+ * Returns YYYY-MM-DD representing the user's LOCAL calendar date (browser/device time zone),
+ * preventing UTC day rollover mismatches with Supabase.
+ */
+export function getLocalDateString(d: Date = new Date()): string {
+  const year = d.getFullYear()
+  const month = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
+}
+
 if (typeof window !== 'undefined') {
   try {
     localStorage.removeItem('asaheeb_crm_office_location_v1')
@@ -166,7 +177,7 @@ export async function saveOfficeLocation(
 // 2. DAILY PUNCH-IN & PUNCH-OUT API
 // ==========================================
 export async function fetchTodayAttendance(userId: string): Promise<AttendanceLog | null> {
-  const todayStr = new Date().toISOString().split('T')[0]
+  const todayStr = getLocalDateString()
   try {
     const supabase = createClient()
     const { data, error } = await supabase
@@ -201,7 +212,7 @@ export async function submitPunchIn(params: {
   networkInfo?: NetworkSpecs | null
   ipAddress?: string | null
 }): Promise<AttendanceLog> {
-  const todayStr = new Date().toISOString().split('T')[0]
+  const todayStr = getLocalDateString()
   const punchStatus: AttendancePunchStatus = params.isInsideGeofence ? 'APPROVED' : 'PENDING_REVIEW'
 
   const recordPayload: Record<string, any> = {
@@ -258,12 +269,24 @@ export async function submitPunchOut(params: {
   networkInfo?: NetworkSpecs | null
   ipAddress?: string | null
 }): Promise<AttendanceLog> {
-  const todayStr = new Date().toISOString().split('T')[0]
+  const todayStr = getLocalDateString()
   const punchStatus: AttendancePunchStatus = params.isInsideGeofence ? 'APPROVED' : 'PENDING_REVIEW'
   const currentRecord = await fetchTodayAttendance(params.userId)
 
+  if (!currentRecord || !currentRecord.punch_in_at) {
+    throw new Error('No active punch-in found for today. You must punch in before punching out.')
+  }
+  if (currentRecord.punch_out_at) {
+    throw new Error('You have already punched out for today.')
+  }
+  if (currentRecord.date !== todayStr) {
+    throw new Error(
+      'Shift for this day has ended and was auto-closed at midnight. Punch out is only permitted on the same calendar day before local midnight. Please request Attendance Regularization to adjust your shift hours.'
+    )
+  }
+
   let minutes = 0
-  if (currentRecord?.punch_in_at) {
+  if (currentRecord.punch_in_at) {
     const inTime = new Date(currentRecord.punch_in_at).getTime()
     const outTime = Date.now()
     minutes = Math.max(1, Math.round((outTime - inTime) / (1000 * 60)))
@@ -311,7 +334,7 @@ export async function submitPunchOut(params: {
 // 3. ATTENDANCE HISTORY & TIMESHEETS
 // ==========================================
 export async function fetchUserAttendanceHistory(userId: string): Promise<AttendanceLog[]> {
-  const todayStr = new Date().toISOString().split('T')[0]
+  const todayStr = getLocalDateString()
   let rawLogs: AttendanceLog[] = []
 
   try {
@@ -676,7 +699,7 @@ export async function quickApproveRegularization(
   adminId: string
 ): Promise<AttendanceLog | null> {
   const parsed = parseRegularizationRequestNotes(log.review_notes)
-  const dateStr = log.date || new Date().toISOString().split('T')[0]
+  const dateStr = log.date || getLocalDateString()
 
   let punchInIso = (log as any).requested_punch_in || log.punch_in_at
   let punchOutIso = (log as any).requested_punch_out || log.punch_out_at
@@ -1021,10 +1044,21 @@ export async function fetchAdminDailyRoster(dateStr: string): Promise<RosterEmpl
             liveStatus = log.punch_in_status === 'APPROVED' ? 'PRESENT_HQ' : 'PRESENT_REMOTE'
             activeMinutes = log.total_working_minutes
           } else {
-            // Currently active
-            liveStatus = log.punch_in_status === 'APPROVED' ? 'PRESENT_HQ' : 'PRESENT_REMOTE'
-            const inTime = new Date(log.punch_in_at).getTime()
-            activeMinutes = Math.max(1, Math.round((Date.now() - inTime) / (1000 * 60)))
+            // Unclosed punch
+            const localTodayStr = getLocalDateString()
+            if (dateStr < localTodayStr) {
+              // Past day unclosed punch: auto-closed up to 17:00 EOD
+              const inDate = new Date(log.punch_in_at)
+              const inMinutes = inDate.getHours() * 60 + inDate.getMinutes()
+              const endMinutes = 17 * 60
+              activeMinutes = Math.max(0, endMinutes - inMinutes)
+              liveStatus = 'FLAGGED'
+            } else {
+              // Currently active today
+              liveStatus = log.punch_in_status === 'APPROVED' ? 'PRESENT_HQ' : 'PRESENT_REMOTE'
+              const inTime = new Date(log.punch_in_at).getTime()
+              activeMinutes = Math.max(1, Math.round((Date.now() - inTime) / (1000 * 60)))
+            }
           }
         }
 
@@ -1807,7 +1841,9 @@ export function calculateExpectedHoursInMonth(
   customDayHours?: Record<string, number>,
   holidays?: import('@/types/attendance').CompanyHoliday[],
   upToDayParam?: number,
-  trackingStartDate?: string | null
+  trackingStartDate?: string | null,
+  shiftEndTimeStr?: string,
+  isShiftCompletedToday?: boolean
 ): {
   count: number
   totalHours: number
@@ -1830,6 +1866,10 @@ export function calculateExpectedHoursInMonth(
   let elapsedHours = 0
 
   const todayDay = now.getDate()
+  const nowMinutes = now.getHours() * 60 + now.getMinutes()
+  const [endH, endM] = (shiftEndTimeStr || '17:00').split(':').map(Number)
+  const shiftEndMinutes = (isNaN(endH) ? 17 : endH) * 60 + (isNaN(endM) ? 0 : endM)
+  const isShiftEndedToday = Boolean(isShiftCompletedToday) || nowMinutes >= shiftEndMinutes
 
   for (let day = 1; day <= daysInMonth; day++) {
     const d = new Date(year, month - 1, day)
@@ -1854,9 +1894,23 @@ export function calculateExpectedHoursInMonth(
         if (isFutureMonth) {
           // Future month: 0 elapsed
         } else if (isCurrentMonth) {
-          if (day <= todayDay) {
+          if (upToDayParam !== undefined) {
+            if (day <= upToDayParam) {
+              elapsedCount++
+              elapsedHours += dayHours
+            }
+          } else if (day < todayDay) {
             elapsedCount++
             elapsedHours += dayHours
+          } else if (day === todayDay) {
+            // Deficit rule: Only add today's expected hours to elapsed to-date hours
+            // once today's shift has ended or employee has completed / punched out.
+            // Before shift end time (or before workday starts), today is in progress,
+            // so 0h expected is elapsed for today to prevent premature deficit!
+            if (isShiftEndedToday) {
+              elapsedCount++
+              elapsedHours += dayHours
+            }
           }
         } else {
           // Past month: all elapsed
@@ -1902,13 +1956,14 @@ export async function fetchMonthlyWorkHoursAudit(
     policy.custom_day_hours,
     policy.official_holidays,
     undefined,
-    policy.tracking_start_date
+    policy.tracking_start_date,
+    policy.shift_end_time || '17:00'
   )
 
   const startDateStr = `${yearMonthStr}-01`
   const lastDay = new Date(year, month, 0).getDate()
   const endDateStr = `${yearMonthStr}-${lastDay.toString().padStart(2, '0')}`
-  const todayStr = new Date().toISOString().split('T')[0]
+  const todayStr = getLocalDateString()
 
   try {
     const supabase = createClient()
@@ -2011,6 +2066,10 @@ export async function fetchMonthlyWorkHoursAudit(
         let empElapsedWorkingDays = elapsedWorkingDays
 
         if ((empSchedule || empJoiningDate || policy.tracking_start_date) && !isExempt) {
+          const empShiftEnd = empSchedule?.shift_end_time || policy.shift_end_time || '17:00'
+          const todayStaffLog = staffLogs.find((l) => l.date === todayStr)
+          const isShiftDoneToday = Boolean(todayStaffLog?.punch_out_at)
+
           const empCalc = calculateExpectedHoursInMonth(
             year,
             month,
@@ -2019,7 +2078,9 @@ export async function fetchMonthlyWorkHoursAudit(
             empCustomDayHours,
             policy.official_holidays,
             undefined,
-            effectiveStartDate
+            effectiveStartDate,
+            empShiftEnd,
+            isShiftDoneToday
           )
           empExpectedHours = empCalc.totalHours
           empExpectedToDateHours = empCalc.elapsedHours
