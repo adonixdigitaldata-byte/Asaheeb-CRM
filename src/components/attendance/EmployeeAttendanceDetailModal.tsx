@@ -36,6 +36,7 @@ import {
 import { formatDistance, getGoogleMapsUrl } from '@/lib/geoUtils'
 import RegularizeAttendanceModal from '@/components/attendance/RegularizeAttendanceModal'
 import ConfirmModal from '@/components/ConfirmModal'
+import DeviceAuditModal from '@/components/attendance/DeviceAuditModal'
 
 interface EmployeeAttendanceDetailModalProps {
   isOpen: boolean
@@ -110,6 +111,7 @@ export default function EmployeeAttendanceDetailModal({
     record: null,
   })
   const [isDeletingRecord, setIsDeletingRecord] = useState(false)
+  const [auditModalLog, setAuditModalLog] = useState<AttendanceLog | null>(null)
 
   useEffect(() => {
     if (isOpen && employee) {
@@ -387,19 +389,53 @@ export default function EmployeeAttendanceDetailModal({
 
   function handleExportEmployeeCsv() {
     const rows = [
-      ['Date', 'Employee', 'Punch In', 'Punch In Status', 'Punch Out', 'Punch Out Status', 'Duration Minutes', 'Working Hours'],
-      ...history.map((l) => [
-        l.date,
-        employee?.name || '',
-        l.punch_in_at ? new Date(l.punch_in_at).toLocaleTimeString() : 'N/A',
-        l.punch_in_status,
-        l.punch_out_at ? new Date(l.punch_out_at).toLocaleTimeString() : 'N/A',
-        l.punch_out_status || 'N/A',
-        l.total_working_minutes.toString(),
-        `${(l.total_working_minutes / 60).toFixed(1)} hrs`,
-      ]),
+      [
+        'Date',
+        'Employee',
+        'Punch In',
+        'Punch In Status',
+        'Punch In Device',
+        'Punch In IP',
+        'Punch Out',
+        'Punch Out Status',
+        'Punch Out Device',
+        'Punch Out IP',
+        'Duration Minutes',
+        'Working Hours',
+      ],
+      ...history.map((l) => {
+        const inDev = l.punch_in_device_info
+          ? `${l.punch_in_device_info.deviceName || l.punch_in_device_info.os || ''} (${l.punch_in_device_info.browser || ''})`.trim()
+          : 'N/A'
+        const outDev = l.punch_out_device_info
+          ? `${l.punch_out_device_info.deviceName || l.punch_out_device_info.os || ''} (${l.punch_out_device_info.browser || ''})`.trim()
+          : 'N/A'
+
+        return [
+          l.date,
+          employee?.name || '',
+          l.punch_in_at ? new Date(l.punch_in_at).toLocaleTimeString() : 'N/A',
+          l.punch_in_status || 'N/A',
+          inDev,
+          l.punch_in_ip || 'N/A',
+          l.punch_out_at ? new Date(l.punch_out_at).toLocaleTimeString() : 'N/A',
+          l.punch_out_status || 'N/A',
+          outDev,
+          l.punch_out_ip || 'N/A',
+          l.total_working_minutes.toString(),
+          `${(l.total_working_minutes / 60).toFixed(1)} hrs`,
+        ]
+      }),
     ]
-    const csvContent = 'data:text/csv;charset=utf-8,' + rows.map((e) => e.join(',')).join('\n')
+    const csvContent =
+      'data:text/csv;charset=utf-8,' +
+      rows
+        .map((e) =>
+          e
+            .map((val) => `"${String(val).replace(/"/g, '""')}"`)
+            .join(',')
+        )
+        .join('\n')
     const encodedUri = encodeURI(csvContent)
     const link = document.createElement('a')
     link.setAttribute('href', encodedUri)
@@ -1460,25 +1496,46 @@ export default function EmployeeAttendanceDetailModal({
                         🌐 IP: {todayLog.punch_in_ip}
                       </div>
                     )}
-                    {todayLog.punch_in_lat && todayLog.punch_in_lng && (
-                      <a
-                        href={getGoogleMapsUrl(todayLog.punch_in_lat, todayLog.punch_in_lng)}
-                        target="_blank"
-                        rel="noreferrer"
-                        style={{
-                          fontSize: '11px',
-                          color: '#2563EB',
-                          display: 'inline-flex',
-                          alignItems: 'center',
-                          gap: '3px',
-                          marginTop: '4px',
-                          textDecoration: 'none',
-                          fontWeight: 600,
-                        }}
-                      >
-                        View Map <ExternalLink size={10} />
-                      </a>
-                    )}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginTop: '6px', flexWrap: 'wrap' }}>
+                      {todayLog.punch_in_lat && todayLog.punch_in_lng && (
+                        <a
+                          href={getGoogleMapsUrl(todayLog.punch_in_lat, todayLog.punch_in_lng)}
+                          target="_blank"
+                          rel="noreferrer"
+                          style={{
+                            fontSize: '11px',
+                            color: '#2563EB',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '3px',
+                            textDecoration: 'none',
+                            fontWeight: 600,
+                          }}
+                        >
+                          View Map <ExternalLink size={10} />
+                        </a>
+                      )}
+                      {(todayLog.punch_in_device_info || todayLog.punch_in_ip) && (
+                        <button
+                          type="button"
+                          onClick={() => setAuditModalLog(todayLog)}
+                          style={{
+                            background: 'none',
+                            border: 'none',
+                            color: '#4F46E5',
+                            fontSize: '11px',
+                            fontWeight: 700,
+                            cursor: 'pointer',
+                            padding: 0,
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '3px',
+                          }}
+                        >
+                          <ShieldCheck size={12} /> Audit Hardware Specs
+                        </button>
+                      )}
+                    </div>
                   </div>
                 )}
 
@@ -1529,25 +1586,46 @@ export default function EmployeeAttendanceDetailModal({
                         🌐 IP: {todayLog.punch_out_ip}
                       </div>
                     )}
-                    {todayLog.punch_out_lat && todayLog.punch_out_lng && (
-                      <a
-                        href={getGoogleMapsUrl(todayLog.punch_out_lat, todayLog.punch_out_lng)}
-                        target="_blank"
-                        rel="noreferrer"
-                        style={{
-                          fontSize: '11px',
-                          color: '#2563EB',
-                          display: 'inline-flex',
-                          alignItems: 'center',
-                          gap: '3px',
-                          marginTop: '4px',
-                          textDecoration: 'none',
-                          fontWeight: 600,
-                        }}
-                      >
-                        View Map <ExternalLink size={10} />
-                      </a>
-                    )}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginTop: '6px', flexWrap: 'wrap' }}>
+                      {todayLog.punch_out_lat && todayLog.punch_out_lng && (
+                        <a
+                          href={getGoogleMapsUrl(todayLog.punch_out_lat, todayLog.punch_out_lng)}
+                          target="_blank"
+                          rel="noreferrer"
+                          style={{
+                            fontSize: '11px',
+                            color: '#2563EB',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '3px',
+                            textDecoration: 'none',
+                            fontWeight: 600,
+                          }}
+                        >
+                          View Map <ExternalLink size={10} />
+                        </a>
+                      )}
+                      {(todayLog.punch_out_device_info || todayLog.punch_out_ip) && (
+                        <button
+                          type="button"
+                          onClick={() => setAuditModalLog(todayLog)}
+                          style={{
+                            background: 'none',
+                            border: 'none',
+                            color: '#4F46E5',
+                            fontSize: '11px',
+                            fontWeight: 700,
+                            cursor: 'pointer',
+                            padding: 0,
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '3px',
+                          }}
+                        >
+                          <ShieldCheck size={12} /> Audit Hardware Specs
+                        </button>
+                      )}
+                    </div>
                   </div>
                 )}
               </div>
@@ -1617,19 +1695,135 @@ export default function EmployeeAttendanceDetailModal({
                       const hrs = (log.total_working_minutes / 60).toFixed(1)
                       const isHq = log.punch_in_status === 'APPROVED'
 
+                      const inDev = log.punch_in_device_info
+                      const inIp = log.punch_in_ip || log.punch_in_network_info?.ip
+                      const outDev = log.punch_out_device_info
+                      const outIp = log.punch_out_ip || log.punch_out_network_info?.ip
+
+                      const hasDiscrepancy = Boolean(
+                        log.punch_in_at &&
+                        log.punch_out_at &&
+                        ((inDev && outDev && (inDev.deviceType !== outDev.deviceType || inDev.os !== outDev.os)) ||
+                          (inIp && outIp && inIp !== 'N/A' && outIp !== 'N/A' && inIp !== outIp))
+                      )
+
                       const isRegApproved = Boolean(log.review_notes?.includes('Regularized:'))
                       const isRegRejected = Boolean(log.review_notes?.includes('REJECTED REGULARIZATION')) || Boolean(log.review_notes?.includes('REJECTED'))
                       const isRegPending = Boolean(log.review_notes?.includes('REGULARIZATION REQUEST'))
 
                       return (
                         <tr key={log.id} style={{ borderBottom: '1px solid #F1F5F9' }}>
-                          <td style={{ padding: '10px 14px', fontWeight: 600, color: '#0F172A' }}>{log.date}</td>
-                          <td style={{ padding: '10px 14px', color: '#334155' }}>{inTime}</td>
-                          <td style={{ padding: '10px 14px', color: '#334155' }}>{outTime}</td>
-                          <td style={{ padding: '10px 14px' }}>
+                          <td style={{ padding: '10px 14px', fontWeight: 600, color: '#0F172A', verticalAlign: 'top' }}>{log.date}</td>
+                          <td style={{ padding: '10px 14px', color: '#334155', verticalAlign: 'top' }}>
+                            <div style={{ fontWeight: 600, color: '#0F172A' }}>{inTime}</div>
+                            {(inDev || (inIp && inIp !== 'N/A')) ? (
+                              <div
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  setAuditModalLog(log)
+                                }}
+                                title="Click to view full hardware telemetry audit"
+                                style={{
+                                  marginTop: '4px',
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: '4px',
+                                  fontSize: '10.5px',
+                                  color: '#475569',
+                                  backgroundColor: '#F8FAFC',
+                                  border: '1px solid #E2E8F0',
+                                  padding: '2px 6px',
+                                  borderRadius: '5px',
+                                  cursor: 'pointer',
+                                  maxWidth: '200px',
+                                  whiteSpace: 'nowrap',
+                                  overflow: 'hidden',
+                                  textOverflow: 'ellipsis',
+                                }}
+                              >
+                                <span>{inDev?.deviceType === 'Mobile' ? '📱' : inDev?.deviceType === 'Tablet' ? '📟' : '💻'}</span>
+                                <span style={{ fontWeight: 600, color: '#334155', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                                  {inDev?.deviceName || inDev?.os || 'Device'}
+                                </span>
+                                {inIp && inIp !== 'N/A' && (
+                                  <span style={{ color: '#7C3AED', fontWeight: 600, fontSize: '10px' }}>
+                                    · {inIp}
+                                  </span>
+                                )}
+                              </div>
+                            ) : log.punch_in_at ? (
+                              <div style={{ fontSize: '10px', color: '#94A3B8', marginTop: '3px' }}>No telemetry</div>
+                            ) : null}
+                          </td>
+                          <td style={{ padding: '10px 14px', color: '#334155', verticalAlign: 'top' }}>
+                            <div style={{ fontWeight: 600, color: '#0F172A' }}>{outTime}</div>
+                            {(outDev || (outIp && outIp !== 'N/A')) ? (
+                              <div
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  setAuditModalLog(log)
+                                }}
+                                title="Click to view full hardware telemetry audit"
+                                style={{
+                                  marginTop: '4px',
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: '4px',
+                                  fontSize: '10.5px',
+                                  color: '#475569',
+                                  backgroundColor: '#F8FAFC',
+                                  border: '1px solid #E2E8F0',
+                                  padding: '2px 6px',
+                                  borderRadius: '5px',
+                                  cursor: 'pointer',
+                                  maxWidth: '200px',
+                                  whiteSpace: 'nowrap',
+                                  overflow: 'hidden',
+                                  textOverflow: 'ellipsis',
+                                }}
+                              >
+                                <span>{outDev?.deviceType === 'Mobile' ? '📱' : outDev?.deviceType === 'Tablet' ? '📟' : '💻'}</span>
+                                <span style={{ fontWeight: 600, color: '#334155', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                                  {outDev?.deviceName || outDev?.os || 'Device'}
+                                </span>
+                                {outIp && outIp !== 'N/A' && (
+                                  <span style={{ color: '#7C3AED', fontWeight: 600, fontSize: '10px' }}>
+                                    · {outIp}
+                                  </span>
+                                )}
+                              </div>
+                            ) : log.punch_out_at ? (
+                              <div style={{ fontSize: '10px', color: '#94A3B8', marginTop: '3px' }}>No telemetry</div>
+                            ) : null}
+                          </td>
+                          <td style={{ padding: '10px 14px', verticalAlign: 'top' }}>
                             <div style={{ fontWeight: 600, color: '#0284C7' }}>
                               {hrs} hrs ({log.total_working_minutes}m)
                             </div>
+                            {hasDiscrepancy && (
+                              <div>
+                                <span
+                                  onClick={() => setAuditModalLog(log)}
+                                  title="Discrepancy: Different device or public IP used between Punch In and Punch Out"
+                                  style={{
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: '3px',
+                                    fontSize: '10px',
+                                    fontWeight: 700,
+                                    backgroundColor: '#FEF2F2',
+                                    color: '#DC2626',
+                                    padding: '1px 6px',
+                                    borderRadius: '4px',
+                                    marginTop: '3px',
+                                    cursor: 'pointer',
+                                    border: '1px solid #FECACA',
+                                  }}
+                                >
+                                  ⚠️ Diff Device/IP
+                                </span>
+                              </div>
+                            )}
                             {isRegApproved ? (
                               <span style={{ display: 'inline-block', fontSize: '10px', fontWeight: 700, backgroundColor: '#DCFCE7', color: '#15803D', padding: '1px 6px', borderRadius: '4px', marginTop: '2px' }}>
                                 ✓ Regularized
@@ -1648,7 +1842,7 @@ export default function EmployeeAttendanceDetailModal({
                               </span>
                             ) : null}
                           </td>
-                          <td style={{ padding: '10px 14px' }}>
+                          <td style={{ padding: '10px 14px', verticalAlign: 'top' }}>
                             <span
                               style={{
                                 padding: '2px 8px',
@@ -1662,8 +1856,28 @@ export default function EmployeeAttendanceDetailModal({
                               {isHq ? '🟢 Jeddah HQ' : `🟡 Remote (${formatDistance(log.punch_in_distance_m || 0)})`}
                             </span>
                           </td>
-                          <td style={{ padding: '10px 14px', textAlign: 'right' }}>
-                            <div style={{ display: 'inline-flex', gap: '6px', justifyContent: 'flex-end', alignItems: 'center' }}>
+                          <td style={{ padding: '10px 14px', textAlign: 'right', verticalAlign: 'top' }}>
+                            <div style={{ display: 'inline-flex', gap: '6px', justifyContent: 'flex-end', alignItems: 'center', flexWrap: 'wrap' }}>
+                              <button
+                                type="button"
+                                onClick={() => setAuditModalLog(log)}
+                                style={{
+                                  border: '1px solid #C7D2FE',
+                                  background: '#EEF2FF',
+                                  color: '#4338CA',
+                                  padding: '4px 8px',
+                                  borderRadius: '6px',
+                                  cursor: 'pointer',
+                                  fontSize: '11px',
+                                  fontWeight: 600,
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: '4px',
+                                }}
+                                title="Inspect device hardware specs, CPU, RAM, OS, IP, and browser telemetry"
+                              >
+                                <ShieldCheck size={12} /> Audit Specs
+                              </button>
                               <button
                                 type="button"
                                 onClick={() => {
@@ -1862,6 +2076,14 @@ export default function EmployeeAttendanceDetailModal({
         loading={isDeletingRecord}
         onConfirm={handleConfirmDeleteLog}
         onCancel={() => setDeleteConfirmModal({ isOpen: false, record: null })}
+      />
+
+      {/* Device & Hardware Telemetry Audit Modal */}
+      <DeviceAuditModal
+        isOpen={Boolean(auditModalLog)}
+        onClose={() => setAuditModalLog(null)}
+        log={auditModalLog}
+        employeeName={employee.name}
       />
     </div>
   )
