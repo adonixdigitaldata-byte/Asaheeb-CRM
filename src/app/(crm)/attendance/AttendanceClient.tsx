@@ -389,14 +389,15 @@ export default function AttendanceClient({ profile }: AttendanceClientProps) {
       const dayExpectedMinutes = dayExpectedHours * 60
 
       let worked = log.total_working_minutes || 0
-      // Fallback for unclosed shifts
+      // Fallback for unclosed shifts: calculate up to individual employee's scheduled shift end
       if (log.punch_in_at && !log.punch_out_at) {
         if (log.date < todayDateStr) {
-          // If employee forgot to punch out on past date, calculate duration up to 17:00 EOD
           const inDate = new Date(log.punch_in_at)
           const inMinutes = inDate.getHours() * 60 + inDate.getMinutes()
-          const endMinutes = 17 * 60
-          worked = Math.max(0, endMinutes - inMinutes)
+          const [endH, endM] = empShiftEnd.split(':').map(Number)
+          let targetEndMins = (isNaN(endH) ? 17 : endH) * 60 + (isNaN(endM) ? 0 : endM)
+          if (targetEndMins < inMinutes) targetEndMins += 24 * 60
+          worked = Math.max(0, targetEndMins - inMinutes)
         } else if (log.date === todayDateStr && worked === 0) {
           worked = Math.max(1, Math.round((Date.now() - new Date(log.punch_in_at).getTime()) / (1000 * 60)))
         }
@@ -405,7 +406,8 @@ export default function AttendanceClient({ profile }: AttendanceClientProps) {
       totalWorkedMinutes += worked
 
       const isCurrentMonth = log.date && log.date.startsWith(currentMonthStr)
-      if (isCurrentMonth) {
+      const isAfterTracking = !effectiveStartDate || log.date >= effectiveStartDate
+      if (isCurrentMonth && isAfterTracking) {
         currentMonthWorkedMinutes += worked
       }
 
@@ -4195,7 +4197,9 @@ export default function AttendanceClient({ profile }: AttendanceClientProps) {
                                   width: 'fit-content',
                                 }}
                               >
-                                ⚠️ Auto-Closed (17:00 EOD)
+                                {item.review_notes && item.review_notes.includes('Auto-Closed')
+                                  ? (item.review_notes.match(/⚠️ Auto-Closed \([^)]+\)/)?.[0] || '⚠️ Auto-Closed')
+                                  : '⚠️ Auto-Closed'}
                               </span>
                               {diff < 0 && (
                                 <span style={{ fontSize: 11, fontWeight: 700, color: '#DC2626' }}>

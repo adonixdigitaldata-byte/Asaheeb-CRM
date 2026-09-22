@@ -25,7 +25,7 @@ interface Props {
   campaigns: AdCampaign[]
   agents: { id: string; name: string }[]
   projects: Project[]
-  initialSearchParams?: { action?: string; new?: string }
+  initialSearchParams?: { [key: string]: string | undefined }
 }
 
 export default function LeadsClient({
@@ -57,14 +57,27 @@ export default function LeadsClient({
   const [search, setSearch] = useState('')
   const [monthFilter, setMonthFilter] = useState<string>('ALL')
   const [stageFilter, setStageFilter] = useState<string>('ALL')
-  const [agentFilter, setAgentFilter] = useState<string>('ALL')
+  const [agentFilter, setAgentFilter] = useState<string>(() => {
+    if (initialSearchParams?.my_leads === 'true' && profile?.id) return profile.id
+    if (initialSearchParams?.agent_id) return initialSearchParams.agent_id
+    return 'ALL'
+  })
   const [sourceFilter, setSourceFilter] = useState<string>('ALL')
   const [categoryFilter, setCategoryFilter] = useState<string>('ALL')
   const [budgetTierFilter, setBudgetTierFilter] = useState<string>('ALL')
+  const [pendingFollowupLeadIds, setPendingFollowupLeadIds] = useState<string[]>([])
 
   const isAdmin = profile?.role === 'ADMIN'
   const isManager = profile?.role === 'SALES_MANAGER'
   const isLeadManager = isAdmin || isManager
+
+  useEffect(() => {
+    if (initialSearchParams?.my_leads === 'true' && profile?.id) {
+      setAgentFilter(profile.id)
+    } else if (initialSearchParams?.agent_id) {
+      setAgentFilter(initialSearchParams.agent_id)
+    }
+  }, [initialSearchParams, profile?.id])
 
   // Fetch leads from Supabase
   const fetchLeads = useCallback(async () => {
@@ -84,10 +97,16 @@ export default function LeadsClient({
       query = query.eq('assigned_agent_id', profile.id)
     }
 
-    const { data, error } = await query
+    const [leadsRes, fupsRes] = await Promise.all([
+      query,
+      supabase.from('lead_followups').select('lead_id').eq('is_completed', false),
+    ])
 
-    if (!error && data) {
-      setLeads(data as Lead[])
+    if (!leadsRes.error && leadsRes.data) {
+      setLeads(leadsRes.data as Lead[])
+    }
+    if (!fupsRes.error && fupsRes.data) {
+      setPendingFollowupLeadIds(fupsRes.data.map((f: any) => f.lead_id as string))
     }
     setLoading(false)
   }, [supabase, isLeadManager, profile?.id])
@@ -95,6 +114,31 @@ export default function LeadsClient({
   useEffect(() => {
     fetchLeads()
   }, [fetchLeads])
+
+  // Instant optimistic lead move for frictionless Kanban responsiveness
+  function handleOptimisticLeadMove(
+    leadId: string,
+    targetStageId: string,
+    extraUpdates: Partial<Lead> = {}
+  ) {
+    const targetStage = stages.find((s) => s.id === targetStageId)
+    setLeads((prevLeads) =>
+      prevLeads.map((l) =>
+        l.id === leadId
+          ? {
+              ...l,
+              stage_id: targetStageId,
+              stage: targetStage || l.stage,
+              ...extraUpdates,
+            }
+          : l
+      )
+    )
+  }
+
+  function handleFollowupScheduled(leadId: string) {
+    setPendingFollowupLeadIds((prev) => (prev.includes(leadId) ? prev : [...prev, leadId]))
+  }
 
   // Filtered Leads
   const filteredLeads = leads.filter((lead) => {
@@ -243,11 +287,82 @@ export default function LeadsClient({
     <div>
       {/* Page Header */}
       <div className="page-header">
-        <div>
-          <h1 className="text-page-title">{isLeadManager ? 'Leads Pipeline' : 'My Leads'}</h1>
-          <p className="text-meta" style={{ marginTop: 2 }}>
-            {filteredLeads.length} lead{filteredLeads.length !== 1 ? 's' : ''} in pipeline
-          </p>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap' }}>
+          <div>
+            <h1 className="text-page-title">{isLeadManager ? 'Leads Pipeline' : 'My Leads'}</h1>
+            <p className="text-meta" style={{ marginTop: 2 }}>
+              {filteredLeads.length} lead{filteredLeads.length !== 1 ? 's' : ''} {agentFilter === profile.id ? 'assigned to you' : 'in pipeline'}
+            </p>
+          </div>
+
+          {/* Quick Switcher for Managers / Admins: All Team Leads vs My Leads */}
+          {isLeadManager && (
+            <div style={{
+              display: 'inline-flex',
+              backgroundColor: '#F1F5F9',
+              border: '1px solid var(--border)',
+              borderRadius: '8px',
+              padding: '3px',
+              gap: 2,
+            }}>
+              <button
+                type="button"
+                onClick={() => setAgentFilter('ALL')}
+                style={{
+                  padding: '5px 12px',
+                  fontSize: 12,
+                  fontWeight: 600,
+                  borderRadius: '6px',
+                  border: 'none',
+                  cursor: 'pointer',
+                  background: agentFilter === 'ALL' ? '#FFFFFF' : 'transparent',
+                  color: agentFilter === 'ALL' ? '#0F172A' : '#64748B',
+                  boxShadow: agentFilter === 'ALL' ? '0 1px 2px rgba(0,0,0,0.08)' : 'none',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  transition: 'all 0.15s ease',
+                }}
+              >
+                <span>👥 All Team Leads</span>
+                <span style={{ fontSize: 10.5, background: agentFilter === 'ALL' ? '#F1F5F9' : '#E2E8F0', padding: '1px 6px', borderRadius: 9999, color: '#475569' }}>
+                  {leads.length}
+                </span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setAgentFilter(profile.id)}
+                style={{
+                  padding: '5px 12px',
+                  fontSize: 12,
+                  fontWeight: 600,
+                  borderRadius: '6px',
+                  border: 'none',
+                  cursor: 'pointer',
+                  background: agentFilter === profile.id ? '#FFFFFF' : 'transparent',
+                  color: agentFilter === profile.id ? 'var(--accent)' : '#64748B',
+                  boxShadow: agentFilter === profile.id ? '0 1px 2px rgba(0,0,0,0.08)' : 'none',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  transition: 'all 0.15s ease',
+                }}
+              >
+                <span>👤 My Assigned Leads</span>
+                <span style={{
+                  fontSize: 10.5,
+                  background: agentFilter === profile.id ? '#EFF6FF' : '#E2E8F0',
+                  padding: '1px 6px',
+                  borderRadius: 9999,
+                  color: agentFilter === profile.id ? 'var(--accent)' : '#475569',
+                  fontWeight: 700,
+                }}>
+                  {leads.filter((l) => l.assigned_agent_id === profile.id).length}
+                </span>
+              </button>
+            </div>
+          )}
         </div>
 
         <div className="flex items-center gap-2">
@@ -381,17 +496,25 @@ export default function LeadsClient({
             ))}
           </select>
 
-          {/* Agent Filter (Admin only) */}
-          {isAdmin && (
+          {/* Agent Filter (Admin & Sales Manager) */}
+          {isLeadManager && (
             <select
               value={agentFilter}
               onChange={(e) => setAgentFilter(e.target.value)}
               className="form-select"
-              style={{ width: 'auto', fontSize: 12.5 }}
+              style={{
+                width: 'auto',
+                fontSize: 12.5,
+                fontWeight: agentFilter !== 'ALL' ? 600 : 400,
+                color: agentFilter !== 'ALL' ? '#1D4ED8' : '#334155',
+                borderColor: agentFilter !== 'ALL' ? '#93C5FD' : 'var(--border)',
+                backgroundColor: agentFilter !== 'ALL' ? '#EFF6FF' : '#FFFFFF',
+              }}
             >
               <option value="ALL">All agents</option>
+              <option value={profile.id}>★ Assigned to Me ({profile.name})</option>
               <option value="UNASSIGNED">Unassigned</option>
-              {agents.map((a) => (
+              {agents.filter((a) => a.id !== profile.id).map((a) => (
                 <option key={a.id} value={a.id}>
                   {a.name}
                 </option>
@@ -458,6 +581,9 @@ export default function LeadsClient({
             stages={stages}
             profile={profile}
             onLeadMoved={fetchLeads}
+            onOptimisticMove={handleOptimisticLeadMove}
+            onFollowupScheduled={handleFollowupScheduled}
+            pendingFollowupLeadIds={pendingFollowupLeadIds}
           />
         ) : (
           <LeadsTable

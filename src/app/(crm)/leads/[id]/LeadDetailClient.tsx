@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import {
@@ -28,7 +28,9 @@ import {
   User,
   Search,
   Sparkles,
+  AlertTriangle,
 } from 'lucide-react'
+import { checkFollowupConflict, type ScheduleConflict } from '@/lib/followupConflictService'
 import { SaudiRiyalIcon } from '@/components/SaudiRiyalIcon'
 import {
   CLIENT_CATEGORIES,
@@ -46,7 +48,8 @@ import { formatCurrency, formatDate } from '@/lib/utils'
 import { PREDEFINED_CITIES } from '@/lib/cities'
 import ConfirmModal from '@/components/ConfirmModal'
 import ProjectSearchModal from '@/components/ProjectSearchModal'
-import { useEffect } from 'react'
+import StageChangeModal, { type StageChangePayload } from '@/components/leads/StageChangeModal'
+import FollowupCompletionModal, { type FollowupCompletionData } from '@/components/leads/FollowupCompletionModal'
 
 interface Props {
   lead: Lead
@@ -74,6 +77,12 @@ export default function LeadDetailClient({
   const router = useRouter()
   const supabase = createClient()
 
+  const [pendingStageChange, setPendingStageChange] = useState<{
+    fromStage: LeadStage | null
+    toStage: LeadStage
+  } | null>(null)
+  const [completingFollowup, setCompletingFollowup] = useState<LeadFollowup | null>(null)
+
   const isAdmin = profile?.role === 'ADMIN'
   const isManager = profile?.role === 'SALES_MANAGER'
   const isLeadManager = isAdmin || isManager
@@ -84,19 +93,71 @@ export default function LeadDetailClient({
   const [followups, setFollowups] = useState<LeadFollowup[]>(initialFollowups)
   const [activities, setActivities] = useState<LeadActivity[]>(initialActivities)
 
-  // Realtime subscription for activities and notes
+  // Synchronize component state with fresh server props dynamically
+  useEffect(() => {
+    setLead(initialLead)
+  }, [initialLead])
+
+  useEffect(() => {
+    setNotes(initialNotes)
+  }, [initialNotes])
+
+  useEffect(() => {
+    setFollowups(initialFollowups)
+  }, [initialFollowups])
+
+  useEffect(() => {
+    setActivities(initialActivities)
+  }, [initialActivities])
+
+  // Realtime subscription for activities, notes, and followups
   useEffect(() => {
     const channel = supabase
       .channel(`lead-realtime-${lead.id}`)
       .on(
         'postgres_changes',
-        { event: 'INSERT', schema: 'public', table: 'lead_activities', filter: `lead_id=eq.${lead.id}` },
+        { event: '*', schema: 'public', table: 'lead_activities', filter: `lead_id=eq.${lead.id}` },
         (payload) => {
-          const newAct = payload.new as LeadActivity
-          setActivities((prev) => {
-            if (prev.some((a) => a.id === newAct.id)) return prev
-            return [{ ...newAct, performer: profile }, ...prev]
-          })
+          if (payload.eventType === 'INSERT') {
+            const newAct = payload.new as LeadActivity
+            setActivities((prev) => {
+              if (prev.some((a) => a.id === newAct.id)) return prev
+              return [{ ...newAct, performer: profile }, ...prev]
+            })
+          }
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'lead_notes', filter: `lead_id=eq.${lead.id}` },
+        (payload) => {
+          if (payload.eventType === 'INSERT') {
+            const newNote = payload.new as LeadNote
+            setNotes((prev) => {
+              if (prev.some((n) => n.id === newNote.id)) return prev
+              return [{ ...newNote, author: profile }, ...prev]
+            })
+          } else if (payload.eventType === 'DELETE') {
+            setNotes((prev) => prev.filter((n) => n.id !== payload.old.id))
+          }
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'lead_followups', filter: `lead_id=eq.${lead.id}` },
+        (payload) => {
+          if (payload.eventType === 'INSERT') {
+            const newFup = payload.new as LeadFollowup
+            setFollowups((prev) => {
+              if (prev.some((f) => f.id === newFup.id)) return prev
+              return [{ ...newFup, agent: profile }, ...prev]
+            })
+          } else if (payload.eventType === 'UPDATE') {
+            const updated = payload.new as LeadFollowup
+            setFollowups((prev) => prev.map((f) => (f.id === updated.id ? { ...f, ...updated } : f)))
+          } else if (payload.eventType === 'DELETE') {
+            setFollowups((prev) => prev.filter((f) => f.id !== payload.old.id))
+          }
         }
       )
       .subscribe()
@@ -181,6 +242,47 @@ export default function LeadDetailClient({
   const [followupNote, setFollowupNote] = useState('')
   const [editingFollowupId, setEditingFollowupId] = useState<string | null>(null)
   const [savingFollowup, setSavingFollowup] = useState(false)
+  const [followupConflict, setFollowupConflict] = useState<ScheduleConflict | null>(null)
+  const [allowFollowupConflictOverlap, setAllowFollowupConflictOverlap] = useState(false)
+  const [followupFormError, setFollowupFormError] = useState<string | null>(null)
+
+  // Reset overlap toggle on followupDate change
+  useEffect(() => {
+    setAllowFollowupConflictOverlap(false)
+    setFollowupFormError(null)
+  }, [followupDate])
+
+  // Conflict detection for inline followup form
+  useEffect(() => {
+    if (!showFollowupForm || !followupDate) {
+      setFollowupConflict(null)
+      return
+    }
+
+    const dt = new Date(followupDate)
+    if (isNaN(dt.getTime())) return
+
+    const targetAgentId = lead.assigned_agent_id || profile.id
+    if (!targetAgentId) return
+
+    let active = true
+    const timer = setTimeout(async () => {
+      const found = await checkFollowupConflict(supabase, {
+        agentId: targetAgentId,
+        scheduledAtIso: dt.toISOString(),
+        excludeFollowupId: editingFollowupId || undefined,
+        bufferMinutes: 30,
+      })
+      if (active) {
+        setFollowupConflict(found)
+      }
+    }, 250)
+
+    return () => {
+      active = false
+      clearTimeout(timer)
+    }
+  }, [showFollowupForm, followupDate, editingFollowupId, lead.assigned_agent_id, profile.id])
 
   // Notes state
   const [newNote, setNewNote] = useState('')
@@ -208,22 +310,14 @@ export default function LeadDetailClient({
     })
   }
 
-  // Handle Stage change with immediate UI feedback
-  async function handleStageChange(newStageId: string) {
-    if (newStageId === lead.stage_id) return
-
-    const oldStage = stages.find((s) => s.id === lead.stage_id)
-    const newStage = stages.find((s) => s.id === newStageId)
-
-    // Instant local state update
+  async function executeDirectStageChange(newStageId: string, oldStage: LeadStage | null, newStage: LeadStage | undefined) {
     setLead((prev) => ({ ...prev, stage_id: newStageId, stage: newStage || prev.stage }))
     logActivity('STAGE_CHANGE', {
       from_stage: oldStage?.label || '—',
       to_stage: newStage?.label || '—',
     })
 
-    // Background sync
-    await Promise.all([
+    const updates: any[] = [
       supabase.from('leads').update({ stage_id: newStageId }).eq('id', lead.id),
       supabase.from('lead_stage_history').insert({
         lead_id: lead.id,
@@ -231,7 +325,230 @@ export default function LeadDetailClient({
         to_stage_id: newStageId,
         changed_by: profile.id,
       }),
-    ])
+    ]
+
+    // Auto schedule followup for meeting_done
+    if (newStage?.key === 'meeting_done') {
+      const in2Days = new Date()
+      in2Days.setDate(in2Days.getDate() + 2)
+      in2Days.setHours(11, 0, 0, 0)
+      const followupText = 'Post-meeting follow-up on next steps'
+      const optimisticFollowup: LeadFollowup = {
+        id: crypto.randomUUID(),
+        lead_id: lead.id,
+        agent_id: lead.assigned_agent_id || profile.id,
+        agent: profile,
+        scheduled_at: in2Days.toISOString(),
+        note: followupText,
+        is_completed: false,
+        reminder_sent: false,
+        created_at: new Date().toISOString(),
+      }
+      setFollowups((prev) => [optimisticFollowup, ...prev])
+      updates.push(
+        supabase.from('lead_followups').insert({
+          lead_id: lead.id,
+          agent_id: lead.assigned_agent_id || profile.id,
+          scheduled_at: in2Days.toISOString(),
+          note: followupText,
+          is_completed: false,
+        })
+      )
+    } else if (['won', 'lost'].includes(newStage?.key || '')) {
+      setFollowups((prev) =>
+        prev.map((f) => (!f.is_completed ? { ...f, is_completed: true, completed_at: new Date().toISOString() } : f))
+      )
+      updates.push(
+        supabase
+          .from('lead_followups')
+          .update({ is_completed: true, completed_at: new Date().toISOString() })
+          .eq('lead_id', lead.id)
+          .eq('is_completed', false)
+      )
+    }
+
+    await Promise.all(updates)
+  }
+
+  // Handle Stage change with enforcement modal
+  async function handleStageChange(newStageId: string) {
+    if (newStageId === lead.stage_id) return
+
+    const oldStage = stages.find((s) => s.id === lead.stage_id) || null
+    const newStage = stages.find((s) => s.id === newStageId)
+    if (!newStage) return
+
+    // Intercept stages requiring action commitment or outcome
+    const stagesRequiringIntercept = [
+      'contacted',
+      'no_reply',
+      'followup',
+      'qualified',
+      'proposal',
+      'meeting_scheduled',
+      'site_visit_scheduled',
+      'meeting_done',
+      'negotiation',
+      'lost',
+      'won',
+    ]
+
+    if (stagesRequiringIntercept.includes(newStage.key)) {
+      setPendingStageChange({
+        fromStage: oldStage,
+        toStage: newStage,
+      })
+      return
+    }
+
+    await executeDirectStageChange(newStageId, oldStage, newStage)
+  }
+
+  function handleMarkMeetingOrVisitDone() {
+    const currentStage = stages.find((s) => s.id === lead.stage_id) || null
+    if (currentStage?.key === 'site_visit_scheduled') {
+      const forwardStage =
+        stages.find((s) => s.key === 'proposal') ||
+        stages.find((s) => s.key === 'negotiation') ||
+        stages.find((s) => s.key === 'followup') ||
+        currentStage
+      setPendingStageChange({
+        fromStage: currentStage,
+        toStage: forwardStage,
+      })
+    } else {
+      const meetingDoneStage = stages.find((s) => s.key === 'meeting_done')
+      if (!meetingDoneStage) return
+      setPendingStageChange({
+        fromStage: currentStage,
+        toStage: meetingDoneStage,
+      })
+    }
+  }
+
+  async function handleConfirmStageChange(payload: StageChangePayload) {
+    if (!pendingStageChange) return
+
+    const { fromStage, toStage } = pendingStageChange
+    const effectiveStageId = payload.targetStageId
+    const effectiveStage = stages.find((s) => s.id === effectiveStageId) || toStage
+
+    // Close modal immediately so UI is instantaneous and responsive
+    setPendingStageChange(null)
+
+    setLead((prev) => ({
+      ...prev,
+      stage_id: effectiveStageId,
+      stage: effectiveStage || prev.stage,
+      meeting_date: payload.meetingDate || prev.meeting_date,
+      meeting_time: payload.meetingTime || prev.meeting_time,
+      form_data: payload.lostReason ? { ...(prev.form_data || {}), lost_reason: payload.lostReason } : prev.form_data,
+    }))
+
+    logActivity('STAGE_CHANGE', {
+      from_stage: fromStage?.label || '—',
+      to_stage: effectiveStage.label || '—',
+      outcome: payload.outcome || null,
+      note: payload.note || null,
+      lost_reason: payload.lostReason || null,
+    })
+
+    const leadUpdate: Record<string, any> = { stage_id: effectiveStageId }
+    if (payload.meetingDate) {
+      leadUpdate.meeting_date = payload.meetingDate
+      leadUpdate.meeting_time = payload.meetingTime || null
+    }
+    if (payload.lostReason) {
+      // Store in form_data JSONB to prevent column does not exist DB error
+      leadUpdate.form_data = {
+        ...(lead.form_data || {}),
+        lost_reason: payload.lostReason,
+      }
+    }
+
+    const updates: any[] = [
+      supabase.from('leads').update(leadUpdate).eq('id', lead.id),
+      supabase.from('lead_stage_history').insert({
+        lead_id: lead.id,
+        from_stage_id: fromStage?.id || lead.stage_id,
+        to_stage_id: effectiveStageId,
+        changed_by: profile.id,
+      }),
+    ]
+
+    // Save note to lead_notes table so it is NEVER lost, and optimistically add to notes state!
+    let noteBodyToInsert: string | null = null
+    if (payload.note && payload.note.trim()) {
+      noteBodyToInsert = payload.note.trim()
+    } else if (payload.lostReason) {
+      noteBodyToInsert = `Marked as Lost. Reason: ${payload.lostReason}`
+    }
+
+    if (noteBodyToInsert) {
+      const tempNoteId = crypto.randomUUID()
+      const optimisticNote: LeadNote = {
+        id: tempNoteId,
+        lead_id: lead.id,
+        author_id: profile.id,
+        author: profile,
+        body: noteBodyToInsert,
+        created_at: new Date().toISOString(),
+      }
+      setNotes((prev) => [optimisticNote, ...prev])
+
+      updates.push(
+        supabase.from('lead_notes').insert({
+          lead_id: lead.id,
+          author_id: profile.id,
+          body: noteBodyToInsert,
+        })
+      )
+    }
+
+    // Create follow-up record if scheduled, and optimistically add to followups state!
+    if (payload.followupDate) {
+      const followupText =
+        payload.followupNote?.trim() ||
+        (payload.outcome ? `Follow-up after ${payload.outcome}` : 'Scheduled follow-up')
+      const optimisticFollowup: LeadFollowup = {
+        id: crypto.randomUUID(),
+        lead_id: lead.id,
+        agent_id: lead.assigned_agent_id || profile.id,
+        agent: profile,
+        scheduled_at: payload.followupDate,
+        note: followupText,
+        is_completed: false,
+        reminder_sent: false,
+        created_at: new Date().toISOString(),
+      }
+      setFollowups((prev) => [optimisticFollowup, ...prev])
+
+      updates.push(
+        supabase.from('lead_followups').insert({
+          lead_id: lead.id,
+          agent_id: lead.assigned_agent_id || profile.id,
+          scheduled_at: payload.followupDate,
+          note: followupText,
+          is_completed: false,
+        })
+      )
+    }
+
+    if (['won', 'lost'].includes(effectiveStage.key)) {
+      setFollowups((prev) =>
+        prev.map((f) => (!f.is_completed ? { ...f, is_completed: true, completed_at: new Date().toISOString() } : f))
+      )
+      updates.push(
+        supabase
+          .from('lead_followups')
+          .update({ is_completed: true, completed_at: new Date().toISOString() })
+          .eq('lead_id', lead.id)
+          .eq('is_completed', false)
+      )
+    }
+
+    await Promise.all(updates)
+    router.refresh()
   }
 
   // Handle Agent change with immediate UI feedback and duplicate guard
@@ -389,7 +706,13 @@ export default function LeadDetailClient({
     e.preventDefault()
     if (!followupDate) return
 
+    if (followupConflict && !allowFollowupConflictOverlap) {
+      setFollowupFormError(`⚠️ Schedule Conflict: You already have a commitment around ${followupConflict.formatted_time} with "${followupConflict.lead_name}". Check "Schedule anyway" below to proceed.`)
+      return
+    }
+
     setSavingFollowup(true)
+    setFollowupFormError(null)
     const isoDate = new Date(followupDate).toISOString()
 
     if (editingFollowupId) {
@@ -450,24 +773,195 @@ export default function LeadDetailClient({
 
   // Toggle complete followup
   async function handleToggleFollowup(followupId: string, currentStatus: boolean) {
-    const nextStatus = !currentStatus
+    if (!currentStatus) {
+      // Completing an uncompleted follow-up: Intercept with Outcome & Next Step modal
+      const target = followups.find((f) => f.id === followupId)
+      if (target) {
+        setCompletingFollowup(target)
+        return
+      }
+    }
+
+    // Reopening an already completed follow-up
+    const nextStatus = false
     setFollowups((prev) =>
       prev.map((f) =>
         f.id === followupId
-          ? { ...f, is_completed: nextStatus, completed_at: nextStatus ? new Date().toISOString() : null }
+          ? { ...f, is_completed: nextStatus, completed_at: null }
           : f
       )
     )
 
-    logActivity(nextStatus ? 'FOLLOWUP_COMPLETED' : 'FOLLOWUP_UPDATED')
+    logActivity('FOLLOWUP_UPDATED', { reopened: true })
 
     await supabase
       .from('lead_followups')
       .update({
         is_completed: nextStatus,
-        completed_at: nextStatus ? new Date().toISOString() : null,
+        completed_at: null,
       })
       .eq('id', followupId)
+  }
+
+  // Handle follow-up outcome completion modal submission
+  async function handleSaveFollowupCompletion(payload: FollowupCompletionData) {
+    const nowIso = new Date().toISOString()
+
+    // 1. Mark target follow-up as completed
+    setFollowups((prev) =>
+      prev.map((f) =>
+        f.id === payload.followupId
+          ? { ...f, is_completed: true, completed_at: nowIso }
+          : f
+      )
+    )
+
+    await supabase
+      .from('lead_followups')
+      .update({
+        is_completed: true,
+        completed_at: nowIso,
+      })
+      .eq('id', payload.followupId)
+
+    // 2. Insert outcome note into lead_notes
+    if (payload.outcomeNote) {
+      const optimisticNote: LeadNote = {
+        id: crypto.randomUUID(),
+        lead_id: lead.id,
+        author_id: profile.id,
+        body: `🏁 Follow-up Completed: ${payload.outcomeNote}`,
+        created_at: nowIso,
+        author: profile,
+      }
+      setNotes((prev) => [optimisticNote, ...prev])
+
+      const { data: createdNote } = await supabase
+        .from('lead_notes')
+        .insert({
+          lead_id: lead.id,
+          author_id: profile.id,
+          body: `🏁 Follow-up Completed: ${payload.outcomeNote}`,
+        })
+        .select('*, author:profiles(id, name, email)')
+        .single()
+
+      if (createdNote) {
+        setNotes((prev) => [createdNote, ...prev.filter((n) => n.id !== optimisticNote.id)])
+      }
+    }
+
+    // 3. Log FOLLOWUP_COMPLETED activity
+    logActivity('FOLLOWUP_COMPLETED', {
+      outcome: payload.outcomeNote,
+      next_step: payload.nextStepType,
+    })
+
+    // 4. Update stage if changed
+    if (payload.targetStageId && payload.targetStageId !== lead.stage_id) {
+      const oldStage = stages.find((s) => s.id === lead.stage_id) || null
+      const newStage = stages.find((s) => s.id === payload.targetStageId)
+      await executeDirectStageChange(payload.targetStageId, oldStage, newStage)
+    }
+
+    // 5. Handle Next Step actions
+    if (payload.nextStepType === 'FOLLOWUP' && payload.nextFollowupDate) {
+      const optimisticNewFollowup: LeadFollowup = {
+        id: crypto.randomUUID(),
+        lead_id: lead.id,
+        agent_id: profile.id,
+        scheduled_at: payload.nextFollowupDate,
+        note: payload.nextFollowupNote || 'Scheduled follow-up',
+        is_completed: false,
+        reminder_sent: false,
+        created_at: nowIso,
+        agent: profile,
+      }
+      setFollowups((prev) => [optimisticNewFollowup, ...prev])
+      logActivity('FOLLOWUP_SCHEDULED', { date: payload.nextFollowupDate, note: payload.nextFollowupNote })
+
+      const { data: newFuData } = await supabase
+        .from('lead_followups')
+        .insert({
+          lead_id: lead.id,
+          agent_id: profile.id,
+          scheduled_at: payload.nextFollowupDate,
+          note: payload.nextFollowupNote || 'Scheduled follow-up',
+          is_completed: false,
+        })
+        .select('*, agent:profiles(id, name, email)')
+        .single()
+
+      if (newFuData) {
+        setFollowups((prev) => [newFuData, ...prev.filter((f) => f.id !== optimisticNewFollowup.id)])
+      }
+    } else if (payload.nextStepType === 'MEETING') {
+      const leadUpdates: Record<string, any> = {
+        meeting_date: payload.meetingDate || null,
+        meeting_time: payload.meetingTime || null,
+      }
+      setLead((prev) => ({ ...prev, ...leadUpdates }))
+      await supabase.from('leads').update(leadUpdates).eq('id', lead.id)
+
+      logActivity('MEETING_SCHEDULED', {
+        date: payload.meetingDate,
+        time: payload.meetingTime,
+        location: payload.meetingLocation,
+        note: payload.meetingNote,
+      })
+
+      if (payload.meetingDate) {
+        const meetingIso = new Date(`${payload.meetingDate}T${payload.meetingTime || '15:00'}:00`).toISOString()
+        const optimisticMeetingFu: LeadFollowup = {
+          id: crypto.randomUUID(),
+          lead_id: lead.id,
+          agent_id: profile.id,
+          scheduled_at: meetingIso,
+          note: `🤝 ${payload.meetingLocation || 'Meeting'}: ${payload.meetingNote || 'Client presentation'}`,
+          is_completed: false,
+          reminder_sent: false,
+          created_at: nowIso,
+          agent: profile,
+        }
+        setFollowups((prev) => [optimisticMeetingFu, ...prev])
+
+        const { data: meetingFuData } = await supabase
+          .from('lead_followups')
+          .insert({
+            lead_id: lead.id,
+            agent_id: profile.id,
+            scheduled_at: meetingIso,
+            note: `🤝 ${payload.meetingLocation || 'Meeting'}: ${payload.meetingNote || 'Client presentation'}`,
+            is_completed: false,
+          })
+          .select('*, agent:profiles(id, name, email)')
+          .single()
+
+        if (meetingFuData) {
+          setFollowups((prev) => [meetingFuData, ...prev.filter((f) => f.id !== optimisticMeetingFu.id)])
+        }
+      }
+    } else if (payload.nextStepType === 'LOST') {
+      if (payload.lostReason) {
+        const lostNote: LeadNote = {
+          id: crypto.randomUUID(),
+          lead_id: lead.id,
+          author_id: profile.id,
+          body: `❌ Reason for Lost: ${payload.lostReason}`,
+          created_at: nowIso,
+          author: profile,
+        }
+        setNotes((prev) => [lostNote, ...prev])
+
+        await supabase.from('lead_notes').insert({
+          lead_id: lead.id,
+          author_id: profile.id,
+          body: `❌ Reason for Lost: ${payload.lostReason}`,
+        })
+      }
+    }
+
+    setCompletingFollowup(null)
   }
 
   // Delete Follow-up
@@ -816,29 +1310,112 @@ export default function LeadDetailClient({
                 <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10, gridColumn: '1 / -1' }}>
                   <Calendar size={16} style={{ color: '#2563EB', marginTop: 2, flexShrink: 0 }} />
                   <div style={{ width: '100%' }}>
-                    <div className="text-label" style={{ fontSize: 11 }}>SCHEDULED MEETING</div>
-                    {lead.meeting_date ? (
-                      <div
-                        style={{
-                          marginTop: 4,
-                          padding: '6px 10px',
-                          backgroundColor: '#EFF6FF',
-                          border: '1px solid #BFDBFE',
-                          borderRadius: '6px',
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: 8,
-                          fontSize: '12.5px',
-                          color: '#1E40AF',
-                          fontWeight: 600,
-                        }}
-                      >
-                        <span>📅 {formatDate(lead.meeting_date)}</span>
-                        {lead.meeting_time && <span>⏰ {lead.meeting_time}</span>}
-                      </div>
-                    ) : (
-                      <div style={{ color: '#94A3B8', fontSize: 13, marginTop: 2 }}>No meeting scheduled</div>
-                    )}
+                    {(() => {
+                      const currentStageKey = stages.find((s) => s.id === lead.stage_id)?.key || lead.stage?.key || ''
+                      const isSiteVisit = currentStageKey === 'site_visit_scheduled'
+                      const isMeetingDone = ['meeting_done', 'proposal', 'negotiation', 'won', 'lost'].includes(currentStageKey) && !isSiteVisit
+                      const labelText = isSiteVisit ? 'SCHEDULED SITE VISIT' : 'SCHEDULED MEETING'
+
+                      return (
+                        <>
+                          <div className="text-label" style={{ fontSize: 11 }}>{labelText}</div>
+                          {lead.meeting_date ? (
+                            <div
+                              style={{
+                                marginTop: 4,
+                                padding: '8px 12px',
+                                backgroundColor: isMeetingDone ? '#ECFDF5' : '#EFF6FF',
+                                border: `1px solid ${isMeetingDone ? '#A7F3D0' : '#BFDBFE'}`,
+                                borderRadius: '6px',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'space-between',
+                                flexWrap: 'wrap',
+                                gap: 8,
+                                fontSize: '12.5px',
+                                color: isMeetingDone ? '#065F46' : '#1E40AF',
+                                fontWeight: 600,
+                              }}
+                            >
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                <span>📅 {formatDate(lead.meeting_date)}</span>
+                                {lead.meeting_time && <span>⏰ {lead.meeting_time}</span>}
+                                {isMeetingDone && (
+                                  <span style={{ fontSize: 10.5, fontWeight: 700, backgroundColor: '#DCFCE7', color: '#15803D', padding: '2px 8px', borderRadius: 4, border: '1px solid #BBF7D0' }}>
+                                    ✓ Meeting Completed
+                                  </span>
+                                )}
+                              </div>
+
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                                {!isMeetingDone && (
+                                  <button
+                                    type="button"
+                                    onClick={handleMarkMeetingOrVisitDone}
+                                    className="btn btn-sm"
+                                    style={{
+                                      backgroundColor: '#16A34A',
+                                      color: '#FFFFFF',
+                                      padding: '3px 10px',
+                                      fontSize: '11px',
+                                      fontWeight: 700,
+                                      borderRadius: '6px',
+                                      border: 'none',
+                                      display: 'inline-flex',
+                                      alignItems: 'center',
+                                      gap: 4,
+                                      cursor: 'pointer',
+                                      boxShadow: '0 1px 3px rgba(22, 163, 74, 0.3)',
+                                    }}
+                                    title={isSiteVisit ? 'Mark site visit completed and advance forward' : 'Mark meeting done and schedule next steps'}
+                                  >
+                                    <CheckCircle size={12} />
+                                    <span>{isSiteVisit ? 'Mark Visit Done' : 'Mark Meeting Done'}</span>
+                                  </button>
+                                )}
+                                <button
+                                  type="button"
+                                  onClick={async () => {
+                                    if (!confirm(`Are you sure you want to remove this scheduled ${isSiteVisit ? 'site visit' : 'meeting'}?`)) return
+                                    setLead((prev) => ({ ...prev, meeting_date: null, meeting_time: null }))
+                                    logActivity('MEETING_REMOVED', {
+                                      previous_date: lead.meeting_date,
+                                      previous_time: lead.meeting_time,
+                                    })
+                                    await supabase
+                                      .from('leads')
+                                      .update({ meeting_date: null, meeting_time: null })
+                                      .eq('id', lead.id)
+                                  }}
+                                  className="btn btn-sm"
+                                  style={{
+                                    backgroundColor: '#FEE2E2',
+                                    color: '#DC2626',
+                                    padding: '3px 8px',
+                                    fontSize: '11px',
+                                    fontWeight: 600,
+                                    borderRadius: '6px',
+                                    border: '1px solid #FECACA',
+                                    cursor: 'pointer',
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: 4,
+                                  }}
+                                  title={`Remove or cancel this scheduled ${isSiteVisit ? 'site visit' : 'meeting'}`}
+                                >
+                                  <X size={12} />
+                                  <span>Remove</span>
+                                </button>
+                              </div>
+                            </div>
+                          ) : (
+                            <div style={{ color: '#94A3B8', fontSize: 13, marginTop: 2 }}>
+                              No {isSiteVisit ? 'site visit' : 'meeting'} scheduled
+                            </div>
+                          )}
+                        </>
+                      )
+                    })()}
                   </div>
                 </div>
               </div>
@@ -1100,6 +1677,45 @@ export default function LeadDetailClient({
                     </div>
                   </div>
 
+                  {/* Conflict Alert Banner */}
+                  {followupConflict && (
+                    <div
+                      style={{
+                        padding: '10px 14px',
+                        borderRadius: 8,
+                        backgroundColor: '#FEF3C7',
+                        border: '1.5px solid #F59E0B',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: 4,
+                      }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 7, color: '#92400E', fontWeight: 700, fontSize: '0.8125rem' }}>
+                        <AlertTriangle size={15} color="#D97706" style={{ flexShrink: 0 }} />
+                        <span>⚠️ Time Conflict ({followupConflict.formatted_time})</span>
+                      </div>
+                      <div style={{ fontSize: '0.75rem', color: '#78350F', lineHeight: '1.4' }}>
+                        You already have a commitment scheduled with <strong>{followupConflict.lead_name}</strong> around this time
+                        {followupConflict.note ? ` ("${followupConflict.note}")` : ''}.
+                      </div>
+                      <label style={{ display: 'flex', alignItems: 'center', gap: 7, cursor: 'pointer', marginTop: 4, fontSize: '0.75rem', fontWeight: 600, color: '#92400E' }}>
+                        <input
+                          type="checkbox"
+                          checked={allowFollowupConflictOverlap}
+                          onChange={(e) => setAllowFollowupConflictOverlap(e.target.checked)}
+                          style={{ width: 14, height: 14, accentColor: '#D97706', cursor: 'pointer' }}
+                        />
+                        <span>Schedule anyway (allow overlap)</span>
+                      </label>
+                    </div>
+                  )}
+
+                  {followupFormError && (
+                    <div style={{ color: '#DC2626', fontSize: '0.75rem', fontWeight: 600, marginTop: 2 }}>
+                      {followupFormError}
+                    </div>
+                  )}
+
                   <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
                     <button
                       type="button"
@@ -1123,7 +1739,7 @@ export default function LeadDetailClient({
               )}
 
               {/* Follow-ups List with Edit & Delete */}
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8, maxHeight: 360, overflowY: 'auto', paddingRight: 4 }}>
                 {followups.map((f) => (
                   <div
                     key={f.id}
@@ -1312,31 +1928,83 @@ export default function LeadDetailClient({
               </h3>
 
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                {activities.map((a) => (
-                  <div
-                    key={a.id}
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'space-between',
-                      fontSize: 12.5,
-                      paddingBlock: 6,
-                      borderBottom: '1px solid #F1F5F9',
-                    }}
-                  >
-                    <div className="flex items-center gap-2">
-                      <span className="badge badge-source" style={{ fontSize: 10.5 }}>
-                        {a.activity_type}
-                      </span>
-                      <span style={{ color: '#64748B' }}>
-                        by <strong style={{ color: '#0F172A' }}>{a.performer?.name || 'System'}</strong>
-                      </span>
+                {activities.map((a) => {
+                  const meta = a.metadata || {}
+                  return (
+                    <div
+                      key={a.id}
+                      style={{
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: 4,
+                        fontSize: 12.5,
+                        paddingBlock: 8,
+                        borderBottom: '1px solid #F1F5F9',
+                      }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 6 }}>
+                        <div className="flex items-center gap-2" style={{ flexWrap: 'wrap' }}>
+                          <span className="badge badge-source" style={{ fontSize: 10.5, fontWeight: 700 }}>
+                            {a.activity_type}
+                          </span>
+                          {meta.from_stage && meta.to_stage && (
+                            <span style={{ fontSize: 12, fontWeight: 600, color: '#1E293B' }}>
+                              {meta.from_stage} → <span style={{ color: 'var(--accent)' }}>{meta.to_stage}</span>
+                            </span>
+                          )}
+                          <span style={{ color: '#64748B', fontSize: 11.5 }}>
+                            by <strong style={{ color: '#0F172A' }}>{a.performer?.name || 'System'}</strong>
+                          </span>
+                        </div>
+                        <span style={{ fontSize: 11, color: '#64748B', fontWeight: 500, flexShrink: 0 }}>
+                          {formatExactTime(a.created_at)}
+                        </span>
+                      </div>
+
+                      {meta.outcome && (
+                        <div style={{ fontSize: 11.5, color: '#2563EB', fontWeight: 600, paddingLeft: 4 }}>
+                          Outcome: <span style={{ textTransform: 'capitalize' }}>{meta.outcome.replace(/_/g, ' ')}</span>
+                        </div>
+                      )}
+
+                      {meta.lost_reason && (
+                        <div style={{ fontSize: 11.5, color: '#DC2626', fontWeight: 600, paddingLeft: 4 }}>
+                          Lost reason: {meta.lost_reason}
+                        </div>
+                      )}
+
+                      {meta.note && (
+                        <div
+                          style={{
+                            fontSize: 12,
+                            color: '#334155',
+                            backgroundColor: '#F8FAFC',
+                            padding: '6px 10px',
+                            borderRadius: 6,
+                            borderLeft: '3px solid var(--accent)',
+                            marginTop: 2,
+                            wordBreak: 'break-word',
+                          }}
+                        >
+                          {meta.note}
+                        </div>
+                      )}
+
+                      {meta.snippet && !meta.note && (
+                        <div
+                          style={{
+                            fontSize: 11.5,
+                            color: '#64748B',
+                            fontStyle: 'italic',
+                            paddingLeft: 4,
+                          }}
+                        >
+                          &ldquo;{meta.snippet}&rdquo;
+                        </div>
+                      )}
                     </div>
-                    <span style={{ fontSize: 11, color: '#64748B', fontWeight: 500 }}>
-                      {formatExactTime(a.created_at)}
-                    </span>
-                  </div>
-                ))}
+                  )
+                })}
               </div>
             </div>
           </div>
@@ -1876,6 +2544,43 @@ export default function LeadDetailClient({
         variant="danger"
         onConfirm={executeDeleteFollowup}
         onCancel={() => setFollowupIdToDelete(null)}
+      />
+
+      {/* Stage Change Intercept Modal */}
+      {pendingStageChange && (
+        <StageChangeModal
+          isOpen={true}
+          lead={{
+            id: lead.id,
+            name: lead.name,
+            phone: lead.phone,
+            stage_id: lead.stage_id,
+            assigned_agent_id: lead.assigned_agent_id,
+          }}
+          currentUserId={profile.id}
+          fromStage={pendingStageChange.fromStage}
+          toStage={pendingStageChange.toStage}
+          stages={stages}
+          onConfirm={handleConfirmStageChange}
+          onCancel={() => setPendingStageChange(null)}
+        />
+      )}
+
+      {/* Follow-up Completion Outcome Modal */}
+      <FollowupCompletionModal
+        isOpen={!!completingFollowup}
+        followup={completingFollowup}
+        lead={{
+          id: lead.id,
+          name: lead.name,
+          phone: lead.phone,
+          stage_id: lead.stage_id,
+          assigned_agent_id: lead.assigned_agent_id,
+        }}
+        currentUserId={profile.id}
+        stages={stages}
+        onClose={() => setCompletingFollowup(null)}
+        onSubmit={handleSaveFollowupCompletion}
       />
     </div>
   )

@@ -333,9 +333,42 @@ export async function submitPunchOut(params: {
 // ==========================================
 // 3. ATTENDANCE HISTORY & TIMESHEETS
 // ==========================================
-export async function fetchUserAttendanceHistory(userId: string): Promise<AttendanceLog[]> {
+
+export function getEmployeeShiftEnd(
+  userId: string,
+  dateStr: string,
+  policy?: CompanyWorkPolicy | null
+): { endMinutes: number; shiftEndStr: string } {
+  if (!policy) {
+    return { endMinutes: 17 * 60, shiftEndStr: '17:00' }
+  }
+  const d = new Date(dateStr + 'T00:00:00')
+  const dayName = d.toLocaleDateString('en-US', { weekday: 'long' }).toUpperCase()
+  const empSchedule = policy.custom_employee_schedules?.[userId]
+  const daySched = empSchedule?.custom_day_schedules?.[dayName] || policy.custom_day_schedules?.[dayName]
+
+  const shiftEndRaw = daySched?.endTime || empSchedule?.shift_end_time || policy.shift_end_time || '17:00'
+  const shiftEndStr = shiftEndRaw.slice(0, 5)
+  const [endH, endM] = shiftEndStr.split(':').map(Number)
+  const endMinutes = (isNaN(endH) ? 17 : endH) * 60 + (isNaN(endM) ? 0 : endM)
+  return { endMinutes, shiftEndStr }
+}
+
+export async function fetchUserAttendanceHistory(
+  userId: string,
+  passedPolicy?: CompanyWorkPolicy
+): Promise<AttendanceLog[]> {
   const todayStr = getLocalDateString()
   let rawLogs: AttendanceLog[] = []
+
+  let policy = passedPolicy
+  if (!policy) {
+    try {
+      policy = await fetchCompanyWorkPolicy()
+    } catch {
+      // fallback
+    }
+  }
 
   try {
     const supabase = createClient()
@@ -399,7 +432,7 @@ export async function fetchUserAttendanceHistory(userId: string): Promise<Attend
     console.warn('Supabase history fetch failed:', err)
   }
 
-  // Post-process logs: handle active shift and past unclosed shift fallback
+  // Post-process logs: handle active shift and individual shift-end unclosed fallback
   return rawLogs.map((log) => {
     const isFlagged = log.punch_in_status === 'FLAGGED' || log.punch_out_status === 'FLAGGED'
 
@@ -416,7 +449,7 @@ export async function fetchUserAttendanceHistory(userId: string): Promise<Attend
         }
       } else if (log.date < todayStr) {
         // Past shift where employee forgot to punch out:
-        // Calculate duration from punch_in_at up to shift end time (17:00 EOD)
+        // Calculate duration from punch_in_at up to individual employee's scheduled shift end
         if (isFlagged) {
           return {
             ...log,
@@ -424,15 +457,24 @@ export async function fetchUserAttendanceHistory(userId: string): Promise<Attend
             review_notes: log.review_notes || '⚠️ Flagged by Admin: Shift not counted',
           }
         }
+        const { endMinutes, shiftEndStr } = getEmployeeShiftEnd(userId, log.date, policy)
         const inDate = new Date(log.punch_in_at)
         const inMinutes = inDate.getHours() * 60 + inDate.getMinutes()
-        const endMinutes = 17 * 60
-        const autoMins = Math.max(0, endMinutes - inMinutes)
+        let targetEndMinutes = endMinutes
+        if (targetEndMinutes < inMinutes) {
+          targetEndMinutes += 24 * 60 // Overnight shift handling
+        }
+        const autoMins = Math.max(0, targetEndMinutes - inMinutes)
+        const autoNote = `⚠️ Auto-Closed (${shiftEndStr} EOD): Employee forgot to punch out`
+        const reviewNotes = !log.review_notes || log.review_notes.includes('Auto-Closed')
+          ? autoNote
+          : log.review_notes
+
         return {
           ...log,
           total_working_minutes: autoMins,
           punch_out_status: log.punch_out_status || ('PENDING_REVIEW' as AttendancePunchStatus),
-          review_notes: log.review_notes || '⚠️ Auto-Closed (17:00 EOD): Employee forgot to punch out',
+          review_notes: reviewNotes,
           is_auto_closed: true,
         }
       }
@@ -1010,6 +1052,13 @@ export function formatDisplayTime(iso?: string | null): string {
 export async function fetchAdminDailyRoster(dateStr: string): Promise<RosterEmployee[]> {
   try {
     const supabase = createClient()
+    let policy: CompanyWorkPolicy | null = null
+    try {
+      policy = await fetchCompanyWorkPolicy()
+    } catch {
+      // fallback
+    }
+
     // Fetch profiles
     const { data: profiles, error: pErr } = await supabase
       .from('profiles')
@@ -1047,11 +1096,15 @@ export async function fetchAdminDailyRoster(dateStr: string): Promise<RosterEmpl
             // Unclosed punch
             const localTodayStr = getLocalDateString()
             if (dateStr < localTodayStr) {
-              // Past day unclosed punch: auto-closed up to 17:00 EOD
+              // Past day unclosed punch: auto-closed up to individual employee shift end
               const inDate = new Date(log.punch_in_at)
               const inMinutes = inDate.getHours() * 60 + inDate.getMinutes()
-              const endMinutes = 17 * 60
-              activeMinutes = Math.max(0, endMinutes - inMinutes)
+              const { endMinutes } = getEmployeeShiftEnd(p.id, dateStr, policy)
+              let targetEndMinutes = endMinutes
+              if (targetEndMinutes < inMinutes) {
+                targetEndMinutes += 24 * 60 // overnight shift
+              }
+              activeMinutes = Math.max(0, targetEndMinutes - inMinutes)
               liveStatus = 'FLAGGED'
             } else {
               // Currently active today
@@ -1879,7 +1932,17 @@ export function calculateExpectedHoursInMonth(
 
     const isTargetWorkDay = targetDayIndices.includes(dayOfWeekIndex)
     const isHoliday = holidayDates.has(dateStr)
-    const isAfterTrackingStart = !trackingStartDate || dateStr >= trackingStartDate
+    const isPastMonth = !isCurrentMonth && !isFutureMonth
+    let isAfterTrackingStart = true
+    if (trackingStartDate) {
+      if (isPastMonth) {
+        if (trackingStartDate.startsWith(`${year}-${month.toString().padStart(2, '0')}`)) {
+          isAfterTrackingStart = dateStr >= trackingStartDate
+        }
+      } else {
+        isAfterTrackingStart = dateStr >= trackingStartDate
+      }
+    }
 
     if (isTargetWorkDay && !isHoliday) {
       const dayHours =
@@ -1887,35 +1950,38 @@ export function calculateExpectedHoursInMonth(
           ? customDayHours[dayName]
           : defaultHours
 
-      count++
-      totalHours += dayHours
+      // Only count as a scheduled workday if dayHours > 0 (0-hour days are off/rest days)
+      if (dayHours > 0) {
+        count++
+        totalHours += dayHours
 
-      if (isAfterTrackingStart) {
-        if (isFutureMonth) {
-          // Future month: 0 elapsed
-        } else if (isCurrentMonth) {
-          if (upToDayParam !== undefined) {
-            if (day <= upToDayParam) {
+        if (isAfterTrackingStart) {
+          if (isFutureMonth) {
+            // Future month: 0 elapsed
+          } else if (isCurrentMonth) {
+            if (upToDayParam !== undefined) {
+              if (day <= upToDayParam) {
+                elapsedCount++
+                elapsedHours += dayHours
+              }
+            } else if (day < todayDay) {
               elapsedCount++
               elapsedHours += dayHours
+            } else if (day === todayDay) {
+              // Deficit rule: Only add today's expected hours to elapsed to-date hours
+              // once today's shift has ended or employee has completed / punched out.
+              // Before shift end time (or before workday starts), today is in progress,
+              // so 0h expected is elapsed for today to prevent premature deficit!
+              if (isShiftEndedToday) {
+                elapsedCount++
+                elapsedHours += dayHours
+              }
             }
-          } else if (day < todayDay) {
+          } else {
+            // Past month: all elapsed
             elapsedCount++
             elapsedHours += dayHours
-          } else if (day === todayDay) {
-            // Deficit rule: Only add today's expected hours to elapsed to-date hours
-            // once today's shift has ended or employee has completed / punched out.
-            // Before shift end time (or before workday starts), today is in progress,
-            // so 0h expected is elapsed for today to prevent premature deficit!
-            if (isShiftEndedToday) {
-              elapsedCount++
-              elapsedHours += dayHours
-            }
           }
-        } else {
-          // Past month: all elapsed
-          elapsedCount++
-          elapsedHours += dayHours
         }
       }
     }
@@ -2045,9 +2111,17 @@ export async function fetchMonthlyWorkHoursAudit(
 
         const sal = salMap.get(p.id)
         const empJoiningDate = sal?.joining_date || null
+        const nowObj = new Date()
+        const isPastMonthAudit = nowObj.getFullYear() > year || (nowObj.getFullYear() === year && nowObj.getMonth() + 1 > month)
+
         const effectiveStartDate = (() => {
           const dates: string[] = []
-          if (policy.tracking_start_date) dates.push(policy.tracking_start_date)
+          // For past months, do not impose the future tracking_start_date (allows historical payroll audits)
+          if (policy.tracking_start_date && !isPastMonthAudit) {
+            dates.push(policy.tracking_start_date)
+          } else if (policy.tracking_start_date && isPastMonthAudit && policy.tracking_start_date.startsWith(`${year}-${month.toString().padStart(2, '0')}`)) {
+            dates.push(policy.tracking_start_date)
+          }
           if (empJoiningDate) dates.push(empJoiningDate)
           if (dates.length === 0) return null
           return dates.sort().pop() || null
@@ -2089,8 +2163,13 @@ export async function fetchMonthlyWorkHoursAudit(
         }
 
         // Total active worked minutes (excluding flagged / rejected punches)
+        // STRICT RULE (Issue 4): Only count hours worked on or after effectiveStartDate!
         const totalWorkedMins = staffLogs.reduce((acc, curr) => {
           if (curr.punch_in_status === 'FLAGGED' || curr.punch_out_status === 'FLAGGED') {
+            return acc
+          }
+          // Do NOT count punches that occurred before the effective start date!
+          if (effectiveStartDate && curr.date < effectiveStartDate) {
             return acc
           }
           let mins = curr.total_working_minutes || 0
@@ -2098,8 +2177,10 @@ export async function fetchMonthlyWorkHoursAudit(
             if (curr.date < todayStr) {
               const inDate = new Date(curr.punch_in_at)
               const inMins = inDate.getHours() * 60 + inDate.getMinutes()
-              const endMins = 17 * 60
-              mins = Math.max(0, endMins - inMins)
+              const { endMinutes: shiftEndMins } = getEmployeeShiftEnd(p.id, curr.date, policy)
+              let targetEndMins = shiftEndMins
+              if (targetEndMins < inMins) targetEndMins += 24 * 60
+              mins = Math.max(0, targetEndMins - inMins)
             } else if (curr.date === todayStr && mins === 0) {
               mins = Math.max(1, Math.round((Date.now() - new Date(curr.punch_in_at).getTime()) / (1000 * 60)))
             }
@@ -2191,14 +2272,17 @@ export async function fetchMonthlyWorkHoursAudit(
           ? Math.round(monthToDateDeficit * hourlyRate * 10) / 10
           : 0
 
-        const daysPresent = staffLogs.filter((l) => l.punch_in_status === 'APPROVED').length
-        const daysRemote = staffLogs.filter(
+        const validStaffLogs = staffLogs.filter(
+          (l) => !effectiveStartDate || l.date >= effectiveStartDate
+        )
+        const daysPresent = validStaffLogs.filter((l) => l.punch_in_status === 'APPROVED').length
+        const daysRemote = validStaffLogs.filter(
           (l) => l.punch_in_status === 'PENDING_REVIEW' || l.punch_out_status === 'PENDING_REVIEW'
         ).length
 
         // Late days calculation based on personalized shift start time + grace period (with per-day schedule support)
         let daysLate = 0
-        staffLogs.forEach((l) => {
+        validStaffLogs.forEach((l) => {
           if (l.punch_in_at && l.date) {
             const punchDate = new Date(l.punch_in_at)
             const dObj = new Date(l.date + 'T00:00:00')
@@ -2216,7 +2300,38 @@ export async function fetchMonthlyWorkHoursAudit(
           }
         })
 
-        const daysAbsent = Math.max(0, empElapsedWorkingDays - staffLogs.length - Math.round(elapsedLeaveDays))
+        let daysAbsent = 0
+        if (!isExempt) {
+          const logDatesSet = new Set(validStaffLogs.map((l) => l.date))
+          const daysInMonth = new Date(year, month, 0).getDate()
+          const maxDay = isPastMonthAudit ? daysInMonth : Math.min(daysInMonth, nowObj.getDate())
+
+          for (let d = 1; d <= maxDay; d++) {
+            const dateStr = `${year}-${month.toString().padStart(2, '0')}-${d.toString().padStart(2, '0')}`
+            const dObj = new Date(year, month - 1, d)
+            const dayName = dObj.toLocaleDateString('en-US', { weekday: 'long' }).toUpperCase()
+            const isWorkDay = empWorkDays.includes(dayName)
+            const isHoliday = (policy.official_holidays || []).some((h) => h.date === dateStr)
+            const isAfterStart = !effectiveStartDate || dateStr >= effectiveStartDate
+            const dayHrs = (empCustomDayHours && empCustomDayHours[dayName] !== undefined)
+              ? empCustomDayHours[dayName]
+              : empDailyHours
+
+            if (isWorkDay && !isHoliday && isAfterStart && dayHrs > 0) {
+              const hasPunch = logDatesSet.has(dateStr)
+              const hasApprovedLeave = staffLeaves.some((r) => r.status === 'APPROVED' && dateStr >= r.start_date && dateStr <= r.end_date)
+              if (!hasPunch && !hasApprovedLeave) {
+                const isToday = dateStr === todayStr
+                const { endMinutes } = getEmployeeShiftEnd(p.id, dateStr, policy)
+                const nowMinutes = nowObj.getHours() * 60 + nowObj.getMinutes()
+                const isShiftOver = isToday ? nowMinutes >= endMinutes : true
+                if (!isToday || isShiftOver) {
+                  daysAbsent++
+                }
+              }
+            }
+          }
+        }
 
         return {
           employee_id: p.id,

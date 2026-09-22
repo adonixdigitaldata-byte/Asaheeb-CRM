@@ -52,6 +52,10 @@ export interface AttendanceLog {
   // Work Duration & Review
   total_working_minutes: number
   is_auto_closed?: boolean
+  is_absent?: boolean
+  is_leave?: boolean
+  leave_type?: LeaveType
+  expected_hours?: number
   review_notes: string | null
   reviewed_by: string | null
   reviewed_at: string | null

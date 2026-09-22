@@ -26,23 +26,37 @@ import {
   GripVertical,
   Calendar,
   Clock,
+  AlertTriangle,
+  CheckCircle,
 } from 'lucide-react'
 import type { Lead, LeadStage, Profile } from '@/types/database'
 import { formatTimeAgo, formatDate } from '@/lib/utils'
+import StageChangeModal, { type StageChangePayload } from '@/components/leads/StageChangeModal'
 
 interface Props {
   leads: Lead[]
   stages: LeadStage[]
   profile?: Profile
   onLeadMoved: () => void
+  onOptimisticMove?: (leadId: string, targetStageId: string, extraUpdates?: Partial<Lead>) => void
+  onFollowupScheduled?: (leadId: string) => void
+  pendingFollowupLeadIds?: string[]
 }
 
 function KanbanCardItem({
   lead,
   isOverlay = false,
+  isIdle = false,
+  idleBadgeText = 'No next action scheduled',
+  idleBadgeColor = 'red',
+  onMarkMeetingDone,
 }: {
   lead: Lead
   isOverlay?: boolean
+  isIdle?: boolean
+  idleBadgeText?: string | null
+  idleBadgeColor?: 'red' | 'amber' | null
+  onMarkMeetingDone?: (lead: Lead) => void
 }) {
   const router = useRouter()
   const {
@@ -60,8 +74,8 @@ function KanbanCardItem({
 
   const style = {
     transform: CSS.Translate.toString(transform),
-    transition,
-    opacity: isDragging ? 0.25 : 1,
+    transition: isDragging ? undefined : transition,
+    opacity: isDragging ? 0.3 : 1,
   }
 
   // Agent initials
@@ -80,7 +94,7 @@ function KanbanCardItem({
     <div
       ref={setNodeRef}
       style={style}
-      className="kanban-card"
+      className={`kanban-card ${isIdle ? 'is-idle' : ''}`}
       onClick={() => {
         if (!isDragging) {
           router.push(`/leads/${lead.id}`)
@@ -129,29 +143,99 @@ function KanbanCardItem({
         </div>
       </div>
 
-      {/* Scheduled Meeting Date & Time */}
+      {/* Idle Warning indicator */}
+      {isIdle && (
+        <div
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: 4,
+            fontSize: 10,
+            fontWeight: 700,
+            color: idleBadgeColor === 'amber' ? '#B45309' : '#DC2626',
+            backgroundColor: idleBadgeColor === 'amber' ? '#FEF3C7' : '#FEF2F2',
+            border: `1px solid ${idleBadgeColor === 'amber' ? '#FCD34D' : '#FECACA'}`,
+            padding: '1px 6px',
+            borderRadius: 4,
+            marginBottom: 5,
+          }}
+          title={idleBadgeText || 'No action scheduled'}
+        >
+          <AlertTriangle size={10} style={{ flexShrink: 0 }} />
+          <span>{idleBadgeText || 'No next action scheduled'}</span>
+        </div>
+      )}
+
+      {/* Scheduled Meeting Date & Time + Quick Mark Done Button */}
       {(lead.meeting_date || lead.meeting_time) && (
         <div
           style={{
             display: 'flex',
             alignItems: 'center',
-            gap: 4,
-            fontSize: 11,
-            fontWeight: 600,
-            color: '#1D4ED8',
-            backgroundColor: '#EFF6FF',
-            border: '1px solid #BFDBFE',
-            padding: '2px 6px',
-            borderRadius: 4,
+            justifyContent: 'space-between',
+            gap: 6,
             marginBottom: 5,
-            width: 'fit-content',
+            flexWrap: 'wrap',
           }}
         >
-          <Calendar size={11} style={{ flexShrink: 0 }} />
-          <span>
-            {lead.meeting_date ? formatDate(lead.meeting_date) : ''}
-            {lead.meeting_time ? ` · ${lead.meeting_time}` : ''}
-          </span>
+          <div
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 4,
+              fontSize: 11,
+              fontWeight: 600,
+              color: onMarkMeetingDone ? '#1D4ED8' : '#059669',
+              backgroundColor: onMarkMeetingDone ? '#EFF6FF' : '#ECFDF5',
+              border: `1px solid ${onMarkMeetingDone ? '#BFDBFE' : '#A7F3D0'}`,
+              padding: '2px 6px',
+              borderRadius: 4,
+              width: 'fit-content',
+            }}
+          >
+            {onMarkMeetingDone ? (
+              <Calendar size={11} style={{ flexShrink: 0 }} />
+            ) : (
+              <CheckCircle size={11} style={{ flexShrink: 0, color: '#059669' }} />
+            )}
+            <span>
+              {lead.meeting_date ? formatDate(lead.meeting_date) : ''}
+              {lead.meeting_time ? ` · ${lead.meeting_time}` : ''}
+              {!onMarkMeetingDone ? ' (Done)' : ''}
+            </span>
+          </div>
+
+          {onMarkMeetingDone && (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation()
+                onMarkMeetingDone(lead)
+              }}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 3,
+                fontSize: 10,
+                fontWeight: 700,
+                color: '#15803D',
+                backgroundColor: '#DCFCE7',
+                border: '1px solid #BBF7D0',
+                padding: '2px 6px',
+                borderRadius: 4,
+                cursor: 'pointer',
+                transition: 'all 0.15s ease',
+              }}
+              title={
+                lead.stage?.key === 'site_visit_scheduled'
+                  ? 'Mark site visit as completed — record outcome and advance to next stage'
+                  : 'Mark this meeting as completed — record outcome and schedule next steps'
+              }
+            >
+              <CheckCircle size={10} style={{ flexShrink: 0 }} />
+              <span>{lead.stage?.key === 'site_visit_scheduled' ? 'Mark Visit Done' : 'Mark Done'}</span>
+            </button>
+          )}
         </div>
       )}
 
@@ -209,14 +293,20 @@ function KanbanCardItem({
 function KanbanColumn({
   stage,
   leads,
+  pendingFollowupLeadIds,
+  onMarkMeetingDone,
 }: {
   stage: LeadStage
   leads: Lead[]
+  pendingFollowupLeadIds?: Set<string>
+  onMarkMeetingDone?: (lead: Lead) => void
 }) {
   const { setNodeRef, isOver } = useDroppable({
     id: `stage-${stage.id}`,
     data: { stageId: stage.id },
   })
+
+  const isClosedStage = ['won', 'lost'].includes(stage.key)
 
   return (
     <div
@@ -256,9 +346,74 @@ function KanbanColumn({
         strategy={verticalListSortingStrategy}
       >
         <div className="kanban-list">
-          {leads.map((lead) => (
-            <KanbanCardItem key={lead.id} lead={lead} />
-          ))}
+          {leads.map((lead) => {
+            if (isClosedStage) {
+              return <KanbanCardItem key={lead.id} lead={lead} isIdle={false} />
+            }
+
+            const hasPendingFollowup = !!pendingFollowupLeadIds && pendingFollowupLeadIds.has(lead.id)
+
+            // Check meeting date
+            let isUpcomingMeeting = false
+            let isPastMeeting = false
+
+            if (lead.meeting_date) {
+              const todayStart = new Date()
+              todayStart.setHours(0, 0, 0, 0)
+              const mDate = new Date(lead.meeting_date)
+              mDate.setHours(0, 0, 0, 0)
+              if (mDate >= todayStart) {
+                isUpcomingMeeting = true
+              } else {
+                isPastMeeting = true
+              }
+            }
+
+            // If it has an upcoming meeting OR a pending followup, it is NOT idle!
+            if (isUpcomingMeeting || hasPendingFollowup) {
+              return (
+                <KanbanCardItem
+                  key={lead.id}
+                  lead={lead}
+                  isIdle={false}
+                  onMarkMeetingDone={
+                    stage.key === 'meeting_scheduled' || stage.key === 'site_visit_scheduled'
+                      ? onMarkMeetingDone
+                      : undefined
+                  }
+                />
+              )
+            }
+
+            // If it had a meeting that is in the past, and no follow-up was scheduled:
+            if (isPastMeeting) {
+              return (
+                <KanbanCardItem
+                  key={lead.id}
+                  lead={lead}
+                  isIdle={true}
+                  idleBadgeText="Meeting passed — outcome needed"
+                  idleBadgeColor="amber"
+                  onMarkMeetingDone={
+                    stage.key === 'meeting_scheduled' || stage.key === 'site_visit_scheduled'
+                      ? onMarkMeetingDone
+                      : undefined
+                  }
+                />
+              )
+            }
+
+            // Truly idle (no upcoming meeting, no pending followup)
+            return (
+              <KanbanCardItem
+                key={lead.id}
+                lead={lead}
+                isIdle={true}
+                idleBadgeText="No next action scheduled"
+                idleBadgeColor="red"
+              />
+            )
+          })}
 
           {leads.length === 0 && (
             <div
@@ -282,9 +437,24 @@ function KanbanColumn({
   )
 }
 
-export default function KanbanBoard({ leads, stages, profile, onLeadMoved }: Props) {
+export default function KanbanBoard({
+  leads,
+  stages,
+  profile,
+  onLeadMoved,
+  onOptimisticMove,
+  onFollowupScheduled,
+  pendingFollowupLeadIds = [],
+}: Props) {
   const supabase = createClient()
   const [activeLead, setActiveLead] = useState<Lead | null>(null)
+  const [pendingStageChange, setPendingStageChange] = useState<{
+    lead: Lead
+    fromStage: LeadStage | null
+    toStage: LeadStage
+  } | null>(null)
+
+  const pendingLeadIdsSet = new Set(pendingFollowupLeadIds)
 
   const sensors = useSensors(
     useSensor(PointerSensor, {
@@ -298,6 +468,82 @@ export default function KanbanBoard({ leads, stages, profile, onLeadMoved }: Pro
     const { active } = event
     const lead = leads.find((l) => l.id === active.id)
     if (lead) setActiveLead(lead)
+  }
+
+  async function executeDirectStageMove(lead: Lead, fromStage: LeadStage | null, toStage: LeadStage) {
+    // 1. Instant optimistic UI update — card lands in the new column instantly!
+    if (onOptimisticMove) {
+      onOptimisticMove(lead.id, toStage.id)
+    } else {
+      lead.stage_id = toStage.id
+    }
+
+    let performerId = profile?.id
+    if (!performerId) {
+      const { data: { user } } = await supabase.auth.getUser()
+      performerId = user?.id
+    }
+
+    const updates: any[] = [
+      supabase.from('leads').update({ stage_id: toStage.id }).eq('id', lead.id),
+      supabase.from('lead_stage_history').insert({
+        lead_id: lead.id,
+        from_stage_id: fromStage?.id || lead.stage_id,
+        to_stage_id: toStage.id,
+        changed_by: performerId || null,
+      }),
+      supabase.from('lead_activities').insert({
+        lead_id: lead.id,
+        activity_type: 'STAGE_CHANGE',
+        performed_by: performerId || null,
+        metadata: {
+          from_stage: fromStage?.label || '—',
+          to_stage: toStage.label || '—',
+        },
+      }),
+    ]
+
+    // Auto schedule next action for specific stages so leads don't become idle
+    if (toStage.key === 'no_reply') {
+      const tomorrow = new Date()
+      tomorrow.setDate(tomorrow.getDate() + 1)
+      tomorrow.setHours(10, 0, 0, 0)
+      updates.push(
+        supabase.from('lead_followups').insert({
+          lead_id: lead.id,
+          agent_id: lead.assigned_agent_id || performerId,
+          scheduled_at: tomorrow.toISOString(),
+          note: 'Retry calling lead (no reply)',
+          is_completed: false,
+        })
+      )
+      if (onFollowupScheduled) onFollowupScheduled(lead.id)
+    } else if (toStage.key === 'meeting_done') {
+      const in2Days = new Date()
+      in2Days.setDate(in2Days.getDate() + 2)
+      in2Days.setHours(11, 0, 0, 0)
+      updates.push(
+        supabase.from('lead_followups').insert({
+          lead_id: lead.id,
+          agent_id: lead.assigned_agent_id || performerId,
+          scheduled_at: in2Days.toISOString(),
+          note: 'Post-meeting follow-up on next steps',
+          is_completed: false,
+        })
+      )
+      if (onFollowupScheduled) onFollowupScheduled(lead.id)
+    } else if (['won', 'lost'].includes(toStage.key)) {
+      updates.push(
+        supabase
+          .from('lead_followups')
+          .update({ is_completed: true, completed_at: new Date().toISOString() })
+          .eq('lead_id', lead.id)
+          .eq('is_completed', false)
+      )
+    }
+
+    await Promise.all(updates)
+    onLeadMoved()
   }
 
   async function handleDragEnd(event: DragEndEvent) {
@@ -326,66 +572,220 @@ export default function KanbanBoard({ leads, stages, profile, onLeadMoved }: Pro
 
     const lead = leads.find((l) => l.id === activeLeadId)
     if (lead && lead.stage_id !== targetStageId) {
-      const fromStage = stages.find((s) => s.id === lead.stage_id)
+      const fromStage = stages.find((s) => s.id === lead.stage_id) || null
       const toStage = stages.find((s) => s.id === targetStageId)
+      if (!toStage) return
 
-      // Optimistic update
-      lead.stage_id = targetStageId
-      onLeadMoved()
+      // Intercept stage changes with action commitment popup modal
+      const stagesRequiringIntercept = [
+        'contacted',
+        'no_reply',
+        'followup',
+        'qualified',
+        'proposal',
+        'meeting_scheduled',
+        'site_visit_scheduled',
+        'meeting_done',
+        'negotiation',
+        'lost',
+        'won',
+      ]
 
-      // Resolve user id who performed the move
-      let performerId = profile?.id
-      if (!performerId) {
-        const { data: { user } } = await supabase.auth.getUser()
-        performerId = user?.id
+      if (stagesRequiringIntercept.includes(toStage.key)) {
+        setPendingStageChange({
+          lead,
+          fromStage,
+          toStage,
+        })
+        return
       }
 
-      // Record stage transition history and activity with the actual user profile id
-      await Promise.all([
-        supabase.from('leads').update({ stage_id: targetStageId }).eq('id', activeLeadId),
-        supabase.from('lead_stage_history').insert({
-          lead_id: activeLeadId,
-          from_stage_id: lead.stage_id,
-          to_stage_id: targetStageId,
-          changed_by: performerId || null,
-        }),
-        supabase.from('lead_activities').insert({
-          lead_id: activeLeadId,
-          activity_type: 'STAGE_CHANGE',
-          performed_by: performerId || null,
-          metadata: {
-            from_stage: fromStage?.label || '—',
-            to_stage: toStage?.label || '—',
-          },
-        }),
-      ])
+      await executeDirectStageMove(lead, fromStage, toStage)
+    }
+  }
 
-      onLeadMoved()
+  async function handleConfirmStageChange(payload: StageChangePayload) {
+    if (!pendingStageChange) return
+
+    const { lead, fromStage, toStage } = pendingStageChange
+    const effectiveStageId = payload.targetStageId
+    const effectiveStage = stages.find((s) => s.id === effectiveStageId) || toStage
+
+    // INSTANT OPTIMISTIC UPDATE: card lands in target column immediately!
+    if (onOptimisticMove) {
+      onOptimisticMove(lead.id, effectiveStageId, {
+        meeting_date: payload.meetingDate,
+        meeting_time: payload.meetingTime,
+      })
+    } else {
+      lead.stage_id = effectiveStageId
+      if (payload.meetingDate) lead.meeting_date = payload.meetingDate
+      if (payload.meetingTime) lead.meeting_time = payload.meetingTime
+    }
+
+    if (payload.followupDate && onFollowupScheduled) {
+      onFollowupScheduled(lead.id)
+    }
+
+    // Close modal immediately
+    setPendingStageChange(null)
+
+    let performerId = profile?.id
+    if (!performerId) {
+      const { data: { user } } = await supabase.auth.getUser()
+      performerId = user?.id
+    }
+
+    // Prepare lead update
+    const leadUpdate: Record<string, any> = { stage_id: effectiveStageId }
+    if (payload.meetingDate) {
+      leadUpdate.meeting_date = payload.meetingDate
+      leadUpdate.meeting_time = payload.meetingTime || null
+    }
+    if (payload.lostReason) {
+      // Store in form_data JSONB to prevent column does not exist DB error
+      leadUpdate.form_data = {
+        ...(lead.form_data || {}),
+        lost_reason: payload.lostReason,
+      }
+    }
+
+    const updates: any[] = [
+      supabase.from('leads').update(leadUpdate).eq('id', lead.id),
+      supabase.from('lead_stage_history').insert({
+        lead_id: lead.id,
+        from_stage_id: fromStage?.id || lead.stage_id,
+        to_stage_id: effectiveStageId,
+        changed_by: performerId || null,
+      }),
+      supabase.from('lead_activities').insert({
+        lead_id: lead.id,
+        activity_type: 'STAGE_CHANGE',
+        performed_by: performerId || null,
+        metadata: {
+          from_stage: fromStage?.label || '—',
+          to_stage: effectiveStage.label || '—',
+          outcome: payload.outcome || null,
+          note: payload.note || null,
+          lost_reason: payload.lostReason || null,
+        },
+      }),
+    ]
+
+    // Save note to lead_notes table so it is NEVER lost!
+    let noteBodyToInsert: string | null = null
+    if (payload.note && payload.note.trim()) {
+      noteBodyToInsert = payload.note.trim()
+    } else if (payload.lostReason) {
+      noteBodyToInsert = `Marked as Lost. Reason: ${payload.lostReason}`
+    }
+
+    if (noteBodyToInsert) {
+      updates.push(
+        supabase.from('lead_notes').insert({
+          lead_id: lead.id,
+          author_id: performerId || null,
+          body: noteBodyToInsert,
+        })
+      )
+    }
+
+    // Create follow-up record if scheduled
+    if (payload.followupDate) {
+      updates.push(
+        supabase.from('lead_followups').insert({
+          lead_id: lead.id,
+          agent_id: lead.assigned_agent_id || performerId,
+          scheduled_at: payload.followupDate,
+          note: payload.followupNote || (payload.outcome ? `Follow-up after ${payload.outcome}` : 'Scheduled follow-up'),
+          is_completed: false,
+        })
+      )
+    }
+
+    // If moved to won or lost, clear pending followups
+    if (['won', 'lost'].includes(effectiveStage.key)) {
+      updates.push(
+        supabase
+          .from('lead_followups')
+          .update({ is_completed: true, completed_at: new Date().toISOString() })
+          .eq('lead_id', lead.id)
+          .eq('is_completed', false)
+      )
+    }
+
+    await Promise.all(updates)
+    onLeadMoved()
+  }
+
+  function handleMarkMeetingDone(targetLead: Lead) {
+    const fromStage = stages.find((s) => s.id === targetLead.stage_id) || null
+    if (fromStage?.key === 'site_visit_scheduled') {
+      // Site Visit -> forward stages (proposal, negotiation, followup, won, lost)
+      const forwardStage =
+        stages.find((s) => s.key === 'proposal') ||
+        stages.find((s) => s.key === 'followup') ||
+        fromStage
+      setPendingStageChange({
+        lead: targetLead,
+        fromStage,
+        toStage: forwardStage,
+      })
+    } else {
+      const meetingDoneStage = stages.find((s) => s.key === 'meeting_done')
+      if (!meetingDoneStage) return
+      // Open StageChangeModal for Meeting Done to collect meeting outcome & next follow-up schedule
+      setPendingStageChange({
+        lead: targetLead,
+        fromStage,
+        toStage: meetingDoneStage,
+      })
     }
   }
 
   return (
-    <DndContext
-      sensors={sensors}
-      onDragStart={handleDragStart}
-      onDragEnd={handleDragEnd}
-    >
-      <div className="kanban-grid">
-        {stages.map((stage) => {
-          const stageLeads = leads.filter((l) => l.stage_id === stage.id)
-          return (
-            <KanbanColumn
-              key={stage.id}
-              stage={stage}
-              leads={stageLeads}
-            />
-          )
-        })}
-      </div>
+    <>
+      <DndContext
+        sensors={sensors}
+        onDragStart={handleDragStart}
+        onDragEnd={handleDragEnd}
+      >
+        <div className="kanban-grid">
+          {stages.map((stage) => {
+            const stageLeads = leads.filter((l) => l.stage_id === stage.id)
+            return (
+              <KanbanColumn
+                key={stage.id}
+                stage={stage}
+                leads={stageLeads}
+                pendingFollowupLeadIds={pendingLeadIdsSet}
+                onMarkMeetingDone={handleMarkMeetingDone}
+              />
+            )
+          })}
+        </div>
 
-      <DragOverlay>
-        {activeLead ? <KanbanCardItem lead={activeLead} isOverlay /> : null}
-      </DragOverlay>
-    </DndContext>
+        <DragOverlay dropAnimation={{ duration: 160, easing: 'cubic-bezier(0.18, 0.67, 0.6, 1.22)' }}>
+          {activeLead ? (
+            <div style={{ transform: 'rotate(1.5deg)', cursor: 'grabbing', opacity: 0.95, filter: 'drop-shadow(0 12px 24px rgba(0,0,0,0.18))' }}>
+              <KanbanCardItem lead={activeLead} isOverlay />
+            </div>
+          ) : null}
+        </DragOverlay>
+      </DndContext>
+
+      {pendingStageChange && (
+        <StageChangeModal
+          isOpen={true}
+          lead={pendingStageChange.lead}
+          fromStage={pendingStageChange.fromStage}
+          toStage={pendingStageChange.toStage}
+          stages={stages}
+          currentUserId={profile?.id}
+          onConfirm={handleConfirmStageChange}
+          onCancel={() => setPendingStageChange(null)}
+        />
+      )}
+    </>
   )
 }

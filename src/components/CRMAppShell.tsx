@@ -10,10 +10,11 @@ import type { Profile } from '@/types/database'
 interface Props {
   profile: Profile | null
   userId: string
+  overdueCount?: number
   children: React.ReactNode
 }
 
-export default function CRMAppShell({ profile, userId, children }: Props) {
+export default function CRMAppShell({ profile, userId, overdueCount = 0, children }: Props) {
   const [sidebarOpen, setSidebarOpen] = useState(false)
 
   return (
@@ -69,6 +70,7 @@ export default function CRMAppShell({ profile, userId, children }: Props) {
         profile={profile}
         isOpen={sidebarOpen}
         onClose={() => setSidebarOpen(false)}
+        overdueCount={overdueCount}
       />
 
       <ActivityTracker userId={userId} />

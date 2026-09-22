@@ -26,9 +26,10 @@ interface SidebarProps {
   profile: Profile | null
   isOpen?: boolean
   onClose?: () => void
+  overdueCount?: number
 }
 
-export default function Sidebar({ profile, isOpen, onClose }: SidebarProps) {
+export default function Sidebar({ profile, isOpen, onClose, overdueCount = 0 }: SidebarProps) {
   const pathname = usePathname()
   const role = profile?.role || 'AGENT'
   const isAdmin = role === 'ADMIN'
@@ -71,6 +72,7 @@ export default function Sidebar({ profile, isOpen, onClose }: SidebarProps) {
       items: [
         { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
         { href: '/leads', label: 'All Team Leads', icon: Users },
+        { href: '/leads?my_leads=true', label: 'My Assigned Leads', icon: UserCheck },
         { href: '/leads/import', label: 'Import Leads', icon: FileSpreadsheet },
       ],
     },
@@ -125,8 +127,8 @@ export default function Sidebar({ profile, isOpen, onClose }: SidebarProps) {
 
   const roleLabel =
     isAdmin ? 'ADMIN' :
-    isManager ? 'SALES MANAGER' :
-    role === 'EMPLOYEE' ? 'EMPLOYEE' : 'SALES AGENT'
+      isManager ? 'SALES MANAGER' :
+        role === 'EMPLOYEE' ? 'EMPLOYEE' : 'SALES AGENT'
 
   return (
     <>
@@ -213,7 +215,15 @@ export default function Sidebar({ profile, isOpen, onClose }: SidebarProps) {
                     className={`sidebar-item ${isActive ? 'active' : ''}`}
                   >
                     <Icon size={16} />
-                    <span>{item.label}</span>
+                    <span style={{ flex: 1 }}>{item.label}</span>
+                    {item.href === '/leads' && overdueCount > 0 && (
+                      <span
+                        className="sidebar-overdue-pill"
+                        title={`${overdueCount} overdue follow-up${overdueCount > 1 ? 's' : ''}`}
+                      >
+                        {overdueCount}
+                      </span>
+                    )}
                   </Link>
                 )
               })}

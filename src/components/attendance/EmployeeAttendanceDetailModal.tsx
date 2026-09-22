@@ -15,8 +15,10 @@ import {
   Download,
   ExternalLink,
   ChevronRight,
+  ChevronLeft,
   TrendingDown,
   TrendingUp,
+  Banknote,
   Edit3,
   Trash2,
   Loader2,
@@ -31,6 +33,9 @@ import {
   updateEmployeeLeaveBalance,
   deleteAttendanceLog,
   toggleEmployeeTrackingExemption,
+  fetchUserSalaryProfile,
+  calculateExpectedHoursInMonth,
+  getEmployeeShiftEnd,
   getLocalDateString,
 } from '@/lib/attendanceService'
 import { formatDistance, getGoogleMapsUrl } from '@/lib/geoUtils'
@@ -110,6 +115,9 @@ export default function EmployeeAttendanceDetailModal({
     isOpen: false,
     record: null,
   })
+  const [selectedDetailMonth, setSelectedDetailMonth] = useState<string>(() => new Date().toISOString().slice(0, 7))
+  const [historyViewMode, setHistoryViewMode] = useState<'SELECTED_MONTH' | 'PAST_60_DAYS'>('SELECTED_MONTH')
+  const [salaryProfile, setSalaryProfile] = useState<{ base_salary: number; currency: string; joining_date?: string | null } | null>(null)
   const [isDeletingRecord, setIsDeletingRecord] = useState(false)
   const [auditModalLog, setAuditModalLog] = useState<AttendanceLog | null>(null)
 
@@ -122,16 +130,20 @@ export default function EmployeeAttendanceDetailModal({
   async function loadEmployeeData(id: string) {
     setLoading(true)
     try {
-      const [hist, bal, reqs, pol] = await Promise.all([
-        fetchUserAttendanceHistory(id),
+      const [bal, reqs, pol, sal] = await Promise.all([
         fetchLeaveBalances(id),
         fetchUserLeaveRequests(id),
         fetchCompanyWorkPolicy(),
+        fetchUserSalaryProfile(id),
       ])
-      if (hist) setHistory(hist)
       if (bal) setLeaveBalances(bal)
       if (reqs) setLeaveRequests(reqs)
       if (pol) setPolicy(pol)
+      if (sal) setSalaryProfile(sal)
+
+      // Pass company policy so unclosed shifts are auto-closed at individual employee shift end times!
+      const hist = await fetchUserAttendanceHistory(id, pol || undefined)
+      if (hist) setHistory(hist)
 
       if (bal) {
         setLeaveForm({
@@ -381,11 +393,224 @@ export default function EmployeeAttendanceDetailModal({
     ? Math.max(0, leaveBalances.annual_leave_total - leaveBalances.annual_leave_used)
     : 21
 
-  // Current month active metrics
-  const currentMonthKey = new Date().toISOString().slice(0, 7) // 'YYYY-MM'
-  const currentMonthLogs = history.filter((h) => h.date && h.date.startsWith(currentMonthKey))
-  const monthActiveMinutes = currentMonthLogs.reduce((acc, h) => acc + (h.total_working_minutes || 0), 0)
+  // Month calculation & deficit analysis for selectedDetailMonth
+  const [detailYearStr, detailMonthStr] = selectedDetailMonth.split('-')
+  const detailYear = parseInt(detailYearStr, 10) || new Date().getFullYear()
+  const detailMonth = parseInt(detailMonthStr, 10) || (new Date().getMonth() + 1)
+  const isCurrentMonth = detailYear === new Date().getFullYear() && detailMonth === (new Date().getMonth() + 1)
+  const isPastMonth = new Date().getFullYear() > detailYear || (new Date().getFullYear() === detailYear && (new Date().getMonth() + 1) > detailMonth)
+
+  const empSchedule = policy?.custom_employee_schedules?.[employee.profile_id]
+  const isExempt = (policy?.exempt_employee_ids || []).includes(employee.profile_id) || Boolean(empSchedule?.is_exempt_from_tracking)
+
+  const empShiftStart = empSchedule?.shift_start_time || policy?.shift_start_time || '09:00'
+  const empShiftEnd = empSchedule?.shift_end_time || policy?.shift_end_time || '17:00'
+  const empGrace = empSchedule?.grace_period_mins ?? policy?.grace_period_mins ?? 15
+  const empDailyHours = empSchedule?.daily_expected_hours ?? policy?.daily_expected_hours ?? 8.0
+  const empWorkDays = empSchedule?.work_days || policy?.work_days || ['SUNDAY', 'MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY']
+  const effectiveCustomDayHours = empSchedule?.custom_day_hours || policy?.custom_day_hours
+  const effectiveCustomDaySchedules = empSchedule?.custom_day_schedules || policy?.custom_day_schedules
+
+  const effectiveStartDate = (() => {
+    const dates: string[] = []
+    if (policy?.tracking_start_date && !isPastMonth) {
+      dates.push(policy.tracking_start_date)
+    } else if (policy?.tracking_start_date && isPastMonth && policy.tracking_start_date.startsWith(`${detailYear}-${detailMonthStr}`)) {
+      dates.push(policy.tracking_start_date)
+    }
+    if (salaryProfile?.joining_date) dates.push(salaryProfile.joining_date)
+    if (dates.length === 0) return null
+    return dates.sort().pop() || null
+  })()
+
+  const todayStr = getLocalDateString()
+  const todayStaffLog = history.find((l) => l.date === todayStr)
+  const isShiftDoneToday = Boolean(todayStaffLog?.punch_out_at)
+
+  const monthCalc = calculateExpectedHoursInMonth(
+    detailYear,
+    detailMonth,
+    empWorkDays,
+    empDailyHours,
+    effectiveCustomDayHours,
+    policy?.official_holidays,
+    undefined,
+    effectiveStartDate,
+    empShiftEnd,
+    isShiftDoneToday
+  )
+
+  // Logs for selected detail month (strictly filtering by effectiveStartDate for actual worked hours)
+  const monthLogs = history.filter((h) => h.date && h.date.startsWith(selectedDetailMonth))
+  const validMonthLogs = monthLogs.filter((h) => !effectiveStartDate || h.date >= effectiveStartDate)
+
+  const monthActiveMinutes = validMonthLogs.reduce((acc, h) => {
+    if (h.punch_in_status === 'FLAGGED' || h.punch_out_status === 'FLAGGED') return acc
+    return acc + (h.total_working_minutes || 0)
+  }, 0)
   const monthActiveHours = (monthActiveMinutes / 60).toFixed(1)
+
+  // Approved leave hours elapsed for this employee in selected month
+  let elapsedLeaveHours = 0
+  let elapsedLeaveDays = 0
+  ;(leaveRequests || []).filter((r) => r.status === 'APPROVED').forEach((l) => {
+    const start = new Date(l.start_date + 'T00:00:00')
+    const end = new Date(l.end_date + 'T00:00:00')
+    for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+      const dYear = d.getFullYear()
+      const dMonth = d.getMonth() + 1
+      const dDay = d.getDate()
+      const dDateStr = `${dYear}-${dMonth.toString().padStart(2, '0')}-${dDay.toString().padStart(2, '0')}`
+
+      if (dYear === detailYear && dMonth === detailMonth) {
+        const dayName = d.toLocaleDateString('en-US', { weekday: 'long' }).toUpperCase()
+        const isWorkDay = empWorkDays.includes(dayName)
+        const isHoliday = (policy?.official_holidays || []).some((h) => h.date === dDateStr)
+        const isAfterStart = !effectiveStartDate || dDateStr >= effectiveStartDate
+
+        if (isWorkDay && !isHoliday && (isPastMonth || dDateStr <= todayStr) && isAfterStart) {
+          const dayHrs = (effectiveCustomDayHours && effectiveCustomDayHours[dayName] !== undefined)
+            ? effectiveCustomDayHours[dayName]
+            : empDailyHours
+          if (dayHrs > 0) {
+            elapsedLeaveDays++
+            elapsedLeaveHours += dayHrs
+          }
+        }
+      }
+    }
+  })
+  const monthLeaveHours = (Math.round(elapsedLeaveHours * 10) / 10).toFixed(1)
+
+  const expHours = monthCalc.totalHours
+  const expToDate = monthCalc.elapsedHours
+  const workedHrsNum = parseFloat(monthActiveHours)
+  const leaveHrsNum = parseFloat(monthLeaveHours)
+
+  const monthDeficit = isExempt
+    ? 0
+    : Math.max(0, Math.round((expToDate - workedHrsNum - leaveHrsNum) * 10) / 10)
+
+  const baseSalary = salaryProfile?.base_salary || 0
+  const currency = salaryProfile?.currency || 'SAR'
+  const hourlyRate = (expHours > 0 && baseSalary > 0)
+    ? Math.round((baseSalary / expHours) * 100) / 100
+    : 0
+  const estimatedPayCut = (hourlyRate > 0 && monthDeficit > 0)
+    ? Math.round(monthDeficit * hourlyRate * 10) / 10
+    : 0
+
+  // Late days in selected month
+  let daysLate = 0
+  validMonthLogs.forEach((l) => {
+    if (l.punch_in_at && l.date) {
+      const punchDate = new Date(l.punch_in_at)
+      const dObj = new Date(l.date + 'T00:00:00')
+      const dayName = dObj.toLocaleDateString('en-US', { weekday: 'long' }).toUpperCase()
+      const daySched = effectiveCustomDaySchedules?.[dayName]
+      const dayShiftStart = daySched?.startTime || empShiftStart
+
+      const [sH, sM] = dayShiftStart.split(':').map(Number)
+      const validH = isNaN(sH) ? 9 : sH
+      const validM = isNaN(sM) ? 0 : sM
+      const cutoffMinutes = validH * 60 + validM + empGrace
+
+      const punchMins = punchDate.getHours() * 60 + punchDate.getMinutes()
+      if (punchMins > cutoffMinutes) daysLate++
+    }
+  })
+
+  // Generate unified daily timesheet for selected month including Absent and Leave days
+  const unifiedDailyRecords = (() => {
+    const recordsMap = new Map<string, AttendanceLog>()
+    history.forEach((l) => {
+      recordsMap.set(l.date, l)
+    })
+
+    const daysInMonth = new Date(detailYear, detailMonth, 0).getDate()
+    const result: (AttendanceLog & { isAbsent?: boolean; isLeave?: boolean; leaveReason?: string })[] = []
+
+    const holidaySet = new Set((policy?.official_holidays || []).map((h) => h.date))
+    const approvedLeaves = (leaveRequests || []).filter((r) => r.status === 'APPROVED')
+    const maxDay = isCurrentMonth ? Math.min(daysInMonth, new Date().getDate()) : daysInMonth
+
+    for (let day = 1; day <= maxDay; day++) {
+      const dateStr = `${detailYear}-${detailMonthStr}-${day.toString().padStart(2, '0')}`
+      const d = new Date(detailYear, detailMonth - 1, day)
+      const dayName = d.toLocaleDateString('en-US', { weekday: 'long' }).toUpperCase()
+      const isWorkDay = empWorkDays.includes(dayName)
+      const isHoliday = holidaySet.has(dateStr)
+      const isAfterStart = !effectiveStartDate || dateStr >= effectiveStartDate
+
+      const existing = recordsMap.get(dateStr)
+      if (existing) {
+        result.push(existing)
+        continue
+      }
+
+      const matchingLeave = approvedLeaves.find((l) => dateStr >= l.start_date && dateStr <= l.end_date)
+      if (matchingLeave) {
+        result.push({
+          id: `leave-${employee.profile_id}-${dateStr}`,
+          user_id: employee.profile_id,
+          date: dateStr,
+          punch_in_at: null,
+          punch_out_at: null,
+          total_working_minutes: 0,
+          punch_in_status: 'APPROVED',
+          punch_out_status: 'APPROVED',
+          review_notes: `🔵 Approved Leave: ${matchingLeave.leave_type} (${matchingLeave.reason || 'Leave granted'})`,
+          created_at: dateStr,
+          updated_at: dateStr,
+          isLeave: true,
+          leaveReason: `${matchingLeave.leave_type} Leave`,
+        } as any)
+        continue
+      }
+
+      if (isWorkDay && !isHoliday && isAfterStart) {
+        const dayExpectedHrs = (effectiveCustomDayHours && effectiveCustomDayHours[dayName] !== undefined)
+          ? effectiveCustomDayHours[dayName]
+          : empDailyHours
+
+        // If employee has 0 scheduled hours for this day (off-day / rest day), do NOT generate an absent record!
+        if (dayExpectedHrs <= 0) {
+          continue
+        }
+
+        const isToday = dateStr === todayStr
+        const { endMinutes } = getEmployeeShiftEnd(employee.profile_id, dateStr, policy)
+        const nowMinutes = new Date().getHours() * 60 + new Date().getMinutes()
+        const isShiftOver = isToday ? nowMinutes >= endMinutes : true
+
+        if (!isToday || isShiftOver) {
+          result.push({
+            id: `absent-${employee.profile_id}-${dateStr}`,
+            user_id: employee.profile_id,
+            date: dateStr,
+            punch_in_at: null,
+            punch_out_at: null,
+            total_working_minutes: 0,
+            punch_in_status: 'FLAGGED',
+            punch_out_status: 'FLAGGED',
+            review_notes: '🔴 Absent (No punch recorded)',
+            created_at: dateStr,
+            updated_at: dateStr,
+            isAbsent: true,
+            expected_hours: dayExpectedHrs,
+          } as any)
+        }
+      }
+    }
+
+    return result.sort((a, b) => b.date.localeCompare(a.date))
+  })()
+
+  const daysWithPunches = new Set(validMonthLogs.map((l) => l.date)).size
+  const daysAbsent = isExempt ? 0 : unifiedDailyRecords.filter((r) => r.isAbsent).length
+  const adherencePercent = expToDate > 0 ? Math.min(100, Math.round(((workedHrsNum + leaveHrsNum) / expToDate) * 100)) : 100
+
+  const displayedLogs = historyViewMode === 'SELECTED_MONTH' ? unifiedDailyRecords : history
 
   function handleExportEmployeeCsv() {
     const rows = [
@@ -403,7 +628,7 @@ export default function EmployeeAttendanceDetailModal({
         'Duration Minutes',
         'Working Hours',
       ],
-      ...history.map((l) => {
+      ...displayedLogs.map((l: any) => {
         const inDev = l.punch_in_device_info
           ? `${l.punch_in_device_info.deviceName || l.punch_in_device_info.os || ''} (${l.punch_in_device_info.browser || ''})`.trim()
           : 'N/A'
@@ -411,19 +636,21 @@ export default function EmployeeAttendanceDetailModal({
           ? `${l.punch_out_device_info.deviceName || l.punch_out_device_info.os || ''} (${l.punch_out_device_info.browser || ''})`.trim()
           : 'N/A'
 
+        const statusStr = l.isAbsent ? 'ABSENT' : l.isLeave ? 'APPROVED_LEAVE' : (l.punch_in_status || 'N/A')
+
         return [
           l.date,
           employee?.name || '',
-          l.punch_in_at ? new Date(l.punch_in_at).toLocaleTimeString() : 'N/A',
-          l.punch_in_status || 'N/A',
+          l.punch_in_at ? new Date(l.punch_in_at).toLocaleTimeString() : l.isAbsent ? 'Absent (No punch)' : l.isLeave ? 'On Leave' : 'N/A',
+          statusStr,
           inDev,
           l.punch_in_ip || 'N/A',
           l.punch_out_at ? new Date(l.punch_out_at).toLocaleTimeString() : 'N/A',
-          l.punch_out_status || 'N/A',
+          l.punch_out_status || (l.isAbsent ? 'ABSENT' : l.isLeave ? 'LEAVE' : 'N/A'),
           outDev,
           l.punch_out_ip || 'N/A',
-          l.total_working_minutes.toString(),
-          `${(l.total_working_minutes / 60).toFixed(1)} hrs`,
+          (l.total_working_minutes || 0).toString(),
+          `${((l.total_working_minutes || 0) / 60).toFixed(1)} hrs`,
         ]
       }),
     ]
@@ -701,7 +928,7 @@ export default function EmployeeAttendanceDetailModal({
                 {monthActiveHours} hrs
               </div>
               <div style={{ fontSize: '12px', color: '#64748B', marginTop: '2px' }}>
-                {currentMonthLogs.length} active work shifts logged
+                {validMonthLogs.length} active work shifts logged
               </div>
             </div>
 
@@ -1632,6 +1859,223 @@ export default function EmployeeAttendanceDetailModal({
             </div>
           )}
 
+          {/* Monthly Work Hours & Deficit Analysis Card (Issue 3) */}
+          <div
+            style={{
+              backgroundColor: '#FFFFFF',
+              borderRadius: '12px',
+              border: '1px solid #E2E8F0',
+              padding: '18px 20px',
+              boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
+            }}
+          >
+            {/* Header with Month Selector & Quick Navigation */}
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                flexWrap: 'wrap',
+                gap: '12px',
+                borderBottom: '1px solid #F1F5F9',
+                paddingBottom: '14px',
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <div
+                  style={{
+                    width: '36px',
+                    height: '36px',
+                    borderRadius: '8px',
+                    backgroundColor: '#EEF2FF',
+                    color: '#4F46E5',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                  }}
+                >
+                  <Calendar size={18} />
+                </div>
+                <div>
+                  <h4 style={{ margin: 0, fontSize: '14px', fontWeight: 700, color: '#0F172A' }}>
+                    Monthly Work Hours &amp; Deficit Analysis
+                  </h4>
+                  <div style={{ fontSize: '11px', color: '#64748B' }}>
+                    Historical performance &amp; payroll deduction analysis per employee
+                  </div>
+                </div>
+              </div>
+
+              {/* Month Picker with Prev / Next month buttons */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <span style={{ fontSize: '12px', fontWeight: 600, color: '#475569', marginRight: '4px' }}>
+                  Select Month:
+                </span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const [y, m] = selectedDetailMonth.split('-').map(Number)
+                    const prevD = new Date(y, m - 2, 1)
+                    setSelectedDetailMonth(`${prevD.getFullYear()}-${(prevD.getMonth() + 1).toString().padStart(2, '0')}`)
+                  }}
+                  title="Previous Month"
+                  style={{
+                    padding: '6px 8px',
+                    borderRadius: '6px',
+                    border: '1px solid #CBD5E1',
+                    background: '#FFFFFF',
+                    color: '#334155',
+                    cursor: 'pointer',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                  }}
+                >
+                  <ChevronLeft size={14} />
+                </button>
+
+                <input
+                  type="month"
+                  value={selectedDetailMonth}
+                  onChange={(e) => setSelectedDetailMonth(e.target.value)}
+                  style={{
+                    height: '34px',
+                    fontSize: '12.5px',
+                    fontWeight: 700,
+                    padding: '4px 10px',
+                    borderRadius: '6px',
+                    border: '1px solid #CBD5E1',
+                    color: '#0F172A',
+                    backgroundColor: '#F8FAFC',
+                  }}
+                />
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    const [y, m] = selectedDetailMonth.split('-').map(Number)
+                    const nextD = new Date(y, m, 1)
+                    setSelectedDetailMonth(`${nextD.getFullYear()}-${(nextD.getMonth() + 1).toString().padStart(2, '0')}`)
+                  }}
+                  title="Next Month"
+                  style={{
+                    padding: '6px 8px',
+                    borderRadius: '6px',
+                    border: '1px solid #CBD5E1',
+                    background: '#FFFFFF',
+                    color: '#334155',
+                    cursor: 'pointer',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                  }}
+                >
+                  <ChevronRight size={14} />
+                </button>
+              </div>
+            </div>
+
+            {/* Metrics Breakdown Grid */}
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))',
+                gap: '12px',
+                marginTop: '14px',
+              }}
+            >
+              {/* Expected Hours */}
+              <div style={{ backgroundColor: '#F8FAFC', padding: '12px 14px', borderRadius: '8px', border: '1px solid #E2E8F0' }}>
+                <div style={{ fontSize: '11px', fontWeight: 600, color: '#64748B', textTransform: 'uppercase' }}>
+                  Expected Hours
+                </div>
+                <div style={{ fontSize: '19px', fontWeight: 800, color: '#0F172A', marginTop: '4px' }}>
+                  {expToDate}h
+                </div>
+                <div style={{ fontSize: '11px', color: '#64748B', marginTop: '2px' }}>
+                  {isExempt ? 'Exempt from target' : `To date (${expHours}h full month)`}
+                </div>
+              </div>
+
+              {/* Actual Worked */}
+              <div style={{ backgroundColor: '#F0FDF4', padding: '12px 14px', borderRadius: '8px', border: '1px solid #BBF7D0' }}>
+                <div style={{ fontSize: '11px', fontWeight: 600, color: '#166534', textTransform: 'uppercase' }}>
+                  Actual Logged
+                </div>
+                <div style={{ fontSize: '19px', fontWeight: 800, color: '#15803D', marginTop: '4px' }}>
+                  {monthActiveHours}h
+                </div>
+                <div style={{ fontSize: '11px', color: '#166534', marginTop: '2px' }}>
+                  {daysWithPunches} active logged shifts
+                </div>
+              </div>
+
+              {/* Approved Leave */}
+              <div style={{ backgroundColor: '#F0F9FF', padding: '12px 14px', borderRadius: '8px', border: '1px solid #BAE6FD' }}>
+                <div style={{ fontSize: '11px', fontWeight: 600, color: '#0369A1', textTransform: 'uppercase' }}>
+                  Approved Leave
+                </div>
+                <div style={{ fontSize: '19px', fontWeight: 800, color: '#0284C7', marginTop: '4px' }}>
+                  {monthLeaveHours}h
+                </div>
+                <div style={{ fontSize: '11px', color: '#0369A1', marginTop: '2px' }}>
+                  {elapsedLeaveDays} paid leave days
+                </div>
+              </div>
+
+              {/* Deficit to Date */}
+              <div
+                style={{
+                  backgroundColor: monthDeficit > 0 ? '#FFFBEB' : '#F0FDF4',
+                  padding: '12px 14px',
+                  borderRadius: '8px',
+                  border: `1px solid ${monthDeficit > 0 ? '#FCD34D' : '#BBF7D0'}`,
+                }}
+              >
+                <div style={{ fontSize: '11px', fontWeight: 600, color: monthDeficit > 0 ? '#B45309' : '#166534', textTransform: 'uppercase' }}>
+                  Month Deficit
+                </div>
+                <div style={{ fontSize: '19px', fontWeight: 800, color: monthDeficit > 0 ? '#D97706' : '#15803D', marginTop: '4px' }}>
+                  {isExempt ? '0h (Exempt)' : monthDeficit > 0 ? `-${monthDeficit}h` : '0h (Target Met)'}
+                </div>
+                <div style={{ fontSize: '11px', color: monthDeficit > 0 ? '#B45309' : '#166534', marginTop: '2px' }}>
+                  {monthDeficit > 0 ? 'Shortfall hours to date' : 'Shift target satisfied'}
+                </div>
+              </div>
+
+              {/* Estimated Pay Cut */}
+              <div
+                style={{
+                  backgroundColor: estimatedPayCut > 0 ? '#FEF2F2' : '#F8FAFC',
+                  padding: '12px 14px',
+                  borderRadius: '8px',
+                  border: `1px solid ${estimatedPayCut > 0 ? '#FECACA' : '#E2E8F0'}`,
+                }}
+              >
+                <div style={{ fontSize: '11px', fontWeight: 600, color: estimatedPayCut > 0 ? '#991B1B' : '#64748B', textTransform: 'uppercase' }}>
+                  Estimated Pay Cut
+                </div>
+                <div style={{ fontSize: '19px', fontWeight: 800, color: estimatedPayCut > 0 ? '#DC2626' : '#15803D', marginTop: '4px' }}>
+                  {isExempt ? `0 ${currency}` : estimatedPayCut > 0 ? `-${estimatedPayCut} ${currency}` : `0 ${currency}`}
+                </div>
+                <div style={{ fontSize: '11px', color: '#64748B', marginTop: '2px' }}>
+                  {hourlyRate > 0 ? `@ ${hourlyRate} ${currency}/hr rate` : 'Salary rate not set'}
+                </div>
+              </div>
+
+              {/* Attendance Breakdown */}
+              <div style={{ backgroundColor: '#F8FAFC', padding: '12px 14px', borderRadius: '8px', border: '1px solid #E2E8F0' }}>
+                <div style={{ fontSize: '11px', fontWeight: 600, color: '#64748B', textTransform: 'uppercase' }}>
+                  Shift Adherence
+                </div>
+                <div style={{ fontSize: '19px', fontWeight: 800, color: adherencePercent >= 90 ? '#16A34A' : '#D97706', marginTop: '4px' }}>
+                  {isExempt ? '100%' : `${adherencePercent}%`}
+                </div>
+                <div style={{ fontSize: '11px', color: '#64748B', marginTop: '2px' }}>
+                  {daysWithPunches} Present · {daysLate} Late · <span style={{ color: daysAbsent > 0 ? '#DC2626' : '#64748B', fontWeight: daysAbsent > 0 ? 700 : 400 }}>{daysAbsent} Absent</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
           {/* Historical Timesheets Table */}
           <div
             style={{
@@ -1649,12 +2093,53 @@ export default function EmployeeAttendanceDetailModal({
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'space-between',
+                flexWrap: 'wrap',
+                gap: '10px',
               }}
             >
-              <h3 style={{ fontSize: '14px', fontWeight: 700, color: '#0F172A', margin: 0 }}>
-                Attendance &amp; Login History ({history.length} Records)
-              </h3>
-              <span style={{ fontSize: '12px', color: '#64748B' }}>Past 60 days</span>
+              <div>
+                <h3 style={{ fontSize: '14px', fontWeight: 700, color: '#0F172A', margin: 0 }}>
+                  Attendance &amp; Login History ({displayedLogs.length} Records)
+                </h3>
+                <span style={{ fontSize: '11.5px', color: '#64748B' }}>
+                  {historyViewMode === 'SELECTED_MONTH' ? `Showing daily breakdown for ${selectedDetailMonth} (including Absent & Leave days)` : 'Showing logged punches across past 60 days'}
+                </span>
+              </div>
+
+              {/* Toggle: Selected Month vs Past 60 Days */}
+              <div style={{ display: 'inline-flex', borderRadius: '8px', border: '1px solid #CBD5E1', overflow: 'hidden' }}>
+                <button
+                  type="button"
+                  onClick={() => setHistoryViewMode('SELECTED_MONTH')}
+                  style={{
+                    padding: '5px 12px',
+                    fontSize: '11.5px',
+                    fontWeight: 600,
+                    border: 'none',
+                    backgroundColor: historyViewMode === 'SELECTED_MONTH' ? '#4F46E5' : '#FFFFFF',
+                    color: historyViewMode === 'SELECTED_MONTH' ? '#FFFFFF' : '#475569',
+                    cursor: 'pointer',
+                  }}
+                >
+                  📅 {selectedDetailMonth} Daily Logs
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setHistoryViewMode('PAST_60_DAYS')}
+                  style={{
+                    padding: '5px 12px',
+                    fontSize: '11.5px',
+                    fontWeight: 600,
+                    border: 'none',
+                    borderLeft: '1px solid #CBD5E1',
+                    backgroundColor: historyViewMode === 'PAST_60_DAYS' ? '#4F46E5' : '#FFFFFF',
+                    color: historyViewMode === 'PAST_60_DAYS' ? '#FFFFFF' : '#475569',
+                    cursor: 'pointer',
+                  }}
+                >
+                  🕒 Past 60 Days (Punches Only)
+                </button>
+              </div>
             </div>
 
             <div style={{ overflowX: 'auto' }}>
@@ -1670,7 +2155,7 @@ export default function EmployeeAttendanceDetailModal({
                   </tr>
                 </thead>
                 <tbody>
-                  {loading && history.length === 0 ? (
+                  {loading && displayedLogs.length === 0 ? (
                     <tr>
                       <td colSpan={6} style={{ textAlign: 'center', padding: '36px', color: '#6366F1' }}>
                         <div style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', fontSize: '13px', fontWeight: 600 }}>
@@ -1678,21 +2163,148 @@ export default function EmployeeAttendanceDetailModal({
                         </div>
                       </td>
                     </tr>
-                  ) : history.length === 0 ? (
+                  ) : displayedLogs.length === 0 ? (
                     <tr>
                       <td colSpan={6} style={{ textAlign: 'center', padding: '30px', color: '#94A3B8' }}>
-                        No historical attendance records logged yet for this employee.
+                        No attendance records found for this period.
                       </td>
                     </tr>
                   ) : (
-                    history.map((log) => {
+                    displayedLogs.map((log: any) => {
+                      // 1. RENDER ABSENT DAYS (Issue 2)
+                      if (log.isAbsent) {
+                        return (
+                          <tr key={log.id} style={{ borderBottom: '1px solid #FEE2E2', backgroundColor: '#FEF2F2' }}>
+                            <td style={{ padding: '10px 14px', fontWeight: 700, color: '#991B1B', verticalAlign: 'top' }}>
+                              {log.date}
+                            </td>
+                            <td style={{ padding: '10px 14px', verticalAlign: 'top' }}>
+                              <div style={{ fontWeight: 700, color: '#DC2626' }}>
+                                🔴 Absent (No punch recorded)
+                              </div>
+                              <div style={{ fontSize: '11px', color: '#991B1B', marginTop: '2px' }}>
+                                Scheduled work shift missed
+                              </div>
+                            </td>
+                            <td style={{ padding: '10px 14px', color: '#94A3B8', verticalAlign: 'top' }}>
+                              -
+                            </td>
+                            <td style={{ padding: '10px 14px', verticalAlign: 'top' }}>
+                              <div style={{ fontWeight: 700, color: '#DC2626' }}>
+                                0.0 hrs (0m)
+                              </div>
+                              <div style={{ fontSize: '10.5px', color: '#B91C1C', fontWeight: 600, marginTop: '2px' }}>
+                                Deficit: -{log.expected_hours !== undefined ? log.expected_hours : 8}h
+                              </div>
+                              <span style={{ display: 'inline-block', fontSize: '10px', fontWeight: 700, backgroundColor: '#FEE2E2', color: '#DC2626', padding: '1px 6px', borderRadius: '4px', marginTop: '2px', border: '1px solid #FECACA' }}>
+                                🔴 Absent / Not Logged In
+                              </span>
+                            </td>
+                            <td style={{ padding: '10px 14px', verticalAlign: 'top' }}>
+                              <span
+                                style={{
+                                  padding: '2px 8px',
+                                  borderRadius: '6px',
+                                  fontSize: '11px',
+                                  fontWeight: 600,
+                                  backgroundColor: '#FEE2E2',
+                                  color: '#DC2626',
+                                  border: '1px solid #FECACA',
+                                }}
+                              >
+                                🔴 No Activity
+                              </span>
+                            </td>
+                            <td style={{ padding: '10px 14px', textAlign: 'right', verticalAlign: 'top' }}>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setRegularizeLog({
+                                    ...log,
+                                    employee_name: employee.name,
+                                  })
+                                  setRegularizeModalOpen(true)
+                                }}
+                                style={{
+                                  border: '1px solid #FCA5A5',
+                                  background: '#FFFFFF',
+                                  color: '#DC2626',
+                                  padding: '4px 10px',
+                                  borderRadius: '6px',
+                                  cursor: 'pointer',
+                                  fontSize: '11px',
+                                  fontWeight: 700,
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: '4px',
+                                }}
+                                title="Adjust or regularize this missed shift"
+                              >
+                                <Edit3 size={12} /> Adjust
+                              </button>
+                            </td>
+                          </tr>
+                        )
+                      }
+
+                      // 2. RENDER APPROVED LEAVES
+                      if (log.isLeave) {
+                        return (
+                          <tr key={log.id} style={{ borderBottom: '1px solid #E0F2FE', backgroundColor: '#F0F9FF' }}>
+                            <td style={{ padding: '10px 14px', fontWeight: 700, color: '#0369A1', verticalAlign: 'top' }}>
+                              {log.date}
+                            </td>
+                            <td style={{ padding: '10px 14px', verticalAlign: 'top' }}>
+                              <div style={{ fontWeight: 700, color: '#0284C7' }}>
+                                🔵 Approved Leave
+                              </div>
+                              <div style={{ fontSize: '11px', color: '#0369A1', marginTop: '2px' }}>
+                                {log.leaveReason || 'Authorized leave credited'}
+                              </div>
+                            </td>
+                            <td style={{ padding: '10px 14px', color: '#94A3B8', verticalAlign: 'top' }}>
+                              -
+                            </td>
+                            <td style={{ padding: '10px 14px', verticalAlign: 'top' }}>
+                              <div style={{ fontWeight: 700, color: '#0284C7' }}>
+                                0.0 hrs
+                              </div>
+                              <span style={{ display: 'inline-block', fontSize: '10px', fontWeight: 700, backgroundColor: '#E0F2FE', color: '#0369A1', padding: '1px 6px', borderRadius: '4px', marginTop: '2px', border: '1px solid #BAE6FD' }}>
+                                🔵 Paid / Approved Leave
+                              </span>
+                            </td>
+                            <td style={{ padding: '10px 14px', verticalAlign: 'top' }}>
+                              <span
+                                style={{
+                                  padding: '2px 8px',
+                                  borderRadius: '6px',
+                                  fontSize: '11px',
+                                  fontWeight: 600,
+                                  backgroundColor: '#E0F2FE',
+                                  color: '#0369A1',
+                                  border: '1px solid #BAE6FD',
+                                }}
+                              >
+                                🔵 On Leave
+                              </span>
+                            </td>
+                            <td style={{ padding: '10px 14px', textAlign: 'right', verticalAlign: 'top' }}>
+                              <span style={{ fontSize: '11px', color: '#64748B', fontWeight: 500 }}>
+                                Approved Leave
+                              </span>
+                            </td>
+                          </tr>
+                        )
+                      }
+
+                      // 3. RENDER REAL PUNCH LOGS (WITH INDIVIDUAL AUTO-CLOSE BADGE)
                       const inTime = log.punch_in_at
                         ? new Date(log.punch_in_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
                         : '-'
                       const outTime = log.punch_out_at
                         ? new Date(log.punch_out_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
                         : '-'
-                      const hrs = (log.total_working_minutes / 60).toFixed(1)
+                      const hrs = ((log.total_working_minutes || 0) / 60).toFixed(1)
                       const isHq = log.punch_in_status === 'APPROVED'
 
                       const inDev = log.punch_in_device_info
@@ -1710,6 +2322,11 @@ export default function EmployeeAttendanceDetailModal({
                       const isRegApproved = Boolean(log.review_notes?.includes('Regularized:'))
                       const isRegRejected = Boolean(log.review_notes?.includes('REJECTED REGULARIZATION')) || Boolean(log.review_notes?.includes('REJECTED'))
                       const isRegPending = Boolean(log.review_notes?.includes('REGULARIZATION REQUEST'))
+
+                      // Extract auto-close label if present (e.g. ⚠️ Auto-Closed (21:30 EOD))
+                      const autoCloseLabel = log.review_notes && log.review_notes.includes('Auto-Closed')
+                        ? (log.review_notes.match(/⚠️ Auto-Closed \([^)]+\)/)?.[0] || '⚠️ Auto-Closed')
+                        : '⚠️ Auto-Closed'
 
                       return (
                         <tr key={log.id} style={{ borderBottom: '1px solid #F1F5F9' }}>
@@ -1837,8 +2454,8 @@ export default function EmployeeAttendanceDetailModal({
                                 ⏳ Pending Review
                               </span>
                             ) : (log.is_auto_closed || (!log.punch_out_at && log.date < getLocalDateString())) ? (
-                              <span style={{ display: 'inline-block', fontSize: '10px', fontWeight: 700, backgroundColor: '#FEF3C7', color: '#B45309', padding: '1px 6px', borderRadius: '4px', marginTop: '2px' }}>
-                                ⚠️ Auto-Closed
+                              <span style={{ display: 'inline-block', fontSize: '10px', fontWeight: 700, backgroundColor: '#FEF3C7', color: '#B45309', padding: '1px 6px', borderRadius: '4px', marginTop: '2px', border: '1px solid #FDE68A' }}>
+                                {autoCloseLabel}
                               </span>
                             ) : null}
                           </td>

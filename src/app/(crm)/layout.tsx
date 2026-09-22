@@ -17,14 +17,22 @@ export default async function CRMProtectedLayout({
     redirect('/login')
   }
 
-  const { data: profile } = await supabase
-    .from('profiles')
-    .select('*')
-    .eq('id', user.id)
-    .single()
+  const nowIso = new Date().toISOString()
+  const [profileRes, overdueRes] = await Promise.all([
+    supabase.from('profiles').select('*').eq('id', user.id).single(),
+    supabase
+      .from('lead_followups')
+      .select('id', { count: 'exact', head: true })
+      .eq('agent_id', user.id)
+      .eq('is_completed', false)
+      .lt('scheduled_at', nowIso),
+  ])
+
+  const profile = profileRes.data
+  const overdueCount = overdueRes.count ?? 0
 
   return (
-    <CRMAppShell profile={profile as Profile} userId={user.id}>
+    <CRMAppShell profile={profile as Profile} userId={user.id} overdueCount={overdueCount}>
       {children}
     </CRMAppShell>
   )
