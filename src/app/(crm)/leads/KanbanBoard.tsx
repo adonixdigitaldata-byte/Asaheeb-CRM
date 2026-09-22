@@ -50,6 +50,8 @@ function KanbanCardItem({
   idleBadgeText = 'No next action scheduled',
   idleBadgeColor = 'red',
   onMarkMeetingDone,
+  allStages,
+  onStageSelect,
 }: {
   lead: Lead
   isOverlay?: boolean
@@ -57,6 +59,8 @@ function KanbanCardItem({
   idleBadgeText?: string | null
   idleBadgeColor?: 'red' | 'amber' | null
   onMarkMeetingDone?: (lead: Lead) => void
+  allStages?: LeadStage[]
+  onStageSelect?: (lead: Lead, targetStageId: string) => void
 }) {
   const router = useRouter()
   const {
@@ -89,6 +93,7 @@ function KanbanCardItem({
     : null
 
   const propertyDisplayName = lead.property?.name_en || lead.interest
+  const currentStage = lead.stage || allStages?.find((s) => s.id === lead.stage_id)
 
   return (
     <div
@@ -259,9 +264,84 @@ function KanbanCardItem({
         </div>
       ) : null}
 
-      {/* Footer Info: Time & Agent Circle */}
-      <div className="flex items-center justify-between" style={{ marginTop: 6, paddingTop: 4, borderTop: '1px solid #F1F5F9', fontSize: 11, color: '#64748B' }}>
-        <span>{formatTimeAgo(lead.created_at)}</span>
+      {/* Footer Info: Time & Stage Dropdown & Agent Circle */}
+      <div
+        className="flex items-center justify-between"
+        style={{
+          marginTop: 6,
+          paddingTop: 5,
+          borderTop: '1px solid #F1F5F9',
+          fontSize: 11,
+          color: '#64748B',
+          gap: 6,
+        }}
+      >
+        <span style={{ fontSize: 10.5, color: '#94A3B8', whiteSpace: 'nowrap', flexShrink: 0 }}>
+          {formatTimeAgo(lead.created_at)}
+        </span>
+
+        {/* Quick Stage Changer Dropdown */}
+        {allStages && allStages.length > 0 && onStageSelect && (
+          <div
+            style={{ position: 'relative', display: 'flex', alignItems: 'center', minWidth: 0 }}
+            onClick={(e) => e.stopPropagation()}
+            onMouseDown={(e) => e.stopPropagation()}
+            onPointerDown={(e) => e.stopPropagation()}
+          >
+            <select
+              value={lead.stage_id}
+              onChange={(e) => {
+                e.stopPropagation()
+                const val = e.target.value
+                if (val && val !== lead.stage_id) {
+                  onStageSelect(lead, val)
+                }
+              }}
+              onClick={(e) => e.stopPropagation()}
+              onMouseDown={(e) => e.stopPropagation()}
+              onPointerDown={(e) => e.stopPropagation()}
+              style={{
+                fontSize: 10,
+                fontWeight: 700,
+                height: 22,
+                padding: '1px 18px 1px 7px',
+                borderRadius: 9999,
+                border: `1px solid ${currentStage?.color_hex ? `${currentStage.color_hex}50` : '#CBD5E1'}`,
+                backgroundColor: currentStage?.color_hex ? `${currentStage.color_hex}15` : '#F1F5F9',
+                color: currentStage?.color_hex || '#334155',
+                cursor: 'pointer',
+                outline: 'none',
+                maxWidth: 125,
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+                appearance: 'none',
+                WebkitAppearance: 'none',
+                MozAppearance: 'none',
+                backgroundImage: `url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3e%3cpolyline points='6 9 12 15 18 9'%3e%3c/polyline%3e%3c/svg%3e")`,
+                backgroundRepeat: 'no-repeat',
+                backgroundPosition: 'right 5px center',
+                backgroundSize: '10px',
+                lineHeight: '20px',
+              }}
+              title={`Stage: ${currentStage?.label || 'Unknown'}. Click to move to another stage.`}
+            >
+              {allStages.map((stg) => (
+                <option
+                  key={stg.id}
+                  value={stg.id}
+                  style={{
+                    backgroundColor: '#FFFFFF',
+                    color: '#0F172A',
+                    fontWeight: 600,
+                    fontSize: 12,
+                  }}
+                >
+                  {stg.label}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
 
         {agentInitial ? (
           <span
@@ -277,13 +357,14 @@ function KanbanCardItem({
               alignItems: 'center',
               justifyContent: 'center',
               border: '1px solid #BFDBFE',
+              flexShrink: 0,
             }}
             title={`Assigned to ${lead.assigned_agent?.name}`}
           >
             {agentInitial}
           </span>
         ) : (
-          <span style={{ fontSize: 10, color: '#94A3B8' }}>—</span>
+          <span style={{ fontSize: 10, color: '#94A3B8', flexShrink: 0 }}>—</span>
         )}
       </div>
     </div>
@@ -295,11 +376,15 @@ function KanbanColumn({
   leads,
   pendingFollowupLeadIds,
   onMarkMeetingDone,
+  allStages,
+  onStageSelect,
 }: {
   stage: LeadStage
   leads: Lead[]
   pendingFollowupLeadIds?: Set<string>
   onMarkMeetingDone?: (lead: Lead) => void
+  allStages: LeadStage[]
+  onStageSelect: (lead: Lead, targetStageId: string) => void
 }) {
   const { setNodeRef, isOver } = useDroppable({
     id: `stage-${stage.id}`,
@@ -348,7 +433,15 @@ function KanbanColumn({
         <div className="kanban-list">
           {leads.map((lead) => {
             if (isClosedStage) {
-              return <KanbanCardItem key={lead.id} lead={lead} isIdle={false} />
+              return (
+                <KanbanCardItem
+                  key={lead.id}
+                  lead={lead}
+                  isIdle={false}
+                  allStages={allStages}
+                  onStageSelect={onStageSelect}
+                />
+              )
             }
 
             const hasPendingFollowup = !!pendingFollowupLeadIds && pendingFollowupLeadIds.has(lead.id)
@@ -376,6 +469,8 @@ function KanbanColumn({
                   key={lead.id}
                   lead={lead}
                   isIdle={false}
+                  allStages={allStages}
+                  onStageSelect={onStageSelect}
                   onMarkMeetingDone={
                     stage.key === 'meeting_scheduled' || stage.key === 'site_visit_scheduled'
                       ? onMarkMeetingDone
@@ -394,6 +489,8 @@ function KanbanColumn({
                   isIdle={true}
                   idleBadgeText="Meeting passed — outcome needed"
                   idleBadgeColor="amber"
+                  allStages={allStages}
+                  onStageSelect={onStageSelect}
                   onMarkMeetingDone={
                     stage.key === 'meeting_scheduled' || stage.key === 'site_visit_scheduled'
                       ? onMarkMeetingDone
@@ -411,6 +508,8 @@ function KanbanColumn({
                 isIdle={true}
                 idleBadgeText="No next action scheduled"
                 idleBadgeColor="red"
+                allStages={allStages}
+                onStageSelect={onStageSelect}
               />
             )
           })}
@@ -743,6 +842,39 @@ export default function KanbanBoard({
     }
   }
 
+  function handleStageSelect(lead: Lead, targetStageId: string) {
+    if (lead.stage_id === targetStageId) return
+
+    const fromStage = stages.find((s) => s.id === lead.stage_id) || null
+    const toStage = stages.find((s) => s.id === targetStageId)
+    if (!toStage) return
+
+    const stagesRequiringIntercept = [
+      'contacted',
+      'no_reply',
+      'followup',
+      'qualified',
+      'proposal',
+      'meeting_scheduled',
+      'site_visit_scheduled',
+      'meeting_done',
+      'negotiation',
+      'lost',
+      'won',
+    ]
+
+    if (stagesRequiringIntercept.includes(toStage.key)) {
+      setPendingStageChange({
+        lead,
+        fromStage,
+        toStage,
+      })
+      return
+    }
+
+    executeDirectStageMove(lead, fromStage, toStage)
+  }
+
   return (
     <>
       <DndContext
@@ -760,6 +892,8 @@ export default function KanbanBoard({
                 leads={stageLeads}
                 pendingFollowupLeadIds={pendingLeadIdsSet}
                 onMarkMeetingDone={handleMarkMeetingDone}
+                allStages={stages}
+                onStageSelect={handleStageSelect}
               />
             )
           })}
