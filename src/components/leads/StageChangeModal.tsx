@@ -225,6 +225,10 @@ export default function StageChangeModal({
       setFollowupDate(getFutureDate(1))
       setFollowupTime('10:00')
       setFollowupNote('Retry calling lead (no answer on first attempt)')
+    } else if (key === 'qualified') {
+      setFollowupDate(getFutureDate(1))
+      setFollowupTime('11:00')
+      setFollowupNote('Follow up with qualified client on shortlisted options & schedule meeting')
     } else if (key === 'followup') {
       setFollowupDate(getFutureDate(fromStage?.key === 'site_visit_scheduled' ? 2 : 1))
       setFollowupTime('11:00')
@@ -262,6 +266,7 @@ export default function StageChangeModal({
   const needsFollowup = [
     'contacted',
     'no_reply',
+    'qualified',
     'followup',
     'proposal',
     'meeting_done',
