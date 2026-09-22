@@ -981,7 +981,7 @@ export default function DashboardClient({
                       </span>
                     </div>
                     <span style={{ fontSize: 11.5, color: '#64748B', fontWeight: 600 }}>
-                      Gaming-proof: Multiple calls to 1 lead count as 1 touch
+                      Gaming-proof: Real client touches only (calls, notes, meetings, stage moves)
                     </span>
                   </div>
 

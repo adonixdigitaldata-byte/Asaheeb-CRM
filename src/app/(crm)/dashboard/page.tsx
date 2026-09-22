@@ -7,6 +7,17 @@ import { sortLeadStages } from '@/types/database'
 
 export const metadata: Metadata = { title: 'Dashboard' }
 
+// Legitimate client outreach & touchpoint activities (excludes administrative actions: LEAD_CREATED, ASSIGNED, LEAD_UPDATED, PROPERTY_UPDATED)
+const OUTREACH_ACTIVITY_TYPES = [
+  'STAGE_CHANGE',
+  'NOTE_ADDED',
+  'NOTE_UPDATED',
+  'FOLLOWUP_SCHEDULED',
+  'FOLLOWUP_UPDATED',
+  'FOLLOWUP_COMPLETED',
+  'MEETING_SCHEDULED',
+]
+
 export default async function DashboardPage() {
   const supabase = await createClient()
   const {
@@ -159,12 +170,13 @@ export default async function DashboardPage() {
       .eq('is_completed', true)
       .gte('completed_at', todayStart.toISOString()),
 
-    // NEW: All actions logged today by current user (calls, stage advances, notes, scheduled follow-ups)
+    // Genuine client outreach actions logged today by current user (calls, stage advances, notes, scheduled follow-ups)
     supabase
       .from('lead_activities')
-      .select('lead_id')
+      .select('lead_id, activity_type')
       .eq('performed_by', user.id)
-      .gte('created_at', todayStart.toISOString()),
+      .gte('created_at', todayStart.toISOString())
+      .in('activity_type', OUTREACH_ACTIVITY_TYPES),
 
     // NEW: All leads assigned to current user (for idle computation)
     supabase
@@ -286,6 +298,7 @@ export default async function DashboardPage() {
         teamActs
           .filter((a: any) => {
             if (a.performed_by !== agent.id || !a.created_at) return false
+            if (!OUTREACH_ACTIVITY_TYPES.includes(a.activity_type)) return false
             const actTime = new Date(a.created_at)
             return actTime >= dStart && actTime <= dEnd
           })
@@ -460,10 +473,14 @@ export default async function DashboardPage() {
     return timeA.localeCompare(timeB)
   })
 
-  // Distinct unique leads worked today by current user
+  // Distinct unique leads worked today by current user (outreach touches only)
   const uniqueLeadsWorkedToday = new Set<string>()
   completedTodayData?.forEach((f: any) => { if (f.lead_id) uniqueLeadsWorkedToday.add(f.lead_id) })
-  myActivitiesTodayData?.forEach((a: any) => { if (a.lead_id) uniqueLeadsWorkedToday.add(a.lead_id) })
+  myActivitiesTodayData?.forEach((a: any) => {
+    if (a.lead_id && OUTREACH_ACTIVITY_TYPES.includes(a.activity_type)) {
+      uniqueLeadsWorkedToday.add(a.lead_id)
+    }
+  })
   const personalDoneToday = uniqueLeadsWorkedToday.size
 
   return (
