@@ -72,6 +72,7 @@ export default function PunchModal({
   // Exception inputs
   const [reason, setReason] = useState<ExceptionReason>('Client / Business meeting')
   const [explanation, setExplanation] = useState<string>('')
+  const [noteError, setNoteError] = useState<string | null>(null)
 
   // Submitting / Error state
   const [isSubmitting, setIsSubmitting] = useState(false)
@@ -96,8 +97,18 @@ export default function PunchModal({
     setTelemetryLoading(true)
     setReason('Client / Business meeting')
     setExplanation('')
+    setNoteError(null)
     setSubmitError(null)
     setIsSubmitting(false)
+  }
+
+  function handleProceedToConfirm() {
+    if (!explanation.trim()) {
+      setNoteError('Please enter notes or details explaining your remote location before proceeding.')
+      return
+    }
+    setNoteError(null)
+    setStep('CONFIRM')
   }
 
   async function runVerificationPipeline() {
@@ -152,6 +163,12 @@ export default function PunchModal({
   async function handleConfirmPunch() {
     if (!coords) {
       setSubmitError('Precise GPS location is required to verify your attendance record.')
+      return
+    }
+
+    if (!isInside && !explanation.trim()) {
+      setSubmitError('Additional notes or details explaining your remote location are mandatory.')
+      setStep('REASON')
       return
     }
 
@@ -395,23 +412,38 @@ export default function PunchModal({
 
               <div>
                 <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, color: '#334155', marginBottom: '6px' }}>
-                  Additional Notes / Details (Optional)
+                  Additional Notes / Details <span style={{ color: '#DC2626' }}>*</span>
                 </label>
                 <textarea
                   value={explanation}
-                  onChange={(e) => setExplanation(e.target.value)}
+                  onChange={(e) => {
+                    setExplanation(e.target.value)
+                    if (noteError && e.target.value.trim()) setNoteError(null)
+                  }}
                   placeholder="e.g. Attending client meeting at King Road Tower..."
                   rows={3}
                   style={{
                     width: '100%',
                     padding: '10px 14px',
                     borderRadius: '8px',
-                    border: '1px solid #CBD5E1',
+                    border: `1.5px solid ${noteError ? '#EF4444' : '#CBD5E1'}`,
+                    backgroundColor: noteError ? '#FEF2F2' : '#FFFFFF',
                     fontSize: '13px',
                     resize: 'none',
                     outline: 'none',
+                    transition: 'all 0.15s ease',
                   }}
                 />
+                {noteError ? (
+                  <div style={{ color: '#DC2626', fontSize: '12px', fontWeight: 600, marginTop: '5px', display: 'flex', alignItems: 'center', gap: '5px' }}>
+                    <AlertTriangle size={13} style={{ flexShrink: 0 }} />
+                    <span>{noteError}</span>
+                  </div>
+                ) : (
+                  <div style={{ fontSize: '11.5px', color: '#64748B', marginTop: '4px' }}>
+                    A specific business explanation is required for admin verification of remote punches.
+                  </div>
+                )}
               </div>
 
               <div style={{ display: 'flex', gap: '10px', marginTop: '6px' }}>
@@ -434,21 +466,22 @@ export default function PunchModal({
                 </button>
                 <button
                   type="button"
-                  onClick={() => setStep('CONFIRM')}
+                  onClick={handleProceedToConfirm}
                   style={{
                     flex: 1.5,
                     padding: '12px',
                     borderRadius: '10px',
                     border: 'none',
-                    backgroundColor: '#2563EB',
+                    backgroundColor: !explanation.trim() ? '#94A3B8' : '#2563EB',
                     color: '#FFFFFF',
                     fontSize: '14px',
                     fontWeight: 600,
-                    cursor: 'pointer',
+                    cursor: !explanation.trim() ? 'not-allowed' : 'pointer',
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
                     gap: '6px',
+                    transition: 'all 0.15s ease',
                   }}
                 >
                   <span>Review Telemetry</span>

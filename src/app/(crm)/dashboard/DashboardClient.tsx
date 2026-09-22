@@ -77,7 +77,9 @@ export interface ScheduledMeetingItem {
   leadId: string
   leadName: string
   leadPhone?: string | null
+  meetingDate?: string | null
   time?: string | null
+  scheduledAtIso?: string | null
   type: 'SITE_VISIT' | 'MEETING'
   typeLabel: string
   stageKey?: string
@@ -118,19 +120,66 @@ function getWhatsAppUrl(phone?: string | null): string | null {
   return `https://wa.me/${digits}`
 }
 
-function formatMeetingTime(timeStr?: string | null): string {
-  if (!timeStr) return 'Time not set'
-  const parts = timeStr.trim().split(':')
-  if (parts.length >= 2) {
-    const hours = parseInt(parts[0], 10)
-    const minutes = parts[1].slice(0, 2)
-    if (!isNaN(hours)) {
-      const ampm = hours >= 12 ? 'PM' : 'AM'
-      const h12 = hours % 12 || 12
-      return `${h12}:${minutes} ${ampm} (${timeStr.slice(0, 5)})`
+function formatMeetingTime(
+  timeStr?: string | null,
+  meetingDateStr?: string | null,
+  scheduledAtIso?: string | null
+): string {
+  if (!timeStr && !scheduledAtIso) return 'Time not set'
+
+  // 1. If we have an exact scheduledAt UTC ISO string (e.g. from lead_followups)
+  if (scheduledAtIso) {
+    try {
+      const d = new Date(scheduledAtIso)
+      if (!isNaN(d.getTime())) {
+        const localFormatted = d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', hour12: true })
+        const saudiFormatted = d.toLocaleTimeString([], { timeZone: 'Asia/Riyadh', hour: 'numeric', minute: '2-digit', hour12: true })
+        const isSaudi = new Date().getTimezoneOffset() === -180
+        if (isSaudi || localFormatted === saudiFormatted) {
+          return `${localFormatted} (${d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false })})`
+        }
+        return `${localFormatted} (${saudiFormatted} KSA)`
+      }
+    } catch {
+      // fallback
     }
   }
-  return timeStr
+
+  // 2. If timeStr is e.g. "12:00" or "15:00" (entered in Saudi Arabia AST, UTC+3)
+  if (timeStr) {
+    const parts = timeStr.trim().split(':')
+    if (parts.length >= 2) {
+      const rawHour = parseInt(parts[0], 10)
+      const rawMinute = parts[1].slice(0, 2)
+      if (!isNaN(rawHour)) {
+        const datePart = meetingDateStr || new Date().toISOString().split('T')[0]
+        const saudiIso = `${datePart}T${String(rawHour).padStart(2, '0')}:${rawMinute}:00+03:00`
+        const localDate = new Date(saudiIso)
+
+        if (!isNaN(localDate.getTime())) {
+          const localFormatted = localDate.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', hour12: true })
+          const saudiAmpm = rawHour >= 12 ? 'PM' : 'AM'
+          const saudi12 = rawHour % 12 || 12
+          const saudiFormatted = `${saudi12}:${rawMinute} ${saudiAmpm}`
+          const isSaudi = new Date().getTimezoneOffset() === -180
+
+          if (isSaudi || localFormatted === saudiFormatted) {
+            return `${localFormatted} (${timeStr.slice(0, 5)})`
+          }
+
+          // Show local device time prominently + Saudi office time
+          return `${localFormatted} (${saudiFormatted} KSA)`
+        }
+
+        const ampm = rawHour >= 12 ? 'PM' : 'AM'
+        const h12 = rawHour % 12 || 12
+        return `${h12}:${rawMinute} ${ampm}`
+      }
+    }
+    return timeStr
+  }
+
+  return 'Time not set'
 }
 
 const SOURCE_LABELS: Record<string, string> = {
@@ -1805,7 +1854,7 @@ export default function DashboardClient({
                 {todayMeetings.map((item) => {
                   const isSiteVisit = item.type === 'SITE_VISIT'
                   const whatsappUrl = getWhatsAppUrl(item.leadPhone)
-                  const formattedTime = formatMeetingTime(item.time)
+                  const formattedTime = formatMeetingTime(item.time, item.meetingDate, item.scheduledAtIso)
 
                   return (
                     <div
@@ -2047,7 +2096,11 @@ export default function DashboardClient({
           onClose={() => setShowTVModal(false)}
           agentStats={agentHealthStats}
           totalLeadsCount={totalLeads}
-          onRefresh={() => router.refresh()}
+          onRefresh={() => {
+            setTimeout(() => {
+              router.refresh()
+            }, 0)
+          }}
         />
       )}
     </div>
