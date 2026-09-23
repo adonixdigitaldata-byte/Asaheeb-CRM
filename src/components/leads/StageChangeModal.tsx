@@ -179,7 +179,7 @@ export default function StageChangeModal({
       const found = await checkFollowupConflict(supabase, {
         agentId: targetAgentId,
         scheduledAtIso: scheduledIso,
-        bufferMinutes: 30,
+        bufferMinutes: 10,
       })
       if (active) {
         setConflict(found)

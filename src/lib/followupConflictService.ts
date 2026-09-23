@@ -28,7 +28,7 @@ export async function checkFollowupConflict(
   supabase: SupabaseClient,
   options: ConflictCheckOptions
 ): Promise<ScheduleConflict | null> {
-  const { agentId, scheduledAtIso, excludeFollowupId, bufferMinutes = 30 } = options
+  const { agentId, scheduledAtIso, excludeFollowupId, bufferMinutes = 10 } = options
 
   if (!agentId || !scheduledAtIso) return null
 

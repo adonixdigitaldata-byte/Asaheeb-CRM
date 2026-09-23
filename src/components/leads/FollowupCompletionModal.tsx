@@ -186,7 +186,7 @@ export default function FollowupCompletionModal({
         agentId: targetAgentId,
         scheduledAtIso: scheduledIso,
         excludeFollowupId: followup.id,
-        bufferMinutes: 30,
+        bufferMinutes: 10,
       })
       if (active) {
         setConflict(found)

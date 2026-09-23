@@ -1,4 +1,5 @@
 import { createClient, createServiceClient } from '@/lib/supabase/server'
+import { fetchAllInBatches } from '@/lib/supabase/fetchAll'
 import { redirect } from 'next/navigation'
 import type { Metadata } from 'next'
 import TeamClient from './TeamClient'
@@ -20,9 +21,9 @@ export default async function TeamPage() {
   const [
     { data: profiles },
     { data: authUsers },
-    { data: leadCounts },
+    leadCounts,
     { data: wonStageData },
-    { data: completedFus },
+    completedFus,
     { data: salaryProfiles },
   ] = await Promise.all([
     supabase
@@ -30,19 +31,25 @@ export default async function TeamPage() {
       .select('*')
       .order('created_at', { ascending: false }),
     serviceSupabase.auth.admin.listUsers().catch(() => ({ data: { users: [] } })),
-    supabase
-      .from('leads')
-      .select('assigned_agent_id')
-      .not('assigned_agent_id', 'is', null),
+    fetchAllInBatches<{ assigned_agent_id: string }>((from, to) =>
+      supabase
+        .from('leads')
+        .select('assigned_agent_id')
+        .not('assigned_agent_id', 'is', null)
+        .range(from, to)
+    ),
     supabase
       .from('lead_stages')
       .select('id')
       .eq('key', 'won')
       .maybeSingle(),
-    supabase
-      .from('lead_followups')
-      .select('agent_id')
-      .eq('is_completed', true),
+    fetchAllInBatches<{ agent_id: string }>((from, to) =>
+      supabase
+        .from('lead_followups')
+        .select('agent_id')
+        .eq('is_completed', true)
+        .range(from, to)
+    ),
     supabase
       .from('employee_salary_profiles')
       .select('profile_id, base_salary, currency'),
@@ -66,11 +73,15 @@ export default async function TeamPage() {
   // Won counts per agent
   const wonCounts: Record<string, number> = {}
   if (wonStageData) {
-    const { data: wonLeads } = await supabase
-      .from('leads')
-      .select('assigned_agent_id')
-      .eq('stage_id', wonStageData.id)
-      .not('assigned_agent_id', 'is', null)
+    const wonLeads = await fetchAllInBatches<{ assigned_agent_id: string }>(
+      (from, to) =>
+        supabase
+          .from('leads')
+          .select('assigned_agent_id')
+          .eq('stage_id', wonStageData.id)
+          .not('assigned_agent_id', 'is', null)
+          .range(from, to)
+    )
 
     wonLeads?.forEach((l: any) => {
       if (l.assigned_agent_id)

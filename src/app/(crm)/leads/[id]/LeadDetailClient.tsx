@@ -271,7 +271,7 @@ export default function LeadDetailClient({
         agentId: targetAgentId,
         scheduledAtIso: dt.toISOString(),
         excludeFollowupId: editingFollowupId || undefined,
-        bufferMinutes: 30,
+        bufferMinutes: 10,
       })
       if (active) {
         setFollowupConflict(found)

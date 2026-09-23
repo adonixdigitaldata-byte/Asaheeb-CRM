@@ -4,6 +4,7 @@ import type { Metadata } from 'next'
 import DashboardClient, { ScheduledMeetingItem } from './DashboardClient'
 import type { Profile, LeadStage } from '@/types/database'
 import { sortLeadStages } from '@/types/database'
+import { fetchAllInBatches } from '@/lib/supabase/fetchAll'
 
 export const metadata: Metadata = { title: 'Dashboard' }
 
@@ -109,25 +110,32 @@ export default async function DashboardPage() {
 
   const [
     { data: stages },
-    { data: leadsData },
+    leadsData,
+    { count: exactTotalLeads },
     { data: recentLeads },
     { data: followups },
     { data: overdueFollowups },
     { data: todayFollowups },
     { data: completedTodayData },
     { data: myActivitiesTodayData },
-    { data: myAllLeads },
-    { data: myPendingFups },
+    myAllLeads,
+    myPendingFups,
     todayMeetingsRes,
     todayMeetingFollowupsRes,
     teamProfilesRes,
-    teamPendingFupsRes,
-    teamDone7DaysRes,
-    teamActivities7DaysRes,
+    teamPending,
+    teamDone,
+    teamActs,
   ] = await Promise.all([
     supabase.from('lead_stages').select('*').order('sort_order'),
 
-    supabase.from('leads').select('id, stage_id, source, assigned_agent_id, meeting_date'),
+    // Fetch ALL leads in batches to bypass Supabase 1000-row default limit
+    fetchAllInBatches<{ id: string; stage_id: string; source: string; assigned_agent_id: string | null; meeting_date: string | null }>((from, to) =>
+      supabase.from('leads').select('id, stage_id, source, assigned_agent_id, meeting_date').range(from, to)
+    ),
+
+    // Exact database count (never truncated)
+    supabase.from('leads').select('*', { count: 'exact', head: true }),
 
     supabase
       .from('leads')
@@ -143,7 +151,7 @@ export default async function DashboardPage() {
       .order('scheduled_at', { ascending: true })
       .limit(10),
 
-    // NEW: Overdue followups for current user (past due, not completed)
+    // Overdue followups for current user (past due, not completed)
     supabase
       .from('lead_followups')
       .select('id, lead_id, scheduled_at, note, lead:leads(id, name, phone)')
@@ -152,7 +160,7 @@ export default async function DashboardPage() {
       .lt('scheduled_at', now.toISOString())
       .order('scheduled_at', { ascending: true }),
 
-    // NEW: Today's followups for current user
+    // Today's followups for current user
     supabase
       .from('lead_followups')
       .select('id, lead_id, scheduled_at, note, lead:leads(id, name, phone)')
@@ -162,7 +170,7 @@ export default async function DashboardPage() {
       .lte('scheduled_at', todayEnd.toISOString())
       .order('scheduled_at', { ascending: true }),
 
-    // NEW: Completed follow-ups today by current user
+    // Completed follow-ups today by current user
     supabase
       .from('lead_followups')
       .select('lead_id')
@@ -178,49 +186,67 @@ export default async function DashboardPage() {
       .gte('created_at', todayStart.toISOString())
       .in('activity_type', OUTREACH_ACTIVITY_TYPES),
 
-    // NEW: All leads assigned to current user (for idle computation)
-    supabase
-      .from('leads')
-      .select('id, stage_id, name, created_at, meeting_date')
-      .eq('assigned_agent_id', user.id),
+    // All leads assigned to current user (for idle computation) in batches
+    fetchAllInBatches<{ id: string; stage_id: string; name: string; created_at: string; meeting_date?: string | null }>((from, to) =>
+      supabase
+        .from('leads')
+        .select('id, stage_id, name, created_at, meeting_date')
+        .eq('assigned_agent_id', user.id)
+        .range(from, to)
+    ),
 
-    // NEW: Lead IDs that already have a pending followup (non-idle)
-    supabase
-      .from('lead_followups')
-      .select('lead_id')
-      .eq('agent_id', user.id)
-      .eq('is_completed', false),
+    // Lead IDs that already have a pending followup (non-idle) in batches
+    fetchAllInBatches<{ lead_id: string }>((from, to) =>
+      supabase
+        .from('lead_followups')
+        .select('lead_id')
+        .eq('agent_id', user.id)
+        .eq('is_completed', false)
+        .range(from, to)
+    ),
 
     // Today's meetings & site visits
     todayMeetingsQuery,
     todayMeetingFollowupsQuery,
 
-    // Team radar queries: strictly for ADMIN only
+    // Team radar queries: strictly for ADMIN only (using batching to ensure no truncation)
     isAdmin
       ? supabase.from('profiles').select('id, name, email, role').in('role', ['AGENT', 'SALES_MANAGER']).order('name')
       : Promise.resolve({ data: [] }),
 
     isAdmin
-      ? supabase.from('lead_followups').select('id, lead_id, agent_id, scheduled_at, lead:leads(assigned_agent_id)').eq('is_completed', false)
-      : Promise.resolve({ data: [] }),
+      ? fetchAllInBatches((from, to) =>
+          supabase
+            .from('lead_followups')
+            .select('id, lead_id, agent_id, scheduled_at, lead:leads(assigned_agent_id)')
+            .eq('is_completed', false)
+            .range(from, to)
+        )
+      : Promise.resolve([]),
 
     isAdmin
-      ? supabase
-          .from('lead_followups')
-          .select('lead_id, agent_id, completed_at')
-          .eq('is_completed', true)
-          .gte('completed_at', sevenDaysAgo.toISOString())
-      : Promise.resolve({ data: [] }),
+      ? fetchAllInBatches((from, to) =>
+          supabase
+            .from('lead_followups')
+            .select('lead_id, agent_id, completed_at')
+            .eq('is_completed', true)
+            .gte('completed_at', sevenDaysAgo.toISOString())
+            .range(from, to)
+        )
+      : Promise.resolve([]),
 
     isAdmin
-      ? supabase
-          .from('lead_activities')
-          .select('lead_id, performed_by, created_at, activity_type, metadata')
-          .gte('created_at', sevenDaysAgo.toISOString())
-      : Promise.resolve({ data: [] }),
+      ? fetchAllInBatches((from, to) =>
+          supabase
+            .from('lead_activities')
+            .select('lead_id, performed_by, created_at, activity_type, metadata')
+            .gte('created_at', sevenDaysAgo.toISOString())
+            .range(from, to)
+        )
+      : Promise.resolve([]),
   ])
 
-  const totalLeads = leadsData?.length ?? 0
+  const totalLeads = exactTotalLeads ?? leadsData?.length ?? 0
 
   const stageCounts: Record<string, number> = {}
   leadsData?.forEach((l: { stage_id: string }) => {
@@ -251,10 +277,7 @@ export default async function DashboardPage() {
 
   if (isAdmin) {
     const teamAgents = teamProfilesRes.data ?? []
-    const teamPending = teamPendingFupsRes.data ?? []
-    const teamDone = teamDone7DaysRes.data ?? []
-    const teamActs = teamActivities7DaysRes.data ?? []
-    const teamPendingLeadIds = new Set(teamPending.map((f: any) => f.lead_id as string))
+    const teamPendingLeadIds = new Set((teamPending ?? []).map((f: any) => f.lead_id as string))
 
     const isLeadCovered = (l: any) => {
       if (teamPendingLeadIds.has(l.id)) return true

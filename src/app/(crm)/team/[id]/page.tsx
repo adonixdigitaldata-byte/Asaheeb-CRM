@@ -1,4 +1,5 @@
 import { createClient, createServiceClient } from '@/lib/supabase/server'
+import { fetchAllInBatches } from '@/lib/supabase/fetchAll'
 import { redirect, notFound } from 'next/navigation'
 import type { Metadata } from 'next'
 import TeamMemberDetailClient from './TeamMemberDetailClient'
@@ -25,13 +26,13 @@ export default async function TeamMemberDetailPage({ params }: { params: Promise
     .from('profiles')
     .select('*')
     .eq('id', id)
-    .maybeSingle()
+    .single()
 
   if (!member) notFound()
 
   // Parallel queries
   const [
-    { data: leads },
+    leads,
     { data: stages },
     { data: followups },
     { data: activities },
@@ -42,11 +43,14 @@ export default async function TeamMemberDetailPage({ params }: { params: Promise
     { data: employeeDocuments },
     { data: employeeCustomRecords },
   ] = await Promise.all([
-    serviceSupabase
-      .from('leads')
-      .select('id, name, phone, email, source, potential_value, created_at, stage_id, stage:lead_stages(id, key, label, color_hex)')
-      .eq('assigned_agent_id', id)
-      .order('created_at', { ascending: false }),
+    fetchAllInBatches((from, to) =>
+      serviceSupabase
+        .from('leads')
+        .select('id, name, phone, email, source, potential_value, created_at, stage_id, stage:lead_stages(id, key, label, color_hex)')
+        .eq('assigned_agent_id', id)
+        .order('created_at', { ascending: false })
+        .range(from, to)
+    ),
     serviceSupabase
       .from('lead_stages')
       .select('*')

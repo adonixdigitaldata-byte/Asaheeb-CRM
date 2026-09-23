@@ -18,6 +18,7 @@ import KanbanBoard from './KanbanBoard'
 import LeadsTable from './LeadsTable'
 import AddLeadModal from './AddLeadModal'
 import LogoLoader from '@/components/LogoLoader'
+import { fetchAllInBatches } from '@/lib/supabase/fetchAll'
 
 interface Props {
   profile: Profile
@@ -79,36 +80,47 @@ export default function LeadsClient({
     }
   }, [initialSearchParams, profile?.id])
 
-  // Fetch leads from Supabase
+  // Fetch leads from Supabase using batching to bypass default 1000-row limit
   const fetchLeads = useCallback(async () => {
     setLoading(true)
-    let query = supabase
-      .from('leads')
-      .select(`
-        *,
-        stage:lead_stages(*),
-        assigned_agent:profiles(id, name, email),
-        campaign:ad_campaigns(id, name),
-        property:projects(id, name_en, name_ar)
-      `)
-      .order('created_at', { ascending: false })
+    try {
+      const [allLeads, allFups] = await Promise.all([
+        fetchAllInBatches<Lead>((from, to) => {
+          let query = supabase
+            .from('leads')
+            .select(`
+              *,
+              stage:lead_stages(*),
+              assigned_agent:profiles(id, name, email),
+              campaign:ad_campaigns(id, name),
+              property:projects(id, name_en, name_ar)
+            `)
+            .order('created_at', { ascending: false })
+            .range(from, to)
 
-    if (!isLeadManager) {
-      query = query.eq('assigned_agent_id', profile.id)
-    }
+          if (!isLeadManager) {
+            query = query.eq('assigned_agent_id', profile.id)
+          }
 
-    const [leadsRes, fupsRes] = await Promise.all([
-      query,
-      supabase.from('lead_followups').select('lead_id').eq('is_completed', false),
-    ])
+          return query
+        }),
 
-    if (!leadsRes.error && leadsRes.data) {
-      setLeads(leadsRes.data as Lead[])
+        fetchAllInBatches<{ lead_id: string }>((from, to) => {
+          return supabase
+            .from('lead_followups')
+            .select('lead_id')
+            .eq('is_completed', false)
+            .range(from, to)
+        }),
+      ])
+
+      setLeads(allLeads)
+      setPendingFollowupLeadIds(allFups.map((f: any) => f.lead_id as string))
+    } catch (err) {
+      console.error('Error fetching leads:', err)
+    } finally {
+      setLoading(false)
     }
-    if (!fupsRes.error && fupsRes.data) {
-      setPendingFollowupLeadIds(fupsRes.data.map((f: any) => f.lead_id as string))
-    }
-    setLoading(false)
   }, [supabase, isLeadManager, profile?.id])
 
   useEffect(() => {
