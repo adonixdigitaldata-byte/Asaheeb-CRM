@@ -448,26 +448,32 @@ export default async function DashboardPage() {
   ;(todayMeetingFollowupsRes?.data || []).forEach((fu: any) => {
     if (!fu.lead || meetingLeadIds.has(fu.lead.id)) return
 
-    const noteLower = (fu.note || '').toLowerCase()
+    const note = (fu.note || '').trim()
+    const noteLower = note.toLowerCase()
     const stageKey = fu.lead.stage?.key || ''
     const stageLabelLower = (fu.lead.stage?.label || '').toLowerCase()
 
-    const isMeetingOrVisit =
+    // Must be an actual meeting/site visit stage OR an explicit meeting followup (e.g., starts with 🤝 or "Meeting:" / "Site Visit:")
+    // Never misclassify regular followups with generic phrases like "options & schedule meeting" on Qualified/Contacted leads
+    const isExplicitMeetingStage =
       stageKey === 'meeting_scheduled' ||
       stageKey === 'site_visit_scheduled' ||
-      noteLower.includes('meeting') ||
-      noteLower.includes('visit') ||
-      stageLabelLower.includes('meeting') ||
-      stageLabelLower.includes('visit')
+      stageLabelLower === 'meeting scheduled' ||
+      stageLabelLower === 'site visit scheduled'
 
-    if (!isMeetingOrVisit) return
+    const isExplicitMeetingNote =
+      note.startsWith('🤝') ||
+      /^(\s*(office\s+)?meeting\s*[:\-]|site\s+visit\s*[:\-])/i.test(note)
+
+    if (!isExplicitMeetingStage && !isExplicitMeetingNote) return
 
     meetingLeadIds.add(fu.lead.id)
 
     const isSiteVisit =
       stageKey === 'site_visit_scheduled' ||
-      noteLower.includes('site visit') ||
-      noteLower.includes('visit')
+      stageLabelLower.includes('visit') ||
+      noteLower.startsWith('site visit') ||
+      note.includes('Site Visit')
 
     const fuDate = new Date(fu.scheduled_at)
     const timeStr = `${String(fuDate.getHours()).padStart(2, '0')}:${String(fuDate.getMinutes()).padStart(2, '0')}`
@@ -477,8 +483,12 @@ export default async function DashboardPage() {
       leadId: fu.lead.id,
       leadName: fu.lead.name || 'Unnamed Lead',
       leadPhone: fu.lead.phone,
-      meetingDate: fu.lead.meeting_date || (fu.scheduled_at ? fu.scheduled_at.split('T')[0] : null),
-      time: fu.lead.meeting_time || timeStr,
+      meetingDate: (fu.lead.meeting_date && dateCandidates.includes(fu.lead.meeting_date))
+        ? fu.lead.meeting_date
+        : (fu.scheduled_at ? fu.scheduled_at.split('T')[0] : null),
+      time: (fu.lead.meeting_date && dateCandidates.includes(fu.lead.meeting_date) && fu.lead.meeting_time)
+        ? fu.lead.meeting_time
+        : timeStr,
       scheduledAtIso: fu.scheduled_at,
       type: isSiteVisit ? 'SITE_VISIT' : 'MEETING',
       typeLabel: isSiteVisit ? 'Site Visit' : 'Office Meeting',
