@@ -417,8 +417,18 @@ export default async function DashboardPage() {
   }
 
   // Build unified today's scheduled meetings & site visits list
+  // Build unified today's scheduled meetings & site visits list
+  // Source of truth: Leads whose meeting_date is scheduled for TODAY
   const meetingLeadIds = new Set<string>()
   const todayMeetings: ScheduledMeetingItem[] = []
+
+  // Collect notes from explicit meeting followups (starts with 🤝) to display on meeting cards
+  const meetingNotesByLeadId = new Map<string, string>()
+  ;(todayMeetingFollowupsRes?.data || []).forEach((fu: any) => {
+    if (fu.lead_id && fu.note?.startsWith('🤝')) {
+      meetingNotesByLeadId.set(fu.lead_id, fu.note)
+    }
+  })
 
   ;(todayMeetingsRes?.data || []).forEach((lead: any) => {
     meetingLeadIds.add(lead.id)
@@ -436,44 +446,31 @@ export default async function DashboardPage() {
       type: isSiteVisit ? 'SITE_VISIT' : 'MEETING',
       typeLabel: isSiteVisit ? 'Site Visit' : 'Office Meeting',
       stageKey: lead.stage?.key,
-      stageLabel: lead.stage?.label || 'Meeting Scheduled',
+      stageLabel: lead.stage?.label || (isSiteVisit ? 'Site Visit Scheduled' : 'Meeting Scheduled'),
       stageColor: lead.stage?.color_hex || '#8B5CF6',
       agentId: lead.assigned_agent_id,
       agentName: lead.assigned_agent?.name || lead.assigned_agent?.email || 'Unassigned',
       projectName: lead.property?.name_en || lead.interest || null,
+      note: meetingNotesByLeadId.get(lead.id) || null,
       status: lead.stage?.key === 'meeting_done' || lead.stage?.key === 'won' ? 'COMPLETED' : 'SCHEDULED',
     })
   })
 
+  // Only include followups that were EXPLICITLY scheduled as an appointment (note starts with 🤝)
+  // NEVER include routine phone call followups (like "Review brochure") even if the lead has a site visit on another date!
   ;(todayMeetingFollowupsRes?.data || []).forEach((fu: any) => {
     if (!fu.lead || meetingLeadIds.has(fu.lead.id)) return
 
     const note = (fu.note || '').trim()
-    const noteLower = note.toLowerCase()
-    const stageKey = fu.lead.stage?.key || ''
-    const stageLabelLower = (fu.lead.stage?.label || '').toLowerCase()
-
-    // Must be an actual meeting/site visit stage OR an explicit meeting followup (e.g., starts with 🤝 or "Meeting:" / "Site Visit:")
-    // Never misclassify regular followups with generic phrases like "options & schedule meeting" on Qualified/Contacted leads
-    const isExplicitMeetingStage =
-      stageKey === 'meeting_scheduled' ||
-      stageKey === 'site_visit_scheduled' ||
-      stageLabelLower === 'meeting scheduled' ||
-      stageLabelLower === 'site visit scheduled'
-
-    const isExplicitMeetingNote =
-      note.startsWith('🤝') ||
-      /^(\s*(office\s+)?meeting\s*[:\-]|site\s+visit\s*[:\-])/i.test(note)
-
-    if (!isExplicitMeetingStage && !isExplicitMeetingNote) return
+    if (!note.startsWith('🤝')) return
 
     meetingLeadIds.add(fu.lead.id)
 
     const isSiteVisit =
-      stageKey === 'site_visit_scheduled' ||
-      stageLabelLower.includes('visit') ||
-      noteLower.startsWith('site visit') ||
-      note.includes('Site Visit')
+      fu.lead.stage?.key === 'site_visit_scheduled' ||
+      (fu.lead.stage?.label || '').toLowerCase().includes('visit') ||
+      note.toLowerCase().includes('site visit') ||
+      note.toLowerCase().includes('visit')
 
     const fuDate = new Date(fu.scheduled_at)
     const timeStr = `${String(fuDate.getHours()).padStart(2, '0')}:${String(fuDate.getMinutes()).padStart(2, '0')}`
@@ -493,7 +490,7 @@ export default async function DashboardPage() {
       type: isSiteVisit ? 'SITE_VISIT' : 'MEETING',
       typeLabel: isSiteVisit ? 'Site Visit' : 'Office Meeting',
       stageKey: fu.lead.stage?.key,
-      stageLabel: fu.lead.stage?.label || 'Meeting Scheduled',
+      stageLabel: fu.lead.stage?.label || (isSiteVisit ? 'Site Visit Scheduled' : 'Meeting Scheduled'),
       stageColor: fu.lead.stage?.color_hex || '#8B5CF6',
       agentId: fu.agent_id || fu.lead.assigned_agent_id,
       agentName: fu.agent?.name || fu.agent?.email || 'Assigned Agent',
