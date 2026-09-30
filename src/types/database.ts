@@ -596,3 +596,51 @@ export interface MarketingPopup {
   created_at: string
   updated_at: string
 }
+
+export type MortgageLeadStatus =
+  | 'new'
+  | 'contacted'
+  | 'bank_submitted'
+  | 'pre_approved'
+  | 'disbursed'
+  | 'lost'
+
+export interface MortgageLeadNote {
+  id: string
+  text: string
+  created_at: string
+  author_name?: string
+  author_id?: string
+}
+
+export interface MortgageLead {
+  id: string
+  full_name: string
+  phone?: string
+  phone_number?: string
+  bank_name?: string
+  bank_name_en?: string
+  bank_slug: string
+  property_price: number
+  down_payment_amount: number
+  down_payment_pct: number
+  loan_period_years: number
+  applied_rate_pct: number
+  monthly_instalment: number
+  total_payable?: number
+  total_payable_value?: number
+  total_loan_amount?: number
+  monthly_income?: number | null
+  monthly_obligations?: number | null
+  is_citizen: boolean
+  is_first_home?: boolean | null
+  has_redf_support?: boolean | null
+  redf_supported?: boolean | null
+  bank_profit_percentage?: number | null
+  status: MortgageLeadStatus | string
+  notes?: string | null
+  source?: string | null
+  created_at: string
+  updated_at?: string
+}
+

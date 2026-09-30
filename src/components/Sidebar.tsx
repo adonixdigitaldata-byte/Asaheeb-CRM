@@ -18,6 +18,7 @@ import {
   WalletCards,
   Clock,
   Megaphone,
+  Calculator,
 } from 'lucide-react'
 import { logout } from '@/app/login/actions'
 import type { Profile } from '@/types/database'
@@ -27,9 +28,16 @@ interface SidebarProps {
   isOpen?: boolean
   onClose?: () => void
   overdueCount?: number
+  newMortgageCount?: number
 }
 
-export default function Sidebar({ profile, isOpen, onClose, overdueCount = 0 }: SidebarProps) {
+export default function Sidebar({
+  profile,
+  isOpen,
+  onClose,
+  overdueCount = 0,
+  newMortgageCount = 0,
+}: SidebarProps) {
   const pathname = usePathname()
   const role = profile?.role || 'AGENT'
   const isAdmin = role === 'ADMIN'
@@ -41,6 +49,7 @@ export default function Sidebar({ profile, isOpen, onClose, overdueCount = 0 }: 
       items: [
         { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
         { href: '/leads', label: 'Leads Pipeline', icon: Users },
+        { href: '/mortgage-leads', label: 'Mortgage Leads', icon: Calculator },
         { href: '/leads/import', label: 'Import Leads', icon: FileSpreadsheet },
       ],
     },
@@ -72,6 +81,7 @@ export default function Sidebar({ profile, isOpen, onClose, overdueCount = 0 }: 
       items: [
         { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
         { href: '/leads', label: 'All Team Leads', icon: Users },
+        { href: '/mortgage-leads', label: 'Mortgage Leads', icon: Calculator },
         { href: '/leads?my_leads=true', label: 'My Assigned Leads', icon: UserCheck },
         { href: '/leads/import', label: 'Import Leads', icon: FileSpreadsheet },
       ],
@@ -102,6 +112,7 @@ export default function Sidebar({ profile, isOpen, onClose, overdueCount = 0 }: 
       items: [
         { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
         { href: '/leads', label: 'My Leads', icon: Users },
+        { href: '/mortgage-leads', label: 'Mortgage Leads', icon: Calculator },
       ],
     },
     {
@@ -222,6 +233,14 @@ export default function Sidebar({ profile, isOpen, onClose, overdueCount = 0 }: 
                         title={`${overdueCount} overdue follow-up${overdueCount > 1 ? 's' : ''}`}
                       >
                         {overdueCount}
+                      </span>
+                    )}
+                    {item.href === '/mortgage-leads' && newMortgageCount > 0 && (
+                      <span
+                        className="sidebar-mortgage-pill"
+                        title={`${newMortgageCount} new mortgage lead${newMortgageCount > 1 ? 's' : ''}`}
+                      >
+                        {newMortgageCount}
                       </span>
                     )}
                   </Link>
