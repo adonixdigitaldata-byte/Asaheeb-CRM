@@ -123,6 +123,9 @@ export default function StageChangeModal({
 
   // Form states
   const [outcome, setOutcome] = useState('connected_info_sent')
+  const isContacted = stageKey === 'contacted'
+  const isLostOutcome = stageKey === 'lost' || (isContacted && (outcome === 'wrong_number' || outcome === 'not_interested'))
+
   const [followupDate, setFollowupDate] = useState('')
   const [followupTime, setFollowupTime] = useState('11:00')
   const [followupNote, setFollowupNote] = useState('')
@@ -149,7 +152,7 @@ export default function StageChangeModal({
 
   // Conflict detection effect
   useEffect(() => {
-    if (!isOpen) {
+    if (!isOpen || isLostOutcome || stageKey === 'lost') {
       setConflict(null)
       return
     }
@@ -179,6 +182,7 @@ export default function StageChangeModal({
       const found = await checkFollowupConflict(supabase, {
         agentId: targetAgentId,
         scheduledAtIso: scheduledIso,
+        excludeLeadId: lead.id,
         bufferMinutes: 10,
       })
       if (active) {
@@ -190,7 +194,15 @@ export default function StageChangeModal({
       active = false
       clearTimeout(timer)
     }
-  }, [isOpen, stageKey, meetingDate, meetingTime, followupDate, followupTime, lead.assigned_agent_id, currentUserId])
+  }, [isOpen, stageKey, isLostOutcome, meetingDate, meetingTime, followupDate, followupTime, lead.id, lead.assigned_agent_id, currentUserId])
+
+  // Clear conflict state and error if transitioning to a lost outcome
+  useEffect(() => {
+    if (isLostOutcome || stageKey === 'lost') {
+      setConflict(null)
+      setError((prev) => (prev?.includes('Schedule Conflict') ? null : prev))
+    }
+  }, [isLostOutcome, stageKey])
 
   // Helper date generators
   function getFutureDate(daysAhead: number): string {
@@ -273,9 +285,6 @@ export default function StageChangeModal({
     'negotiation',
   ].includes(stageKey)
 
-  const isContacted = stageKey === 'contacted'
-  const isLostOutcome = stageKey === 'lost' || (isContacted && (outcome === 'wrong_number' || outcome === 'not_interested'))
-
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     setError(null)
@@ -303,7 +312,7 @@ export default function StageChangeModal({
     }
 
     // Schedule conflict safety check
-    if (conflict && !allowConflictOverlap) {
+    if (!isLostOutcome && stageKey !== 'lost' && conflict && !allowConflictOverlap) {
       setError(`⚠️ Schedule Conflict: You already have a commitment around ${conflict.formatted_time} with "${conflict.lead_name}". Adjust the time or check "Schedule anyway" below to proceed.`)
       return
     }

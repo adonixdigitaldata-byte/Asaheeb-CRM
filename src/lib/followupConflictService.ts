@@ -14,6 +14,7 @@ export interface ConflictCheckOptions {
   agentId?: string | null
   scheduledAtIso: string
   excludeFollowupId?: string
+  excludeLeadId?: string
   bufferMinutes?: number
 }
 
@@ -28,7 +29,7 @@ export async function checkFollowupConflict(
   supabase: SupabaseClient,
   options: ConflictCheckOptions
 ): Promise<ScheduleConflict | null> {
-  const { agentId, scheduledAtIso, excludeFollowupId, bufferMinutes = 10 } = options
+  const { agentId, scheduledAtIso, excludeFollowupId, excludeLeadId, bufferMinutes = 10 } = options
 
   if (!agentId || !scheduledAtIso) return null
 
@@ -50,6 +51,10 @@ export async function checkFollowupConflict(
 
     if (excludeFollowupId) {
       query = query.neq('id', excludeFollowupId)
+    }
+
+    if (excludeLeadId) {
+      query = query.neq('lead_id', excludeLeadId)
     }
 
     const { data, error } = await query.limit(1)
