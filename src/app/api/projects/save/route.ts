@@ -69,6 +69,8 @@ export async function POST(request: NextRequest) {
       brochure_size_ar,
       payment_terms_en,
       payment_terms_ar,
+      payment_milestones,
+      payment_plans,
       floor_plans,
       expected_commission_en,
       expected_commission_ar,
@@ -107,7 +109,7 @@ export async function POST(request: NextRequest) {
     const imageList = Array.isArray(images) ? images : []
     const prevImages = Array.isArray(existingProject?.images) ? existingProject.images : []
 
-    const payload = {
+    const payload: Record<string, any> = {
       id: slug,
       name_en: name_en.trim(),
       name_ar: name_ar.trim(),
@@ -151,6 +153,7 @@ export async function POST(request: NextRequest) {
       brochure_size_ar: brochure_size_ar?.trim() || null,
       payment_terms_en: payment_terms_en?.trim() || null,
       payment_terms_ar: payment_terms_ar?.trim() || null,
+      payment_plans: Array.isArray(payment_plans) ? payment_plans : [],
       floor_plans: Array.isArray(floor_plans) ? floor_plans : [],
       expected_commission_en: expected_commission_en?.trim() || null,
       expected_commission_ar: expected_commission_ar?.trim() || null,
@@ -162,12 +165,28 @@ export async function POST(request: NextRequest) {
       updated_at: new Date().toISOString(),
     }
 
-    // If ID/slug was renamed from an existing project, remove the old ID after upserting new
-    const { data: project, error } = await serviceClient
+    if (Array.isArray(payment_milestones)) {
+      payload.payment_milestones = payment_milestones
+    }
+
+    // Upsert project with graceful fallback if payment_plans or payment_milestones columns do not exist yet
+    let { data: project, error } = await serviceClient
       .from('projects')
       .upsert(payload, { onConflict: 'id' })
       .select()
       .single()
+
+    if (error && (error.message?.includes('payment_plans') || error.message?.includes('payment_milestones') || error.code === '42703')) {
+      delete (payload as any).payment_plans
+      delete payload.payment_milestones
+      const fallbackResult = await serviceClient
+        .from('projects')
+        .upsert(payload, { onConflict: 'id' })
+        .select()
+        .single()
+      project = fallbackResult.data
+      error = fallbackResult.error
+    }
 
     if (error) {
       return NextResponse.json({ error: error.message }, { status: 400 })

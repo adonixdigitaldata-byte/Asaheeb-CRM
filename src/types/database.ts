@@ -119,6 +119,46 @@ export interface ProjectImage {
   captionAr?: string
 }
 
+export interface FloorPlanLayout {
+  url: string
+  model_en?: string
+  model_ar?: string
+  category?: 'studio' | '1_bed' | '2_bed' | '3_bed' | '4_bed' | 'duplex' | 'penthouse' | 'villa' | string
+  category_en?: string
+  category_ar?: string
+  area_sqm?: number | null
+  bedrooms?: number | null
+  bathrooms?: number | null
+  features_en?: string[] | null
+  features_ar?: string[] | null
+  starting_price?: string | null
+  payment_plan_en?: string | null
+  payment_plan_ar?: string | null
+  sort_order?: number
+  // Backward compatibility with legacy format and detailed descriptions
+  captionEn?: string
+  captionAr?: string
+  description_en?: string
+  description_ar?: string
+}
+
+export interface PaymentPlanItem {
+  url: string
+  title_en: string
+  title_ar: string
+  caption_en?: string
+  caption_ar?: string
+  sort_order?: number
+}
+
+export interface PaymentMilestone {
+  stage_en: string
+  stage_ar?: string
+  percentage: number
+  milestone_en: string
+  milestone_ar?: string
+}
+
 export interface ProjectVideo {
   url: string
   titleEn?: string
@@ -205,7 +245,9 @@ export interface Project {
   brochure_size_ar?: string | null
   payment_terms_en?: string | null
   payment_terms_ar?: string | null
-  floor_plans?: ProjectImage[] | null
+  payment_milestones?: PaymentMilestone[] | null
+  payment_plans?: PaymentPlanItem[] | null
+  floor_plans?: (ProjectImage | FloorPlanLayout)[] | null
   expected_commission_en?: string | null
   expected_commission_ar?: string | null
   commission_notes_en?: string | null

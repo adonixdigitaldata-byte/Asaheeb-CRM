@@ -33,8 +33,10 @@ import {
   Search,
 } from 'lucide-react'
 import { SaudiRiyalIcon } from '@/components/SaudiRiyalIcon'
-import type { Project, ProjectVideo, Landmark, Amenity, ProjectDiscountOffer } from '@/types/database'
+import type { Project, ProjectVideo, Landmark, Amenity, ProjectDiscountOffer, FloorPlanLayout, PaymentMilestone, PaymentPlanItem } from '@/types/database'
 import ImageGalleryManager from '@/components/ImageGalleryManager'
+import FloorPlanLayoutManager from '@/components/FloorPlanLayoutManager'
+import PaymentPlansEditor from '@/components/projects/PaymentPlansEditor'
 import CmsActivityTimeline from '@/components/CmsActivityTimeline'
 import InteractiveMapPicker from '@/components/InteractiveMapPicker'
 
@@ -45,7 +47,7 @@ interface Props {
   onSuccess: () => void
 }
 
-type TabType = 'basic' | 'specs' | 'content' | 'amenities' | 'brochure' | 'floorplans' | 'gallery' | 'activity'
+type TabType = 'basic' | 'specs' | 'content' | 'amenities' | 'brochure' | 'floorplans' | 'payment_plans' | 'gallery' | 'activity'
 
 function slugify(text: string): string {
   return text
@@ -128,6 +130,7 @@ export default function ProjectEditorModal({
     price_range_ar: project?.price_range_ar || '',
     payment_terms_en: project?.payment_terms_en || 'Cash + Installment Available',
     payment_terms_ar: project?.payment_terms_ar || 'كاش + أقساط متاحة',
+    payment_milestones: (project?.payment_milestones || []) as PaymentMilestone[],
     size_en: project?.size_en || '',
     size_ar: project?.size_ar || '',
     type_en: project?.type_en || 'Apartments',
@@ -146,6 +149,7 @@ export default function ProjectEditorModal({
     highlights_ar: project?.highlights_ar || [],
     images: project?.images || [],
     floor_plans: project?.floor_plans || [],
+    payment_plans: (project?.payment_plans || []) as PaymentPlanItem[],
     expected_commission_en: project?.expected_commission_en || '',
     expected_commission_ar: project?.expected_commission_ar || '',
     commission_notes_en: project?.commission_notes_en || '',
@@ -602,12 +606,22 @@ export default function ProjectEditorModal({
 
           <button
             type="button"
+            onClick={() => setActiveTab('payment_plans')}
+            className={`btn btn-sm ${activeTab === 'payment_plans' ? 'btn-primary' : 'btn-ghost'}`}
+            style={{ fontSize: '12.5px', padding: '5px 12px' }}
+          >
+            <CreditCard size={14} />
+            <span>7. Payment Plans ({(form.payment_plans || []).length})</span>
+          </button>
+
+          <button
+            type="button"
             onClick={() => setActiveTab('gallery')}
             className={`btn btn-sm ${activeTab === 'gallery' ? 'btn-primary' : 'btn-ghost'}`}
             style={{ fontSize: '12.5px', padding: '5px 12px' }}
           >
             <ImageIcon size={14} />
-            <span>7. Photos ({(form.images || []).length})</span>
+            <span>8. Photos ({(form.images || []).length})</span>
           </button>
 
           {isEdit && (
@@ -623,7 +637,7 @@ export default function ProjectEditorModal({
               }}
             >
               <ShieldCheck size={14} />
-              <span>8. Activity Log</span>
+              <span>9. Activity Log</span>
             </button>
           )}
         </div>
@@ -973,6 +987,7 @@ export default function ProjectEditorModal({
                     />
                   </div>
                 </div>
+
 
                 {/* Brokerage Commission & Agency Terms */}
                 <div
@@ -1594,48 +1609,6 @@ export default function ProjectEditorModal({
                   )}
                 </div>
 
-                {/* Payment Terms / Options */}
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px' }}>
-                  <div className="form-group">
-                    <label className="form-label" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                      <CreditCard size={13} style={{ color: '#2563EB' }} />
-                      <span>Payment Terms / Method</span>
-                    </label>
-                    <select
-                      className="form-input"
-                      value={
-                        form.payment_terms_en === 'Cash Only'
-                          ? 'Cash Only'
-                          : form.payment_terms_en === 'Installment Available'
-                          ? 'Installment Available'
-                          : 'Cash + Installment Available'
-                      }
-                      onChange={(e) => {
-                        const val = e.target.value
-                        let arVal = 'كاش + أقساط متاحة'
-                        if (val === 'Cash Only') arVal = 'كاش فقط'
-                        else if (val === 'Installment Available') arVal = 'أقساط متاحة'
-                        setForm({ ...form, payment_terms_en: val, payment_terms_ar: arVal })
-                      }}
-                    >
-                      <option value="Cash + Installment Available">Cash + Installment Available (كاش + أقساط متاحة)</option>
-                      <option value="Cash Only">Cash Only (كاش فقط)</option>
-                      <option value="Installment Available">Installment Available (أقساط متاحة)</option>
-                    </select>
-                  </div>
-
-                  <div className="form-group">
-                    <label className="form-label" style={{ textAlign: 'right' }}>طريقة الدفع (بالعربية)</label>
-                    <input
-                      type="text"
-                      dir="rtl"
-                      value={form.payment_terms_ar || ''}
-                      onChange={(e) => setForm({ ...form, payment_terms_ar: e.target.value })}
-                      placeholder="مثال: كاش + أقساط متاحة"
-                      className="form-input"
-                    />
-                  </div>
-                </div>
 
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px' }}>
                   <div className="form-group">
@@ -2716,16 +2689,23 @@ export default function ProjectEditorModal({
 
             {/* TAB 6: FLOOR PLANS */}
             {activeTab === 'floorplans' && (
-              <ImageGalleryManager
-                images={form.floor_plans || []}
+              <FloorPlanLayoutManager
+                layouts={(form.floor_plans || []) as FloorPlanLayout[]}
                 onChange={(updatedFloorPlans) => setForm({ ...form, floor_plans: updatedFloorPlans })}
                 folder="asaheeb/floorplans"
-                title={`Floor Plans & Layout Diagrams (${(form.floor_plans || []).length} ${(form.floor_plans || []).length === 1 ? 'diagram' : 'diagrams'})`}
-                description="Upload architectural layouts and floor plan drawings (PNG, JPG, WebP, SVG). If you have PDF blueprints, convert pages to images and upload here."
               />
             )}
 
-            {/* TAB 7: PHOTO GALLERY */}
+            {/* TAB 7: PAYMENT PLANS */}
+            {activeTab === 'payment_plans' && (
+              <PaymentPlansEditor
+                plans={(form.payment_plans || []) as PaymentPlanItem[]}
+                onChange={(updatedPlans) => setForm({ ...form, payment_plans: updatedPlans })}
+                folder="asaheeb/payment-plans"
+              />
+            )}
+
+            {/* TAB 8: PHOTO GALLERY */}
             {activeTab === 'gallery' && (
               <ImageGalleryManager
                 images={form.images || []}
@@ -2734,7 +2714,7 @@ export default function ProjectEditorModal({
               />
             )}
 
-            {/* TAB 8: ACTIVITY LOG */}
+            {/* TAB 9: ACTIVITY LOG */}
             {activeTab === 'activity' && project && (
               <CmsActivityTimeline
                 entityType="PROJECT"
