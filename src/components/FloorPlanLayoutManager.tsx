@@ -21,6 +21,7 @@ import {
   FileText,
 } from 'lucide-react'
 import type { FloorPlanLayout } from '@/types/database'
+import { isCloudinaryUrl, deleteCloudinaryAsset } from '@/lib/cloudinary'
 
 export const LAYOUT_CATEGORIES = [
   { id: 'studio', labelEn: 'Studio', labelAr: 'استوديو' },
@@ -43,6 +44,10 @@ const FEATURE_PRESETS = [
   { en: 'Smart Home Automation', ar: 'نظام منزل ذكي' },
   { en: 'Storage Room', ar: 'مستودع' },
   { en: 'Balcony', ar: 'شرفة' },
+  { en: '2 Private Roofs', ar: 'سطحان خاصان' },
+  { en: 'Guest Majlis', ar: 'مجلس ضيوف' },
+  { en: 'Two entrances', ar: 'مدخلان' },
+  { en: 'Private Parking', ar: 'موقف خاص' },
 ]
 
 interface Props {
@@ -63,6 +68,7 @@ export default function FloorPlanLayoutManager({
   const [newFeatureEn, setNewFeatureEn] = useState('')
   const [newFeatureAr, setNewFeatureAr] = useState('')
   const [previewZoomUrl, setPreviewZoomUrl] = useState<string | null>(null)
+  const [notice, setNotice] = useState<string | null>(null)
 
   // Ensure Cloudinary script is loaded
   useEffect(() => {
@@ -116,12 +122,99 @@ export default function FloorPlanLayoutManager({
     }
   }
 
+  async function handleReplaceEditFormPhoto(newUrl: string) {
+    if (!editForm) return
+    const oldUrl = editForm.url
+    setEditForm({ ...editForm, url: newUrl })
+
+    if (oldUrl && oldUrl !== newUrl && isCloudinaryUrl(oldUrl)) {
+      setNotice('Deleting previous photo from Cloudinary...')
+      const res = await deleteCloudinaryAsset(oldUrl)
+      if (res.success) {
+        setNotice('Blueprint photo replaced & previous image deleted from Cloudinary.')
+      } else {
+        setNotice('Blueprint photo replaced. Cloudinary sync completed.')
+      }
+      setTimeout(() => setNotice(null), 4000)
+    } else {
+      setNotice('Blueprint photo replaced successfully.')
+      setTimeout(() => setNotice(null), 3000)
+    }
+  }
+
+  async function handleReplaceCardPhoto(index: number, newUrl: string) {
+    const oldUrl = layouts[index]?.url
+    const updated = [...layouts]
+    updated[index] = { ...updated[index], url: newUrl }
+    onChange(updated)
+
+    if (oldUrl && oldUrl !== newUrl && isCloudinaryUrl(oldUrl)) {
+      setNotice('Deleting previous photo from Cloudinary...')
+      const res = await deleteCloudinaryAsset(oldUrl)
+      if (res.success) {
+        setNotice('Blueprint photo replaced & previous image deleted from Cloudinary.')
+      } else {
+        setNotice('Blueprint photo replaced. Cloudinary sync completed.')
+      }
+      setTimeout(() => setNotice(null), 4000)
+    } else {
+      setNotice('Blueprint photo replaced successfully.')
+      setTimeout(() => setNotice(null), 3000)
+    }
+  }
+
+  function openCloudinaryReplaceWidget(options: { isEditForm?: boolean; cardIndex?: number }) {
+    if (typeof window === 'undefined') return
+
+    const cloudName = process.env.NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME || 'diwqmlpr'
+    const uploadPreset = process.env.NEXT_PUBLIC_CLOUDINARY_UPLOAD_PRESET || 'asaheeb_preset'
+
+    if (!(window as any).cloudinary) {
+      const script = document.createElement('script')
+      script.src = 'https://upload-widget.cloudinary.com/global/all.js'
+      script.async = true
+      script.onload = () => openCloudinaryReplaceWidget(options)
+      document.body.appendChild(script)
+      return
+    }
+
+    try {
+      const widget = (window as any).cloudinary.createUploadWidget(
+        {
+          cloudName,
+          uploadPreset,
+          folder,
+          sources: ['local', 'url', 'camera', 'google_drive', 'dropbox'],
+          multiple: false,
+          clientAllowedFormats: ['png', 'jpeg', 'jpg', 'webp', 'svg'],
+          resourceType: 'image',
+          theme: 'minimal',
+        },
+        (err: any, result: any) => {
+          if (!err && result && result.event === 'success') {
+            const uploadedUrl = result.info.secure_url
+            if (uploadedUrl) {
+              if (options.isEditForm) {
+                handleReplaceEditFormPhoto(uploadedUrl)
+              } else if (options.cardIndex !== undefined) {
+                handleReplaceCardPhoto(options.cardIndex, uploadedUrl)
+              }
+            }
+          }
+        }
+      )
+      widget.open()
+    } catch (e) {
+      console.error('Failed to open Cloudinary widget for replace:', e)
+    }
+  }
+
   function handleAddNewPlan(url: string) {
-    const defaultIndex = layouts.length + 1
+    const nextIndex = layouts.length + 1
     const newPlan: FloorPlanLayout = {
       url: url.trim(),
-      model_en: `Model ${defaultIndex}`,
-      model_ar: `نموذج ${defaultIndex}`,
+      model_en: `Model ${nextIndex}`,
+      model_ar: `نموذج ${nextIndex}`,
       category: '2_bed',
       category_en: '2 Bedrooms',
       category_ar: 'غرفتا نوم',
@@ -132,17 +225,34 @@ export default function FloorPlanLayoutManager({
       features_ar: ['مطبخ مفتوح', 'تراس خاص'],
       payment_plan_en: '',
       payment_plan_ar: '',
-      sort_order: defaultIndex,
-      captionEn: `Model ${defaultIndex} · 2 Bedrooms — 110 m²`,
-      captionAr: `نموذج ${defaultIndex} · غرفتا نوم — ١١٠ م²`,
+      sort_order: 1,
+      captionEn: `Model ${nextIndex} · 2 Bedrooms — 110 m²`,
+      captionAr: `نموذج ${nextIndex} · غرفتا نوم — ١١٠ م²`,
     }
 
+    // Preserve chronological order (appended at the end)
     const updated = [...layouts, newPlan]
+    const targetIndex = updated.length - 1
     onChange(updated)
 
     // Automatically open editor on the newly added plan
-    setEditingIndex(updated.length - 1)
+    setEditingIndex(targetIndex)
     setEditForm(newPlan)
+
+    setNotice(`Layout #${nextIndex} added! Jumped to edit specs.`)
+    setTimeout(() => setNotice(null), 6000)
+
+    // Auto-scroll modal down to the newly added item instantly and smoothly
+    setTimeout(() => {
+      const cardEl = document.getElementById(`layout-card-${targetIndex}`)
+      if (cardEl) {
+        cardEl.scrollIntoView({ behavior: 'smooth', block: 'center' })
+        const firstInput = cardEl.querySelector('input')
+        if (firstInput) {
+          firstInput.focus({ preventScroll: true })
+        }
+      }
+    }, 100)
   }
 
   function handleStartEdit(index: number) {
@@ -223,6 +333,12 @@ export default function FloorPlanLayoutManager({
     updated[editingIndex] = finalized
     onChange(updated)
 
+    // If URL was changed manually in form and original was on Cloudinary, delete old asset
+    const originalUrl = layouts[editingIndex]?.url
+    if (originalUrl && editForm.url && originalUrl !== editForm.url && isCloudinaryUrl(originalUrl)) {
+      deleteCloudinaryAsset(originalUrl)
+    }
+
     setEditingIndex(null)
     setEditForm(null)
   }
@@ -232,13 +348,17 @@ export default function FloorPlanLayoutManager({
     setEditForm(null)
   }
 
-  function handleDelete(index: number) {
+  async function handleDelete(index: number) {
     if (!confirm('Are you sure you want to remove this floor plan layout?')) return
+    const targetUrl = layouts[index]?.url
     const updated = layouts.filter((_, i) => i !== index)
     onChange(updated)
     if (editingIndex === index) {
       setEditingIndex(null)
       setEditForm(null)
+    }
+    if (targetUrl && isCloudinaryUrl(targetUrl)) {
+      deleteCloudinaryAsset(targetUrl)
     }
   }
 
@@ -283,6 +403,44 @@ export default function FloorPlanLayoutManager({
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+      {/* Dynamic Feedback Notice */}
+      {notice && (
+        <div
+          style={{
+            backgroundColor: '#F0FDF4',
+            border: '1px solid #86EFAC',
+            color: '#15803D',
+            fontSize: '12px',
+            fontWeight: 600,
+            padding: '10px 14px',
+            borderRadius: '8px',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: '8px',
+            boxShadow: '0 1px 2px rgba(0,0,0,0.05)',
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <CheckCircle2 size={16} style={{ color: '#16A34A', flexShrink: 0 }} />
+            <span>{notice}</span>
+          </div>
+          {editingIndex !== null && (
+            <button
+              type="button"
+              onClick={() => {
+                const el = document.getElementById(`layout-card-${editingIndex}`)
+                el?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+              }}
+              className="btn btn-xs btn-outline"
+              style={{ fontSize: '11px', color: '#15803D', borderColor: '#86EFAC', backgroundColor: '#FFFFFF' }}
+            >
+              Jump to Editing ↓
+            </button>
+          )}
+        </div>
+      )}
+
       {/* Top Header & Actions Bar */}
       <div
         style={{
@@ -418,6 +576,7 @@ export default function FloorPlanLayoutManager({
             return (
               <div
                 key={index}
+                id={`layout-card-${index}`}
                 style={{
                   background: isEditing ? '#F8FAFC' : '#FFFFFF',
                   border: isEditing ? '2px solid #2563EB' : '1px solid #E2E8F0',
@@ -430,42 +589,56 @@ export default function FloorPlanLayoutManager({
                 {!isEditing ? (
                   // CARD VIEW
                   <div style={{ display: 'flex', gap: '16px', alignItems: 'flex-start', flexWrap: 'wrap' }}>
-                    {/* Thumbnail */}
-                    <div
-                      style={{
-                        position: 'relative',
-                        width: '110px',
-                        height: '85px',
-                        borderRadius: '8px',
-                        overflow: 'hidden',
-                        backgroundColor: '#0F172A',
-                        border: '1px solid #CBD5E1',
-                        flexShrink: 0,
-                        cursor: 'pointer',
-                      }}
-                      onClick={() => setPreviewZoomUrl(item.url)}
-                      title="Click to enlarge blueprint"
-                    >
-                      <img
-                        src={item.url}
-                        alt={item.model_en || 'Floor plan'}
-                        style={{ width: '100%', height: '100%', objectFit: 'contain', background: '#F8FAFC' }}
-                      />
+                    {/* Thumbnail + Quick Change Photo */}
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '5px', alignItems: 'center' }}>
                       <div
                         style={{
-                          position: 'absolute',
-                          bottom: '4px',
-                          right: '4px',
-                          backgroundColor: 'rgba(0,0,0,0.65)',
-                          borderRadius: '4px',
-                          padding: '2px 4px',
-                          color: '#FFFFFF',
-                          display: 'flex',
-                          alignItems: 'center',
+                          position: 'relative',
+                          width: '110px',
+                          height: '85px',
+                          borderRadius: '8px',
+                          overflow: 'hidden',
+                          backgroundColor: '#0F172A',
+                          border: '1px solid #CBD5E1',
+                          flexShrink: 0,
+                          cursor: 'pointer',
                         }}
+                        onClick={() => setPreviewZoomUrl(item.url)}
+                        title="Click to enlarge blueprint"
                       >
-                        <Maximize2 size={11} />
+                        <img
+                          src={item.url}
+                          alt={item.model_en || 'Floor plan'}
+                          style={{ width: '100%', height: '100%', objectFit: 'contain', background: '#F8FAFC' }}
+                        />
+                        <div
+                          style={{
+                            position: 'absolute',
+                            bottom: '4px',
+                            right: '4px',
+                            backgroundColor: 'rgba(0,0,0,0.65)',
+                            borderRadius: '4px',
+                            padding: '2px 4px',
+                            color: '#FFFFFF',
+                            display: 'flex',
+                            alignItems: 'center',
+                          }}
+                        >
+                          <Maximize2 size={11} />
+                        </div>
                       </div>
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          openCloudinaryReplaceWidget({ cardIndex: index })
+                        }}
+                        className="btn btn-xs btn-outline"
+                        style={{ fontSize: '10.5px', padding: '1px 6px', display: 'flex', alignItems: 'center', gap: '3px', width: '100%', justifyContent: 'center' }}
+                        title="Upload a new photo to replace this blueprint (old image will be deleted from Cloudinary)"
+                      >
+                        <UploadCloud size={11} /> Change Photo
+                      </button>
                     </div>
 
                     {/* Info */}
@@ -642,6 +815,106 @@ export default function FloorPlanLayoutManager({
 
                     {editForm && (
                       <>
+                        {/* Blueprint Photo & Image Replacement Box */}
+                        <div
+                          style={{
+                            display: 'flex',
+                            gap: '14px',
+                            alignItems: 'center',
+                            background: '#F8FAFC',
+                            border: '1.5px solid #E2E8F0',
+                            borderRadius: '8px',
+                            padding: '12px 14px',
+                            flexWrap: 'wrap',
+                          }}
+                        >
+                          {/* Current Image Preview */}
+                          <div
+                            style={{
+                              position: 'relative',
+                              width: '110px',
+                              height: '85px',
+                              borderRadius: '6px',
+                              overflow: 'hidden',
+                              backgroundColor: '#0F172A',
+                              border: '1px solid #CBD5E1',
+                              flexShrink: 0,
+                              cursor: editForm.url ? 'pointer' : 'default',
+                            }}
+                            onClick={() => editForm.url && setPreviewZoomUrl(editForm.url)}
+                            title={editForm.url ? 'Click to enlarge blueprint' : undefined}
+                          >
+                            {editForm.url ? (
+                              <>
+                                <img
+                                  src={editForm.url}
+                                  alt={editForm.model_en || 'Blueprint'}
+                                  style={{ width: '100%', height: '100%', objectFit: 'contain', background: '#F8FAFC' }}
+                                />
+                                <div
+                                  style={{
+                                    position: 'absolute',
+                                    bottom: '3px',
+                                    right: '3px',
+                                    backgroundColor: 'rgba(0,0,0,0.65)',
+                                    borderRadius: '4px',
+                                    padding: '2px 4px',
+                                    color: '#FFFFFF',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                  }}
+                                >
+                                  <Maximize2 size={10} />
+                                </div>
+                              </>
+                            ) : (
+                              <span style={{ fontSize: '10px', color: '#94A3B8', display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', textAlign: 'center' }}>
+                                No image
+                              </span>
+                            )}
+                          </div>
+
+                          {/* Actions to Replace Photo */}
+                          <div style={{ flex: 1, minWidth: '220px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                              <span style={{ fontSize: '12px', fontWeight: 700, color: '#0F172A' }}>
+                                Blueprint Photo
+                              </span>
+                              {isCloudinaryUrl(editForm.url) && (
+                                <span style={{ fontSize: '10px', color: '#047857', backgroundColor: '#D1FAE5', border: '1px solid #A7F3D0', padding: '1px 6px', borderRadius: '4px', fontWeight: 600 }}>
+                                  Cloudinary Hosted
+                                </span>
+                              )}
+                            </div>
+                            <p style={{ margin: 0, fontSize: '11px', color: '#64748B' }}>
+                              Replace or change photo for this layout. The old image will automatically be deleted from Cloudinary.
+                            </p>
+                            <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap', marginTop: '2px' }}>
+                              <button
+                                type="button"
+                                onClick={() => openCloudinaryReplaceWidget({ isEditForm: true })}
+                                className="btn btn-xs btn-primary"
+                                style={{ display: 'inline-flex', alignItems: 'center', gap: '5px' }}
+                              >
+                                <UploadCloud size={13} /> Replace / Change Photo
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const newUrl = prompt('Enter new Blueprint Image URL:', editForm.url || '')
+                                  if (newUrl !== null && newUrl.trim() && newUrl.trim() !== editForm.url) {
+                                    handleReplaceEditFormPhoto(newUrl.trim())
+                                  }
+                                }}
+                                className="btn btn-xs btn-outline"
+                                style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}
+                              >
+                                <LinkIcon size={12} /> Change via URL
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+
                         {/* 1. Model Name & Category */}
                         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '10px' }}>
                           <div className="form-group" style={{ marginBottom: 0 }}>
@@ -952,6 +1225,15 @@ export default function FloorPlanLayoutManager({
                             className="form-input"
                             style={{ fontSize: '11px', flex: 1, padding: '3px 8px' }}
                           />
+                          <button
+                            type="button"
+                            onClick={() => openCloudinaryReplaceWidget({ isEditForm: true })}
+                            className="btn btn-xs btn-outline"
+                            style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', fontSize: '11px' }}
+                            title="Replace blueprint photo using Cloudinary"
+                          >
+                            <UploadCloud size={12} /> Replace
+                          </button>
                         </div>
                       </>
                     )}

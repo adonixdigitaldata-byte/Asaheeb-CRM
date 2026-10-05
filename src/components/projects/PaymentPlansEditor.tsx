@@ -13,8 +13,10 @@ import {
   X,
   CreditCard,
   FileText,
+  CheckCircle2,
 } from 'lucide-react'
 import type { PaymentPlanItem } from '@/types/database'
+import { isCloudinaryUrl, deleteCloudinaryAsset } from '@/lib/cloudinary'
 
 interface PaymentPlansEditorProps {
   plans: PaymentPlanItem[]
@@ -30,6 +32,7 @@ export default function PaymentPlansEditor({
   const [showUrlModal, setShowUrlModal] = useState(false)
   const [directUrl, setDirectUrl] = useState('')
   const [previewZoomUrl, setPreviewZoomUrl] = useState<string | null>(null)
+  const [notice, setNotice] = useState<string | null>(null)
 
   // Ensure Cloudinary script is loaded
   useEffect(() => {
@@ -93,7 +96,25 @@ export default function PaymentPlansEditor({
       caption_ar: '',
       sort_order: plans.length,
     }
-    onChange([...plans, newPlan])
+    // Preserve chronological order (appended at bottom)
+    const updated = [...plans, newPlan]
+    const targetIndex = updated.length - 1
+    onChange(updated.map((item, idx) => ({ ...item, sort_order: idx })))
+
+    setNotice(`Payment Schedule #${nextIndex} added! Jumped to newly added schedule.`)
+    setTimeout(() => setNotice(null), 6000)
+
+    // Auto-scroll modal down to the newly added schedule
+    setTimeout(() => {
+      const cardEl = document.getElementById(`payment-plan-card-${targetIndex}`)
+      if (cardEl) {
+        cardEl.scrollIntoView({ behavior: 'smooth', block: 'center' })
+        const firstInput = cardEl.querySelector('input')
+        if (firstInput) {
+          firstInput.focus({ preventScroll: true })
+        }
+      }
+    }, 100)
   }
 
   const addEmptyPlan = () => {
@@ -106,9 +127,76 @@ export default function PaymentPlansEditor({
     onChange(updated)
   }
 
-  const removePlan = (index: number) => {
+  async function handleReplacePlanPhoto(index: number, newUrl: string) {
+    const oldUrl = plans[index]?.url
+    const updated = [...plans]
+    updated[index] = { ...updated[index], url: newUrl }
+    onChange(updated)
+
+    if (oldUrl && oldUrl !== newUrl && isCloudinaryUrl(oldUrl)) {
+      setNotice('Deleting previous flyer from Cloudinary...')
+      const res = await deleteCloudinaryAsset(oldUrl)
+      if (res.success) {
+        setNotice('Payment flyer replaced & previous image deleted from Cloudinary.')
+      } else {
+        setNotice('Payment flyer replaced. Cloudinary sync completed.')
+      }
+      setTimeout(() => setNotice(null), 4000)
+    } else {
+      setNotice('Payment flyer replaced successfully.')
+      setTimeout(() => setNotice(null), 3000)
+    }
+  }
+
+  function openCloudinaryReplaceWidget(targetIndex: number) {
+    if (typeof window === 'undefined') return
+
+    const cloudName = process.env.NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME || 'diwqmlpr'
+    const uploadPreset = process.env.NEXT_PUBLIC_CLOUDINARY_UPLOAD_PRESET || 'asaheeb_preset'
+
+    if (!(window as any).cloudinary) {
+      const script = document.createElement('script')
+      script.src = 'https://upload-widget.cloudinary.com/global/all.js'
+      script.async = true
+      script.onload = () => openCloudinaryReplaceWidget(targetIndex)
+      document.body.appendChild(script)
+      return
+    }
+
+    try {
+      const widget = (window as any).cloudinary.createUploadWidget(
+        {
+          cloudName,
+          uploadPreset,
+          folder,
+          sources: ['local', 'url', 'camera', 'google_drive', 'dropbox'],
+          multiple: false,
+          clientAllowedFormats: ['png', 'jpeg', 'jpg', 'webp', 'svg', 'pdf'],
+          resourceType: 'image',
+          theme: 'minimal',
+        },
+        (err: any, result: any) => {
+          if (!err && result && result.event === 'success') {
+            const uploadedUrl = result.info.secure_url
+            if (uploadedUrl) {
+              handleReplacePlanPhoto(targetIndex, uploadedUrl)
+            }
+          }
+        }
+      )
+      widget.open()
+    } catch (e) {
+      console.error('Failed to open Cloudinary widget for flyer replace:', e)
+    }
+  }
+
+  const removePlan = async (index: number) => {
     if (!confirm('Are you sure you want to remove this payment plan schedule?')) return
+    const oldUrl = plans[index]?.url
     onChange(plans.filter((_, i) => i !== index))
+    if (oldUrl && isCloudinaryUrl(oldUrl)) {
+      deleteCloudinaryAsset(oldUrl)
+    }
   }
 
   const movePlan = (index: number, direction: 'up' | 'down') => {
@@ -123,6 +211,44 @@ export default function PaymentPlansEditor({
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+      {/* Dynamic Feedback Notice */}
+      {notice && (
+        <div
+          style={{
+            backgroundColor: '#F0FDF4',
+            border: '1px solid #86EFAC',
+            color: '#15803D',
+            fontSize: '12px',
+            fontWeight: 600,
+            padding: '10px 14px',
+            borderRadius: '8px',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: '8px',
+            boxShadow: '0 1px 2px rgba(0,0,0,0.05)',
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <CheckCircle2 size={16} style={{ color: '#16A34A', flexShrink: 0 }} />
+            <span>{notice}</span>
+          </div>
+          {plans.length > 0 && (
+            <button
+              type="button"
+              onClick={() => {
+                const el = document.getElementById(`payment-plan-card-${plans.length - 1}`)
+                el?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+              }}
+              className="btn btn-xs btn-outline"
+              style={{ fontSize: '11px', color: '#15803D', borderColor: '#86EFAC', backgroundColor: '#FFFFFF' }}
+            >
+              Jump to Latest ↓
+            </button>
+          )}
+        </div>
+      )}
+
       {/* Top Banner / Actions Bar */}
       <div
         style={{
@@ -263,6 +389,7 @@ export default function PaymentPlansEditor({
           {plans.map((plan, index) => (
             <div
               key={index}
+              id={`payment-plan-card-${index}`}
               style={{
                 background: '#FFFFFF',
                 border: '1px solid #E2E8F0',
@@ -276,52 +403,63 @@ export default function PaymentPlansEditor({
               }}
             >
               {/* Thumbnail / Image Preview */}
-              <div
-                style={{
-                  position: 'relative',
-                  width: '130px',
-                  height: '100px',
-                  borderRadius: '8px',
-                  overflow: 'hidden',
-                  backgroundColor: '#0F172A',
-                  border: '1px solid #CBD5E1',
-                  flexShrink: 0,
-                  cursor: plan.url ? 'pointer' : 'default',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                }}
-                onClick={() => plan.url && setPreviewZoomUrl(plan.url)}
-                title={plan.url ? 'Click to enlarge flyer' : undefined}
-              >
-                {plan.url ? (
-                  <>
-                    <img
-                      src={plan.url}
-                      alt={plan.title_en || 'Payment Plan'}
-                      style={{ width: '100%', height: '100%', objectFit: 'contain', background: '#F8FAFC' }}
-                    />
-                    <div
-                      style={{
-                        position: 'absolute',
-                        bottom: '4px',
-                        right: '4px',
-                        backgroundColor: 'rgba(0,0,0,0.65)',
-                        borderRadius: '4px',
-                        padding: '2px 4px',
-                        color: '#FFFFFF',
-                        display: 'flex',
-                        alignItems: 'center',
-                      }}
-                    >
-                      <Maximize2 size={11} />
-                    </div>
-                  </>
-                ) : (
-                  <span style={{ fontSize: '10px', color: '#94A3B8', textAlign: 'center', padding: '6px' }}>
-                    Enter image URL below
-                  </span>
-                )}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '5px', alignItems: 'center' }}>
+                <div
+                  style={{
+                    position: 'relative',
+                    width: '130px',
+                    height: '100px',
+                    borderRadius: '8px',
+                    overflow: 'hidden',
+                    backgroundColor: '#0F172A',
+                    border: '1px solid #CBD5E1',
+                    flexShrink: 0,
+                    cursor: plan.url ? 'pointer' : 'default',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                  }}
+                  onClick={() => plan.url && setPreviewZoomUrl(plan.url)}
+                  title={plan.url ? 'Click to enlarge flyer' : undefined}
+                >
+                  {plan.url ? (
+                    <>
+                      <img
+                        src={plan.url}
+                        alt={plan.title_en || 'Payment Plan'}
+                        style={{ width: '100%', height: '100%', objectFit: 'contain', background: '#F8FAFC' }}
+                      />
+                      <div
+                        style={{
+                          position: 'absolute',
+                          bottom: '4px',
+                          right: '4px',
+                          backgroundColor: 'rgba(0,0,0,0.65)',
+                          borderRadius: '4px',
+                          padding: '2px 4px',
+                          color: '#FFFFFF',
+                          display: 'flex',
+                          alignItems: 'center',
+                        }}
+                      >
+                        <Maximize2 size={11} />
+                      </div>
+                    </>
+                  ) : (
+                    <span style={{ fontSize: '10px', color: '#94A3B8', textAlign: 'center', padding: '6px' }}>
+                      Enter image URL below
+                    </span>
+                  )}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => openCloudinaryReplaceWidget(index)}
+                  className="btn btn-xs btn-outline"
+                  style={{ fontSize: '10.5px', padding: '1px 6px', display: 'flex', alignItems: 'center', gap: '3px', width: '100%', justifyContent: 'center' }}
+                  title="Upload new flyer to replace current image (old image will be deleted from Cloudinary)"
+                >
+                  <UploadCloud size={11} /> Change Flyer
+                </button>
               </div>
 
               {/* Form Fields */}
@@ -358,8 +496,6 @@ export default function PaymentPlansEditor({
                   </div>
                 </div>
 
-                
-
                 {/* Image URL Input */}
                 <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
                   <span style={{ fontSize: '11px', color: '#64748B', whiteSpace: 'nowrap' }}>Flyer Image URL:</span>
@@ -371,6 +507,15 @@ export default function PaymentPlansEditor({
                     className="form-input"
                     style={{ fontSize: '11px', flex: 1, padding: '3px 8px' }}
                   />
+                  <button
+                    type="button"
+                    onClick={() => openCloudinaryReplaceWidget(index)}
+                    className="btn btn-xs btn-outline"
+                    style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', fontSize: '11px' }}
+                    title="Replace flyer using Cloudinary"
+                  >
+                    <UploadCloud size={12} /> Replace
+                  </button>
                 </div>
               </div>
 
