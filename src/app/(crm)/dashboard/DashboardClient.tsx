@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
@@ -217,6 +217,10 @@ export default function DashboardClient({
   const isAdmin = profile.role === 'ADMIN'
   const isManagerOrAdmin = profile.role === 'ADMIN' || profile.role === 'SALES_MANAGER'
   const [showTVModal, setShowTVModal] = useState(false)
+  const showTVModalRef = useRef(showTVModal)
+  useEffect(() => {
+    showTVModalRef.current = showTVModal
+  }, [showTVModal])
   const [adminTab, setAdminTab] = useState<'leaderboard' | 'radar' | 'consistency'>('leaderboard')
 
   const closedStageIds = stages.filter((s) => CLOSED_STAGE_KEYS.includes(s.key)).map((s) => s.id)
@@ -251,31 +255,44 @@ export default function DashboardClient({
   const maxStageCount = Math.max(...stages.map((s) => stageCounts[s.id] ?? 0), 1)
 
   // Frontend Auto-refresh: Sync on tab switch, window focus, 10-min interval & Supabase WebSocket
+  // (Skips if TV mode is open, since TV mode manages its own lightweight 5-minute poller)
   useEffect(() => {
     function handleVisibilityOrFocus() {
-      if (document.visibilityState === 'visible') {
+      if (document.visibilityState === 'visible' && !showTVModalRef.current) {
         router.refresh()
       }
     }
     window.addEventListener('focus', handleVisibilityOrFocus)
     document.addEventListener('visibilitychange', handleVisibilityOrFocus)
 
-    // Gentle 10-minute fallback interval (only when active)
+    // Gentle 10-minute fallback interval (only when active and TV not open)
     const interval = setInterval(() => {
-      if (document.visibilityState === 'visible') {
+      if (document.visibilityState === 'visible' && !showTVModalRef.current) {
         router.refresh()
       }
     }, 10 * 60 * 1000)
 
-    // Direct Supabase Realtime WebSocket (free, does not invoke Vercel serverless)
+    // Direct Supabase Realtime WebSocket with debounce
+    let realtimeDebounceTimer: NodeJS.Timeout | null = null
+    const scheduleDebouncedRefresh = () => {
+      if (showTVModalRef.current) return
+      if (realtimeDebounceTimer) return
+      realtimeDebounceTimer = setTimeout(() => {
+        realtimeDebounceTimer = null
+        if (!showTVModalRef.current) {
+          router.refresh()
+        }
+      }, 15000)
+    }
+
     const supabase = createClient()
     const channel = supabase
       .channel('dashboard-realtime-sync')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'lead_followups' }, () => {
-        router.refresh()
+        scheduleDebouncedRefresh()
       })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'lead_activities' }, () => {
-        router.refresh()
+        scheduleDebouncedRefresh()
       })
       .subscribe()
 
@@ -283,6 +300,7 @@ export default function DashboardClient({
       window.removeEventListener('focus', handleVisibilityOrFocus)
       document.removeEventListener('visibilitychange', handleVisibilityOrFocus)
       clearInterval(interval)
+      if (realtimeDebounceTimer) clearTimeout(realtimeDebounceTimer)
       supabase.removeChannel(channel)
     }
   }, [router])
@@ -2096,11 +2114,6 @@ export default function DashboardClient({
           onClose={() => setShowTVModal(false)}
           agentStats={agentHealthStats}
           totalLeadsCount={totalLeads}
-          onRefresh={() => {
-            setTimeout(() => {
-              router.refresh()
-            }, 0)
-          }}
         />
       )}
     </div>

@@ -30,7 +30,10 @@ import {
   LayoutGrid,
   Table as TableIcon,
   Lock,
+  KeyRound,
+  ShieldCheck,
 } from 'lucide-react'
+import SecurityPinGuard from '@/components/SecurityPinGuard'
 import type { Profile } from '@/types/database'
 import { Expense, ExpenseCategory, ExpenseCostCenter, ExpensePaymentMethod, ExpenseStatus, ExpenseSummaryStats } from '@/types/expense'
 import { saveExpense, deleteExpense } from '@/lib/expenseService'
@@ -506,19 +509,29 @@ export default function ExpensesClient({ currentProfile, initialExpenses }: Prop
   }
 
   return (
-    <div
-      className="expenses-page-wrapper"
-      style={{
-        padding: '20px 24px',
-        maxWidth: '1600px',
-        width: '100%',
-        margin: '0 auto',
-        display: 'flex',
-        flexDirection: 'column',
-        gap: '20px',
-        boxSizing: 'border-box',
-      }}
+    <SecurityPinGuard
+      pinType="expenses"
+      profile={currentProfile}
+      title="Executive Expense Tracker Vault"
+      subtitle="Confidential operating expenses, ledger balances, and payment disbursements are protected."
+      sectionName="Expenses"
+      backUrl="/dashboard"
+      backLabel="Back to Dashboard"
     >
+      {({ onLock, onChangePin }) => (
+        <div
+          className="expenses-page-wrapper"
+          style={{
+            padding: '20px 24px',
+            maxWidth: '1600px',
+            width: '100%',
+            margin: '0 auto',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '20px',
+            boxSizing: 'border-box',
+          }}
+        >
       {/* Mobile Responsive & Smooth Touch Scrolling CSS */}
       <style>{`
         /* Smooth horizontal scrollbar styling */
@@ -658,6 +671,46 @@ export default function ExpensesClient({ currentProfile, initialExpenses }: Prop
 
         {/* Action Buttons */}
         <div className="expenses-header-actions" style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+          <button
+            onClick={onChangePin}
+            style={{
+              padding: '8px 12px',
+              borderRadius: '8px',
+              border: '1px solid #CBD5E1',
+              backgroundColor: '#FFFFFF',
+              color: '#334155',
+              fontSize: '12px',
+              fontWeight: 600,
+              cursor: 'pointer',
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '6px',
+            }}
+            title="Change Expenses Security PIN"
+          >
+            <KeyRound size={13} color="#0284C7" /> Change PIN
+          </button>
+
+          <button
+            onClick={onLock}
+            style={{
+              padding: '8px 12px',
+              borderRadius: '8px',
+              border: '1px solid #FECACA',
+              backgroundColor: '#FEF2F2',
+              color: '#DC2626',
+              fontSize: '12px',
+              fontWeight: 700,
+              cursor: 'pointer',
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '6px',
+            }}
+            title="Lock Expenses Vault"
+          >
+            <Lock size={13} /> Lock
+          </button>
+
           <button
             onClick={() => setIsFinancialReportOpen(true)}
             style={{
@@ -2216,5 +2269,7 @@ export default function ExpensesClient({ currentProfile, initialExpenses }: Prop
         stats={stats}
       />
     </div>
+      )}
+    </SecurityPinGuard>
   )
 }

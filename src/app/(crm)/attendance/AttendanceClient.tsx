@@ -34,7 +34,10 @@ import {
   Check,
   X,
   Trash2,
+  Lock,
+  KeyRound,
 } from 'lucide-react'
+import SecurityPinGuard from '@/components/SecurityPinGuard'
 import {
   CompanyLocation,
   AttendanceLog,
@@ -1051,9 +1054,20 @@ export default function AttendanceClient({ profile }: AttendanceClientProps) {
   }
 
   return (
-    <div style={{ width: '100%', minHeight: '100%' }}>
-      {/* 1. Standard CRM Page Header */}
-      <div className="page-header" style={{ marginBottom: 20 }}>
+    <SecurityPinGuard
+      pinType="attendance"
+      profile={profile}
+      enabled={isAdmin}
+      title="Executive Attendance & Workforce Vault"
+      subtitle="Confidential GPS time-clock records, hours audits, and leave balances are protected."
+      sectionName="Attendance"
+      backUrl="/dashboard"
+      backLabel="Back to Dashboard"
+    >
+      {({ onLock, onChangePin }) => (
+        <div style={{ width: '100%', minHeight: '100%' }}>
+          {/* 1. Standard CRM Page Header */}
+          <div className="page-header" style={{ marginBottom: 20 }}>
         <div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
             <span
@@ -1115,6 +1129,38 @@ export default function AttendanceClient({ profile }: AttendanceClientProps) {
               <Briefcase size={15} style={{ color: '#2563EB' }} /> Work Policy ({workPolicy.daily_expected_hours}h/day)
             </button>
           )}
+
+          <button
+            onClick={onChangePin}
+            className="btn btn-outline"
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 6,
+              fontWeight: 600,
+              backgroundColor: '#FFFFFF',
+            }}
+            title="Change Attendance Security PIN"
+          >
+            <KeyRound size={15} style={{ color: '#0284C7' }} /> Change PIN
+          </button>
+
+          <button
+            onClick={onLock}
+            className="btn btn-outline"
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 6,
+              fontWeight: 700,
+              backgroundColor: '#FEF2F2',
+              color: '#DC2626',
+              borderColor: '#FECACA',
+            }}
+            title="Lock Attendance Vault"
+          >
+            <Lock size={15} /> Lock
+          </button>
 
           {/* Admin Office Location Button */}
           {isAdmin && (
@@ -5143,5 +5189,7 @@ export default function AttendanceClient({ profile }: AttendanceClientProps) {
         onCancel={() => setDeleteConfirmModal({ isOpen: false, record: null, isDedicatedReq: false })}
       />
     </div>
+      )}
+    </SecurityPinGuard>
   )
 }

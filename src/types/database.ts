@@ -28,6 +28,9 @@ export interface Profile {
   created_at: string
   updated_at: string
   payroll_pin?: string | null
+  expenses_pin?: string | null
+  attendance_pin?: string | null
+  commissions_pin?: string | null
   iqama_no?: string | null
   iqama_expiry_date?: string | null
   face_descriptor?: number[] | null

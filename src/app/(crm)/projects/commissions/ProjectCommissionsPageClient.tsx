@@ -24,8 +24,11 @@ import {
   ChevronRight,
   ShieldCheck,
   CheckCircle2,
-  Download
+  Download,
+  Lock,
+  KeyRound,
 } from 'lucide-react'
+import SecurityPinGuard from '@/components/SecurityPinGuard'
 import { SaudiRiyalIcon } from '@/components/SaudiRiyalIcon'
 import { createClient } from '@/lib/supabase/client'
 import type { Project, Profile, ProjectCommission } from '@/types/database'
@@ -255,10 +258,20 @@ export default function ProjectCommissionsPageClient({ profile }: Props) {
   }
 
   return (
-    <div className="page-container" style={{ minHeight: '100vh', backgroundColor: 'var(--bg-main, #F8FAFC)' }}>
-      {/* Top Breadcrumb & Actions Bar */}
-      <div
-        className="page-header"
+    <SecurityPinGuard
+      pinType="commissions"
+      profile={profile}
+      title="Executive Commission Hub Vault"
+      subtitle="Confidential transaction ledgers, unit sales margins, and broker payouts are protected."
+      sectionName="Commissions"
+      backUrl="/projects"
+      backLabel="Back to Projects CMS"
+    >
+      {({ onLock, onChangePin }) => (
+        <div className="page-container" style={{ minHeight: '100vh', backgroundColor: 'var(--bg-main, #F8FAFC)' }}>
+          {/* Top Breadcrumb & Actions Bar */}
+          <div
+            className="page-header"
         style={{
           display: 'flex',
           alignItems: 'center',
@@ -316,6 +329,36 @@ export default function ProjectCommissionsPageClient({ profile }: Props) {
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+          <button
+            type="button"
+            onClick={onChangePin}
+            className="btn btn-outline btn-sm"
+            style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}
+            title="Change Commission Hub Security PIN"
+          >
+            <KeyRound size={14} color="#0284C7" />
+            <span>Change PIN</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={onLock}
+            className="btn btn-outline btn-sm"
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '6px',
+              color: '#DC2626',
+              borderColor: '#FECACA',
+              backgroundColor: '#FEF2F2',
+              fontWeight: 700,
+            }}
+            title="Lock Commission Hub Vault"
+          >
+            <Lock size={14} />
+            <span>Lock</span>
+          </button>
+
           <button
             type="button"
             onClick={fetchData}
@@ -1264,5 +1307,7 @@ export default function ProjectCommissionsPageClient({ profile }: Props) {
         />
       )}
     </div>
+      )}
+    </SecurityPinGuard>
   )
 }

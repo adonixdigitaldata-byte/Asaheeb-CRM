@@ -37,6 +37,7 @@ import {
   ShieldCheck,
   Flame,
   Clock,
+  Calendar,
 } from 'lucide-react'
 import { SaudiRiyalIcon } from '@/components/SaudiRiyalIcon'
 import { createClient } from '@/lib/supabase/client'
@@ -84,6 +85,9 @@ export default function ProjectsClient({ profile }: Props) {
   const [deleting, setDeleting] = useState(false)
   const [reorderModalOpen, setReorderModalOpen] = useState(false)
   const [allCommissions, setAllCommissions] = useState<ProjectCommission[]>([])
+  const [commissionPeriod, setCommissionPeriod] = useState<'ALL' | 'MONTH' | 'WEEK' | 'DAY' | 'CUSTOM'>('ALL')
+  const [customStartDate, setCustomStartDate] = useState<string>('')
+  const [customEndDate, setCustomEndDate] = useState<string>('')
 
   const fetchCommissions = useCallback(async () => {
     if (profile?.role !== 'ADMIN') return
@@ -113,14 +117,58 @@ export default function ProjectsClient({ profile }: Props) {
     fetchProjects()
   }, [fetchProjects])
 
+  // Filtered commissions based on selected time horizon (Day, Week, Month, All Time)
+  const filteredCommissions = useMemo(() => {
+    if (commissionPeriod === 'ALL') return allCommissions
+
+    const now = new Date()
+    const todayStr = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Asia/Riyadh',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).format(now) // 'YYYY-MM-DD'
+
+    // Week start (Sunday in Saudi Arabia)
+    const dayOfWeek = now.getDay()
+    const weekStart = new Date(now)
+    weekStart.setDate(now.getDate() - dayOfWeek)
+    weekStart.setHours(0, 0, 0, 0)
+    const weekStartIso = weekStart.toISOString().split('T')[0]
+
+    // Current month start 'YYYY-MM'
+    const monthStartIso = todayStr.slice(0, 7)
+
+    return allCommissions.filter((c) => {
+      const dateStr = (c.sale_date || c.created_at || '').split('T')[0]
+      if (!dateStr) return false
+
+      if (commissionPeriod === 'DAY') {
+        return dateStr === todayStr || dateStr === now.toISOString().split('T')[0]
+      }
+      if (commissionPeriod === 'WEEK') {
+        return dateStr >= weekStartIso
+      }
+      if (commissionPeriod === 'MONTH') {
+        return dateStr.startsWith(monthStartIso)
+      }
+      if (commissionPeriod === 'CUSTOM') {
+        if (customStartDate && dateStr < customStartDate) return false
+        if (customEndDate && dateStr > customEndDate) return false
+        return true
+      }
+      return true
+    })
+  }, [allCommissions, commissionPeriod, customStartDate, customEndDate])
+
   // Aggregate Commission Metrics
   const commissionMetrics = useMemo(() => {
-    const totalEarned = allCommissions.reduce((sum, c) => sum + Number(c.commission_amount || 0), 0)
-    const totalUnitsSold = allCommissions.length
+    const totalEarned = filteredCommissions.reduce((sum, c) => sum + Number(c.commission_amount || 0), 0)
+    const totalUnitsSold = filteredCommissions.length
 
     // Group by project_id
     const projectTotals: Record<string, { total: number; count: number }> = {}
-    allCommissions.forEach((c) => {
+    filteredCommissions.forEach((c) => {
       if (!projectTotals[c.project_id]) {
         projectTotals[c.project_id] = { total: 0, count: 0 }
       }
@@ -142,6 +190,22 @@ export default function ProjectsClient({ profile }: Props) {
     })
 
     const avgPerDeal = totalUnitsSold > 0 ? totalEarned / totalUnitsSold : 0
+    const periodLabel =
+      commissionPeriod === 'DAY'
+        ? 'Today'
+        : commissionPeriod === 'WEEK'
+        ? 'This Week'
+        : commissionPeriod === 'MONTH'
+        ? 'This Month'
+        : commissionPeriod === 'CUSTOM'
+        ? customStartDate && customEndDate
+          ? `${customStartDate} to ${customEndDate}`
+          : customStartDate
+          ? `From ${customStartDate}`
+          : customEndDate
+          ? `Until ${customEndDate}`
+          : 'Custom Range'
+        : 'All Time'
 
     return {
       totalEarned,
@@ -150,8 +214,9 @@ export default function ProjectsClient({ profile }: Props) {
       topProjectAmount,
       topProjectUnits,
       avgPerDeal,
+      periodLabel,
     }
-  }, [allCommissions, projects])
+  }, [filteredCommissions, projects, commissionPeriod, customStartDate, customEndDate])
 
   // Toggle publish status
   async function handleTogglePublish(project: Project) {
@@ -429,26 +494,169 @@ export default function ProjectsClient({ profile }: Props) {
       <div className="page-body" style={{ paddingBottom: '30px' }}>
         {/* Admin Commission Performance KPI Cards (Clickable to navigate to Commissions Page) */}
         {profile?.role === 'ADMIN' && (
-          <div
-            style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
-              gap: '14px',
-              marginBottom: '20px',
-            }}
-          >
-            {/* Card 1: Total Commissions Earned */}
+          <div style={{ marginBottom: '20px' }}>
+            {/* Filter Toolbar for Commission Analytics */}
             <div
-              className="card"
-              onClick={() => router.push('/projects/commissions')}
               style={{
-                padding: '16px 18px',
-                background: 'linear-gradient(135deg, #ECFDF5 0%, #D1FAE5 100%)',
-                border: '1px solid #A7F3D0',
-                cursor: 'pointer',
-                transition: 'all 0.18s ease',
-                position: 'relative',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                flexWrap: 'wrap',
+                gap: '10px',
+                marginBottom: '10px',
               }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <span
+                  style={{
+                    fontSize: '11px',
+                    fontWeight: 800,
+                    textTransform: 'uppercase',
+                    letterSpacing: '0.06em',
+                    color: '#065F46',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '5px',
+                  }}
+                >
+                  <BarChart3 size={14} /> Commission Performance
+                </span>
+                <span style={{ fontSize: '11.5px', color: '#64748B', fontWeight: 600 }}>
+                  • {commissionMetrics.periodLabel}
+                </span>
+              </div>
+
+              {/* Day / Week / Month / Custom / All Time Tabs */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                <div
+                  style={{
+                    display: 'inline-flex',
+                    backgroundColor: '#F1F5F9',
+                    padding: '3px',
+                    borderRadius: '8px',
+                    border: '1px solid #E2E8F0',
+                    gap: '2px',
+                  }}
+                >
+                  {(
+                    [
+                      { key: 'ALL', label: 'All Time' },
+                      { key: 'MONTH', label: 'This Month' },
+                      { key: 'WEEK', label: 'This Week' },
+                      { key: 'DAY', label: 'Today' },
+                      { key: 'CUSTOM', label: 'Custom Range' },
+                    ] as const
+                  ).map((t) => (
+                    <button
+                      key={t.key}
+                      type="button"
+                      onClick={() => setCommissionPeriod(t.key)}
+                      style={{
+                        padding: '4px 12px',
+                        borderRadius: '6px',
+                        fontSize: '11.5px',
+                        fontWeight: commissionPeriod === t.key ? 700 : 500,
+                        border: 'none',
+                        cursor: 'pointer',
+                        transition: 'all 0.15s ease',
+                        backgroundColor: commissionPeriod === t.key ? '#FFFFFF' : 'transparent',
+                        color: commissionPeriod === t.key ? '#065F46' : '#64748B',
+                        boxShadow: commissionPeriod === t.key ? '0 1px 3px rgba(0,0,0,0.08)' : 'none',
+                      }}
+                    >
+                      {t.label}
+                    </button>
+                  ))}
+                </div>
+
+                {/* Custom Date Range Inputs */}
+                {commissionPeriod === 'CUSTOM' && (
+                  <div
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '8px',
+                      backgroundColor: '#FFFFFF',
+                      padding: '4px 10px',
+                      borderRadius: '8px',
+                      border: '1px solid #CBD5E1',
+                      fontSize: '12px',
+                    }}
+                  >
+                    <Calendar size={13} color="#059669" />
+                    <span style={{ color: '#475569', fontWeight: 600, fontSize: '11px' }}>From:</span>
+                    <input
+                      type="date"
+                      value={customStartDate}
+                      onChange={(e) => setCustomStartDate(e.target.value)}
+                      style={{
+                        border: '1px solid #CBD5E1',
+                        borderRadius: '6px',
+                        padding: '2px 6px',
+                        fontSize: '11.5px',
+                        color: '#0F172A',
+                        outline: 'none',
+                      }}
+                    />
+                    <span style={{ color: '#475569', fontWeight: 600, fontSize: '11px' }}>To:</span>
+                    <input
+                      type="date"
+                      value={customEndDate}
+                      onChange={(e) => setCustomEndDate(e.target.value)}
+                      style={{
+                        border: '1px solid #CBD5E1',
+                        borderRadius: '6px',
+                        padding: '2px 6px',
+                        fontSize: '11.5px',
+                        color: '#0F172A',
+                        outline: 'none',
+                      }}
+                    />
+                    {(customStartDate || customEndDate) && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setCustomStartDate('')
+                          setCustomEndDate('')
+                        }}
+                        style={{
+                          border: 'none',
+                          background: 'none',
+                          color: '#94A3B8',
+                          cursor: 'pointer',
+                          padding: '2px',
+                          display: 'flex',
+                          alignItems: 'center',
+                        }}
+                        title="Clear custom dates"
+                      >
+                        <X size={13} />
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
+                gap: '14px',
+              }}
+            >
+              {/* Card 1: Total Commissions Earned */}
+              <div
+                className="card"
+                onClick={() => router.push('/projects/commissions')}
+                style={{
+                  padding: '16px 18px',
+                  background: 'linear-gradient(135deg, #ECFDF5 0%, #D1FAE5 100%)',
+                  border: '1px solid #A7F3D0',
+                  cursor: 'pointer',
+                  transition: 'all 0.18s ease',
+                  position: 'relative',
+                }}
               onMouseEnter={(e) => {
                 ;(e.currentTarget as HTMLElement).style.transform = 'translateY(-2px)'
                 ;(e.currentTarget as HTMLElement).style.boxShadow = '0 6px 16px rgba(16, 185, 129, 0.2)'
@@ -598,7 +806,8 @@ export default function ProjectsClient({ profile }: Props) {
               </div>
             </div>
           </div>
-        )}
+        </div>
+      )}
 
         {/* Quick Filter Pills */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap', marginBottom: '12px' }}>
@@ -1230,28 +1439,6 @@ export default function ProjectsClient({ profile }: Props) {
                             <ShieldCheck size={14} />
                           </button>
 
-                          {profile?.role === 'ADMIN' && (
-                            <button
-                              type="button"
-                              onClick={() => setCommissioningProject(project)}
-                              className="btn btn-outline btn-sm"
-                              style={{
-                                fontSize: '11.5px',
-                                padding: '3px 8px',
-                                display: 'inline-flex',
-                                alignItems: 'center',
-                                gap: '4px',
-                                borderColor: '#10B981',
-                                color: '#059669',
-                                backgroundColor: '#ECFDF5',
-                                fontWeight: 600,
-                              }}
-                              title="Configure Sold Layouts & Commission"
-                            >
-                              <SaudiRiyalIcon size={11} />
-                              <span>Sales</span>
-                            </button>
-                          )}
 
                           {project.is_published && (
                             <a

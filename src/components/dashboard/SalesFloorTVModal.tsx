@@ -36,10 +36,20 @@ export default function SalesFloorTVModal({
   totalLeadsCount,
   onRefresh,
 }: Props) {
+  const REFRESH_INTERVAL_SECONDS = 300 // 5 minutes refresh as requested
+
+  const [currentAgentStats, setCurrentAgentStats] = useState<AgentHealthStat[]>(agentStats || [])
   const [time, setTime] = useState('')
   const [isFullscreen, setIsFullscreen] = useState(false)
-  const [secondsUntilRefresh, setSecondsUntilRefresh] = useState(30)
+  const [secondsUntilRefresh, setSecondsUntilRefresh] = useState(REFRESH_INTERVAL_SECONDS)
   const [isRefreshing, setIsRefreshing] = useState(false)
+
+  // Sync state if initial props change
+  useEffect(() => {
+    if (agentStats && agentStats.length > 0) {
+      setCurrentAgentStats(agentStats)
+    }
+  }, [agentStats])
 
   // Live Clock (Local / Riyadh)
   useEffect(() => {
@@ -60,25 +70,39 @@ export default function SalesFloorTVModal({
     return () => clearInterval(interval)
   }, [isOpen])
 
-  // Countdown timer for display
+  // Fetch updated TV stats via dedicated lightweight API route (no full-page Next.js refresh)
+  const fetchTvStats = async () => {
+    setIsRefreshing(true)
+    try {
+      const res = await fetch('/api/dashboard/tv-stats', { cache: 'no-store' })
+      if (res.ok) {
+        const json = await res.json()
+        if (json.agentHealthStats && Array.isArray(json.agentHealthStats)) {
+          setCurrentAgentStats(json.agentHealthStats)
+        }
+      }
+    } catch (err) {
+      console.error('Failed to auto-refresh TV stats:', err)
+    } finally {
+      setIsRefreshing(false)
+      setSecondsUntilRefresh(REFRESH_INTERVAL_SECONDS)
+    }
+  }
+
+  // Countdown timer for display & auto-refresh every 5 minutes (300 seconds)
   useEffect(() => {
     if (!isOpen) return
     const countdown = setInterval(() => {
-      setSecondsUntilRefresh((prev) => (prev <= 1 ? 30 : prev - 1))
+      setSecondsUntilRefresh((prev) => {
+        if (prev <= 1) {
+          fetchTvStats()
+          return REFRESH_INTERVAL_SECONDS
+        }
+        return prev - 1
+      })
     }, 1000)
     return () => clearInterval(countdown)
   }, [isOpen])
-
-  // Safe auto-refresh trigger outside state updaters
-  useEffect(() => {
-    if (!isOpen || !onRefresh) return
-    const refreshTimer = setInterval(() => {
-      setIsRefreshing(true)
-      onRefresh()
-      setTimeout(() => setIsRefreshing(false), 800)
-    }, 30000)
-    return () => clearInterval(refreshTimer)
-  }, [isOpen, onRefresh])
 
   // ESC key to close
   useEffect(() => {
@@ -104,27 +128,24 @@ export default function SalesFloorTVModal({
   }
 
   const handleManualRefresh = () => {
-    setIsRefreshing(true)
-    if (onRefresh) onRefresh()
-    setSecondsUntilRefresh(30)
-    setTimeout(() => setIsRefreshing(false), 800)
+    fetchTvStats()
   }
 
   if (!isOpen) return null
 
   // Sort agents by today's performance descending
-  const sortedAgents = [...agentStats].sort((a, b) => b.doneToday - a.doneToday)
+  const sortedAgents = [...currentAgentStats].sort((a, b) => b.doneToday - a.doneToday)
 
   // Aggregates
-  const totalDoneToday = agentStats.reduce((acc, a) => acc + a.doneToday, 0)
-  const agentsMeetingTarget = agentStats.filter((a) => a.doneToday >= (a.target || 35)).length
-  const totalIdleLeads = agentStats.reduce((acc, a) => acc + a.idleLeads, 0)
-  const totalOverdue = agentStats.reduce((acc, a) => acc + a.overdueFollowups, 0)
-  const totalMeetingsToday = agentStats.reduce((acc, a) => acc + (a.meetingsBookedToday || 0), 0)
+  const totalDoneToday = currentAgentStats.reduce((acc, a) => acc + a.doneToday, 0)
+  const agentsMeetingTarget = currentAgentStats.filter((a) => a.doneToday >= (a.target || 35)).length
+  const totalIdleLeads = currentAgentStats.reduce((acc, a) => acc + a.idleLeads, 0)
+  const totalOverdue = currentAgentStats.reduce((acc, a) => acc + a.overdueFollowups, 0)
+  const totalMeetingsToday = currentAgentStats.reduce((acc, a) => acc + (a.meetingsBookedToday || 0), 0)
   const topAgent = sortedAgents[0]
 
   const attainmentRate =
-    agentStats.length > 0 ? Math.round((agentsMeetingTarget / agentStats.length) * 100) : 0
+    currentAgentStats.length > 0 ? Math.round((agentsMeetingTarget / currentAgentStats.length) * 100) : 0
 
   // Ticker items for animated broadcast ribbon
   const tickerItems = [
@@ -307,7 +328,10 @@ export default function SalesFloorTVModal({
                   color: isRefreshing ? '#0284C7' : '#64748B',
                 }}
               />
-              <span>{secondsUntilRefresh}s</span>
+              <span>
+                {Math.floor(secondsUntilRefresh / 60)}:
+                {(secondsUntilRefresh % 60).toString().padStart(2, '0')}
+              </span>
             </button>
 
             <button
@@ -474,7 +498,7 @@ export default function SalesFloorTVModal({
                 {attainmentRate}%
               </span>
               <span style={{ fontSize: 13, color: '#334155', fontWeight: 700 }}>
-                ({agentsMeetingTarget} of {agentStats.length} agents on target)
+                ({agentsMeetingTarget} of {currentAgentStats.length} agents on target)
               </span>
             </div>
             <div
@@ -546,7 +570,7 @@ export default function SalesFloorTVModal({
               </span>
             </div>
             <div style={{ fontSize: 11.5, color: '#15803D', fontWeight: 600, marginTop: 10 }}>
-              🎯 Target Pace: {agentStats.length * 35} total client touches
+              🎯 Target Pace: {currentAgentStats.length * 35} total client touches
             </div>
           </div>
 
