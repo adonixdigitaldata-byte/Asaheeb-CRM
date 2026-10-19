@@ -1240,3 +1240,76 @@ textarea {
   border-left: 4px solid #DC2626 !important;
   animation: pulse-idle-border 2.5s infinite ease-in-out;
 }
+
+/* ============================================================
+   GLOBAL PRINT RULES (Official A4 Legal Contracts & Paperwork)
+   ============================================================ */
+@media print {
+  @page {
+    size: A4 portrait;
+    margin: 12mm 15mm;
+  }
+
+  html,
+  body {
+    background: #ffffff !important;
+    color: #000000 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    width: 100% !important;
+    height: auto !important;
+    overflow: visible !important;
+    font-size: 11pt !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  .sidebar,
+  aside,
+  header,
+  .crm-mobile-header,
+  .no-print,
+  .page-header-wrapper,
+  .mobile-close-btn,
+  button,
+  .btn,
+  nav {
+    display: none !important;
+  }
+
+  .app-shell,
+  .main-content,
+  .page-container {
+    display: block !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    height: auto !important;
+    overflow: visible !important;
+    border: none !important;
+    box-shadow: none !important;
+    background: #ffffff !important;
+  }
+
+  .contract-paper {
+    box-shadow: none !important;
+    border: none !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    page-break-inside: auto !important;
+  }
+
+  .contract-clause {
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
+  }
+
+  .contract-signatures {
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
+  }
+}
+

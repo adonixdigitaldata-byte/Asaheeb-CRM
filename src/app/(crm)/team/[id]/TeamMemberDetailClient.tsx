@@ -9,9 +9,12 @@ import {
   ArrowLeft, Users, Phone, Mail, Calendar,
   FileText, Clock, CheckCircle2, ChevronRight, ChevronLeft,
   Eye, Printer, Shield, Activity, AlertCircle, History, GitCommit,
-  Laptop, Smartphone, CreditCard, Package, FolderArchive
+  Laptop, Smartphone, CreditCard, Package, FolderArchive,
+  FileCheck, Edit, Loader2
 } from 'lucide-react'
 import EmployeeDocumentsTab from '@/components/team/EmployeeDocumentsTab'
+import type { EmployeeContract } from '@/types/contract'
+import { formatCurrency, formatDate } from '@/lib/utils'
 
 interface Props {
   member: Profile
@@ -91,9 +94,35 @@ export default function TeamMemberDetailClient({
   initialDocuments = [],
   initialCustomRecords = [],
 }: Props) {
-  const [activeTab, setActiveTab] = useState<'leads' | 'followups' | 'activities' | 'assets' | 'documents'>('leads')
+  const [activeTab, setActiveTab] = useState<'leads' | 'followups' | 'activities' | 'assets' | 'documents' | 'contract'>('leads')
   const [sendingInvite, setSendingInvite] = useState(false)
   const [inviteStatus, setInviteStatus] = useState<string | null>(null)
+
+  // Contract State
+  const [contract, setContract] = useState<EmployeeContract | null>(null)
+  const [loadingContract, setLoadingContract] = useState(false)
+  const [showContractViewModal, setShowContractViewModal] = useState(false)
+  const [showContractEditModal, setShowContractEditModal] = useState(false)
+
+  const isManagerOrAdmin = currentProfile.role === 'ADMIN' || currentProfile.role === 'SALES_MANAGER'
+
+  const loadContract = async () => {
+    if (contract) return contract
+    try {
+      setLoadingContract(true)
+      const res = await fetch(`/api/contracts?profile_id=${member.id}`)
+      const data = await res.json()
+      if (data.contract) {
+        setContract(data.contract)
+        return data.contract
+      }
+    } catch (err) {
+      console.error('Failed to load contract', err)
+    } finally {
+      setLoadingContract(false)
+    }
+    return null
+  }
 
   // Pagination states for each tab
   const [leadsPage, setLeadsPage] = useState(1)
@@ -246,6 +275,29 @@ export default function TeamMemberDetailClient({
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+          <a
+            href={`/team/${member.id}/contract`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="btn btn-primary btn-sm"
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 6,
+              fontWeight: 700,
+              backgroundColor: member.role === 'CHANNEL_PARTNER' ? '#D97706' : '#2563EB',
+              borderColor: member.role === 'CHANNEL_PARTNER' ? '#B45309' : '#1D4ED8',
+              color: '#FFFFFF',
+              textDecoration: 'none',
+            }}
+            title="Open official contract or partner agreement in a new tab"
+          >
+            <FileCheck size={13} />
+            <span>
+              {member.role === 'CHANNEL_PARTNER' ? '📜 Partner Agreement' : '📄 Sales Contract'}
+            </span>
+          </a>
+
           {isAdmin && (
             <button
               onClick={handleResendInvite}
@@ -259,8 +311,8 @@ export default function TeamMemberDetailClient({
             </button>
           )}
 
-          <span className={`badge ${member.role === 'ADMIN' ? 'badge-admin' : 'badge-agent'}`}>
-            {member.role === 'SALES_MANAGER' ? 'SALES MANAGER' : member.role}
+          <span className={`badge ${member.role === 'ADMIN' ? 'badge-admin' : member.role === 'CHANNEL_PARTNER' ? 'badge-warning' : 'badge-agent'}`}>
+            {member.role === 'SALES_MANAGER' ? 'SALES MANAGER' : member.role === 'CHANNEL_PARTNER' ? 'CHANNEL PARTNER' : member.role}
           </span>
           <span className={`badge ${member.work_status === 'BUSY' ? 'badge-warning' : 'badge-active'}`}>
             {member.work_status || 'AVAILABLE'}
@@ -312,8 +364,8 @@ export default function TeamMemberDetailClient({
                   <h1 style={{ fontSize: 22, fontWeight: 800, color: 'var(--text-primary)', margin: 0 }}>
                     {member.name}
                   </h1>
-                  <span className={`badge ${member.role === 'ADMIN' ? 'badge-admin' : 'badge-agent'}`}>
-                    {member.role === 'SALES_MANAGER' ? 'SALES MANAGER' : member.role}
+                  <span className={`badge ${member.role === 'ADMIN' ? 'badge-admin' : member.role === 'CHANNEL_PARTNER' ? 'badge-warning' : 'badge-agent'}`}>
+                    {member.role === 'SALES_MANAGER' ? 'SALES MANAGER' : member.role === 'CHANNEL_PARTNER' ? 'CHANNEL PARTNER' : member.role}
                   </span>
                   <span className={`badge ${member.work_status === 'BUSY' ? 'badge-warning' : 'badge-active'}`}>
                     {member.work_status || 'AVAILABLE'}
@@ -596,6 +648,31 @@ export default function TeamMemberDetailClient({
             }}
           >
             <FolderArchive size={16} /> Documents &amp; Records ({initialDocuments.length})
+          </button>
+
+          <button
+            onClick={() => {
+              setActiveTab('contract')
+              loadContract()
+            }}
+            style={{
+              padding: '10px 4px',
+              fontSize: 14,
+              fontWeight: 700,
+              color: activeTab === 'contract' ? '#1E3A8A' : 'var(--text-secondary)',
+              borderBottom: activeTab === 'contract' ? '2.5px solid #1E3A8A' : '2.5px solid transparent',
+              background: 'none',
+              borderTop: 'none',
+              borderLeft: 'none',
+              borderRight: 'none',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 6,
+              whiteSpace: 'nowrap',
+            }}
+          >
+            <FileCheck size={16} /> Official Contract &amp; Paperwork
           </button>
         </div>
 
@@ -908,6 +985,184 @@ export default function TeamMemberDetailClient({
             initialDocuments={initialDocuments}
             initialCustomRecords={initialCustomRecords}
           />
+        )}
+
+        {/* TAB 6: OFFICIAL CONTRACT & PAPERWORK */}
+        {activeTab === 'contract' && (
+          <div className="card" style={{ padding: '24px' }}>
+            {loadingContract ? (
+              <div style={{ textAlign: 'center', padding: '48px 0' }}>
+                <Loader2 size={32} className="animate-spin" style={{ color: '#1E3A8A', margin: '0 auto 12px auto' }} />
+                <div style={{ fontSize: 14, fontWeight: 600, color: '#475569' }}>Loading legal agreement terms...</div>
+              </div>
+            ) : contract ? (
+              <div>
+                {/* Header Banner */}
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    flexWrap: 'wrap',
+                    gap: 16,
+                    padding: '20px 24px',
+                    borderRadius: 12,
+                    background: contract.contract_type === 'CHANNEL_PARTNER' ? '#FFFBEB' : '#EFF6FF',
+                    border: `1.5px solid ${contract.contract_type === 'CHANNEL_PARTNER' ? '#FDE68A' : '#BFDBFE'}`,
+                    marginBottom: 24,
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+                    <div
+                      style={{
+                        width: 44,
+                        height: 44,
+                        borderRadius: 12,
+                        background: contract.contract_type === 'CHANNEL_PARTNER' ? '#D97706' : '#2563EB',
+                        color: '#FFFFFF',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        flexShrink: 0,
+                      }}
+                    >
+                      <FileCheck size={22} />
+                    </div>
+                    <div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <span style={{ fontSize: 16, fontWeight: 900, color: contract.contract_type === 'CHANNEL_PARTNER' ? '#92400E' : '#1E40AF' }}>
+                          {contract.contract_type === 'CHANNEL_PARTNER'
+                            ? 'Commercial Channel Partner Broker Agreement'
+                            : 'Internal Sales Employment Contract'}
+                        </span>
+                        <span
+                          style={{
+                            fontSize: 10.5,
+                            fontWeight: 800,
+                            padding: '2px 8px',
+                            borderRadius: 9999,
+                            backgroundColor: '#16A34A',
+                            color: '#FFFFFF',
+                          }}
+                        >
+                          {contract.status}
+                        </span>
+                      </div>
+                      <div style={{ fontSize: 12.5, color: '#64748B', marginTop: 2 }}>
+                        Effective since {formatDate(contract.start_date)} · Official Asaheeb Legal Documentation
+                      </div>
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                    {isAdmin && (
+                      <a
+                        href={`/team/${member.id}/contract`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="btn btn-outline btn-sm"
+                        style={{ fontWeight: 700, padding: '7px 14px', textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 6 }}
+                      >
+                        <Edit size={13} />
+                        <span>Edit Terms ↗</span>
+                      </a>
+                    )}
+                    <a
+                      href={`/team/${member.id}/contract`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="btn btn-primary btn-sm"
+                      style={{ fontWeight: 700, padding: '7px 16px', textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 6 }}
+                    >
+                      <Printer size={13} />
+                      <span>View &amp; Print PDF ↗</span>
+                    </a>
+                  </div>
+                </div>
+
+                {/* Key Agreement Terms Grid */}
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 16, marginBottom: 24 }}>
+                  <div className="card" style={{ padding: '16px', background: '#F8FAFC' }}>
+                    <div style={{ fontSize: 11, fontWeight: 700, color: '#64748B', textTransform: 'uppercase' }}>Designation / Department</div>
+                    <div style={{ fontSize: 15, fontWeight: 800, color: '#0F172A', marginTop: 4 }}>{contract.designation}</div>
+                    <div style={{ fontSize: 12, color: '#64748B', marginTop: 2 }}>{contract.department}</div>
+                  </div>
+
+                  <div className="card" style={{ padding: '16px', background: '#F8FAFC' }}>
+                    <div style={{ fontSize: 11, fontWeight: 700, color: '#64748B', textTransform: 'uppercase' }}>Commission Split Rate</div>
+                    <div style={{ fontSize: 22, fontWeight: 900, color: '#059669', marginTop: 2 }}>{contract.commission_rate_pct}%</div>
+                    <div style={{ fontSize: 12, color: '#64748B' }}>
+                      {contract.contract_type === 'CHANNEL_PARTNER' ? 'Direct Deal Split' : 'Above Quota Threshold'}
+                    </div>
+                  </div>
+
+                  {contract.contract_type !== 'CHANNEL_PARTNER' ? (
+                    <div className="card" style={{ padding: '16px', background: '#F8FAFC' }}>
+                      <div style={{ fontSize: 11, fontWeight: 700, color: '#64748B', textTransform: 'uppercase' }}>Basic Salary (SAR)</div>
+                      <div style={{ fontSize: 20, fontWeight: 900, color: '#1E3A8A', marginTop: 2 }}>
+                        {formatCurrency(contract.base_salary)}
+                      </div>
+                      <div style={{ fontSize: 12, color: '#64748B' }}>
+                        Gross: {formatCurrency(Number(contract.base_salary || 0) + Number(contract.housing_allowance || 0) + Number(contract.transport_allowance || 0))} / mo
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="card" style={{ padding: '16px', background: '#F8FAFC' }}>
+                      <div style={{ fontSize: 11, fontWeight: 700, color: '#64748B', textTransform: 'uppercase' }}>REGA Fal License / CR</div>
+                      <div style={{ fontSize: 15, fontWeight: 800, color: '#0F172A', marginTop: 4 }}>
+                        {contract.fal_license_no || contract.cr_number || 'Verified on File'}
+                      </div>
+                      <div style={{ fontSize: 12, color: '#64748B', marginTop: 2 }}>
+                        {contract.brokerage_firm_name || member.name}
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="card" style={{ padding: '16px', background: '#F8FAFC' }}>
+                    <div style={{ fontSize: 11, fontWeight: 700, color: '#64748B', textTransform: 'uppercase' }}>Monthly Target / Quota</div>
+                    <div style={{ fontSize: 18, fontWeight: 800, color: '#334155', marginTop: 4 }}>
+                      {contract.monthly_target_sar > 0 ? formatCurrency(contract.monthly_target_sar) : 'No Minimum Cap'}
+                    </div>
+                    <div style={{ fontSize: 12, color: '#64748B', marginTop: 2 }}>Base threshold</div>
+                  </div>
+                </div>
+
+                {/* Clickable Banner to open full legal document */}
+                <a
+                  href={`/team/${member.id}/contract`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  style={{
+                    display: 'block',
+                    padding: '24px',
+                    borderRadius: 12,
+                    border: '1.5px dashed #CBD5E1',
+                    background: '#FAFAFA',
+                    textAlign: 'center',
+                    cursor: 'pointer',
+                    textDecoration: 'none',
+                    transition: 'all 0.15s ease',
+                  }}
+                >
+                  <FileText size={28} style={{ color: '#1E3A8A', margin: '0 auto 8px auto' }} />
+                  <div style={{ fontSize: 15, fontWeight: 800, color: '#0F172A' }}>
+                    {isAdmin
+                      ? 'Open Full Official Agreement & Edit Terms in New Tab ↗'
+                      : 'Open Full Official Agreement in New Tab ↗'}
+                  </div>
+                  <div style={{ fontSize: 12.5, color: '#64748B', marginTop: 4 }}>
+                    {isAdmin
+                      ? 'View complete bilingual clauses, edit financial variables, print A4 PDF document, and review signatures.'
+                      : 'View complete bilingual clauses, print A4 PDF document, and review signatures.'}
+                  </div>
+                </a>
+              </div>
+            ) : (
+              <div style={{ textAlign: 'center', padding: '32px 0' }}>
+                <p style={{ color: '#64748B' }}>No contract found.</p>
+              </div>
+            )}
+          </div>
         )}
       </div>
     </div>

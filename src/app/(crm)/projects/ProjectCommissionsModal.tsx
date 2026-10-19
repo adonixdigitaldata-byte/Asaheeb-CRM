@@ -19,6 +19,7 @@ import {
 import { SaudiRiyalIcon } from '@/components/SaudiRiyalIcon'
 import { createClient } from '@/lib/supabase/client'
 import type { Project, Profile, ProjectCommission } from '@/types/database'
+import DealCelebrationModal, { DealCelebrationData, unlockCelebrationAudio } from '@/components/DealCelebrationModal'
 
 interface Props {
   project: Project
@@ -44,31 +45,30 @@ export default function ProjectCommissionsModal({ project, profile, onClose }: P
   const [isCustomAgent, setIsCustomAgent] = useState(false)
   const [teamProfiles, setTeamProfiles] = useState<Profile[]>([])
   const [commissionAmount, setCommissionAmount] = useState('')
+  const [areaSqm, setAreaSqm] = useState('')
+  const [dealValueSar, setDealValueSar] = useState('')
   const [saleDate, setSaleDate] = useState(new Date().toISOString().split('T')[0])
   const [notes, setNotes] = useState('')
   const [saving, setSaving] = useState(false)
   const [deletingId, setDeletingId] = useState<string | null>(null)
+  const [celebrationDeal, setCelebrationDeal] = useState<DealCelebrationData | null>(null)
 
   // Fetch commission entries for this project
   const fetchCommissions = useCallback(async () => {
     setLoading(true)
     setErrorMsg('')
     try {
-      const { data, error } = await supabase
-        .from('project_commissions')
-        .select('*')
-        .eq('project_id', project.id)
-        .order('sale_date', { ascending: false })
-
-      if (error) throw error
-      setCommissions((data as ProjectCommission[]) || [])
+      const res = await fetch(`/api/projects/commissions?projectId=${encodeURIComponent(project.id)}`)
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || 'Failed to load commissions')
+      setCommissions((data.commissions as ProjectCommission[]) || [])
     } catch (err: any) {
       console.error('Error fetching project commissions:', err)
       setErrorMsg(err.message || 'Failed to load commissions')
     } finally {
       setLoading(false)
     }
-  }, [supabase, project.id])
+  }, [project.id])
 
   const fetchTeam = useCallback(async () => {
     try {
@@ -95,6 +95,10 @@ export default function ProjectCommissionsModal({ project, profile, onClose }: P
     return commissions.reduce((sum, item) => sum + Number(item.commission_amount || 0), 0)
   }, [commissions])
 
+  const totalAreaSqm = useMemo(() => {
+    return commissions.reduce((sum, item) => sum + Number(item.area_sqm || 0), 0)
+  }, [commissions])
+
   function resetForm() {
     setEditingId(null)
     setUnitName('')
@@ -103,6 +107,8 @@ export default function ProjectCommissionsModal({ project, profile, onClose }: P
     setAgentName('')
     setIsCustomAgent(false)
     setCommissionAmount('')
+    setAreaSqm('')
+    setDealValueSar('')
     setSaleDate(new Date().toISOString().split('T')[0])
     setNotes('')
     setIsFormOpen(false)
@@ -117,6 +123,8 @@ export default function ProjectCommissionsModal({ project, profile, onClose }: P
     setAgentName(item.agent_name || '')
     setIsCustomAgent(!!item.agent_name && !item.agent_id)
     setCommissionAmount(String(item.commission_amount))
+    setAreaSqm(item.area_sqm ? String(item.area_sqm) : '')
+    setDealValueSar(item.deal_value_sar ? String(item.deal_value_sar) : '')
     setSaleDate(item.sale_date || new Date().toISOString().split('T')[0])
     setNotes(item.notes || '')
     setIsFormOpen(true)
@@ -124,6 +132,9 @@ export default function ProjectCommissionsModal({ project, profile, onClose }: P
 
   async function handleSave(e: React.FormEvent) {
     e.preventDefault()
+    // Pre-unlock AudioContext synchronously inside user click event for zero delay
+    unlockCelebrationAudio()
+
     if (!unitName.trim() || !buyerName.trim() || !commissionAmount) {
       setErrorMsg('Please fill in Unit/Property name, Buyer name, and Commission amount.')
       return
@@ -134,6 +145,9 @@ export default function ProjectCommissionsModal({ project, profile, onClose }: P
       setErrorMsg('Please enter a valid commission amount.')
       return
     }
+
+    const numArea = areaSqm ? Number(areaSqm) : 0
+    const numDealValue = dealValueSar ? Number(dealValueSar) : 0
 
     setSaving(true)
     setErrorMsg('')
@@ -151,40 +165,61 @@ export default function ProjectCommissionsModal({ project, profile, onClose }: P
     try {
       if (editingId) {
         // Update existing record
-        const { error } = await supabase
-          .from('project_commissions')
-          .update({
+        const res = await fetch('/api/projects/commissions', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            id: editingId,
             unit_name: unitName.trim(),
             buyer_name: buyerName.trim(),
             agent_id: finalAgentId,
             agent_name: finalAgentName || null,
             commission_amount: numAmount,
+            area_sqm: numArea || 0,
+            deal_value_sar: numDealValue || 0,
             sale_date: saleDate,
             notes: notes.trim() || null,
-            updated_at: new Date().toISOString(),
-          })
-          .eq('id', editingId)
+          }),
+        })
 
-        if (error) throw error
+        const data = await res.json()
+        if (!res.ok) throw new Error(data.error || 'Failed to update commission record')
         setSuccessMsg('Commission record updated successfully!')
       } else {
         // Create new record
-        const { error } = await supabase
-          .from('project_commissions')
-          .insert({
+        const res = await fetch('/api/projects/commissions', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
             project_id: project.id,
             unit_name: unitName.trim(),
             buyer_name: buyerName.trim(),
             agent_id: finalAgentId,
             agent_name: finalAgentName || null,
             commission_amount: numAmount,
+            area_sqm: numArea || 0,
+            deal_value_sar: numDealValue || 0,
             sale_date: saleDate,
             notes: notes.trim() || null,
             created_by: profile.id,
-          })
+          }),
+        })
 
-        if (error) throw error
+        const data = await res.json()
+        if (!res.ok) throw new Error(data.error || 'Failed to save commission record')
         setSuccessMsg('Commission record added successfully!')
+
+        // Trigger Dubai Sales Bell Celebration on new closed sale!
+        setCelebrationDeal({
+          agentName: finalAgentName || 'Asaheeb Sales Team',
+          agentRole: profile.role,
+          projectName: project.name_en,
+          unitName: unitName.trim(),
+          areaSqm: numArea > 0 ? numArea : null,
+          dealValueSar: numDealValue > 0 ? numDealValue : null,
+          commissionAmount: numAmount,
+          saleDate: saleDate,
+        })
       }
 
       await fetchCommissions()
@@ -204,12 +239,13 @@ export default function ProjectCommissionsModal({ project, profile, onClose }: P
     setDeletingId(id)
     setErrorMsg('')
     try {
-      const { error } = await supabase
-        .from('project_commissions')
-        .delete()
-        .eq('id', id)
+      const res = await fetch(`/api/projects/commissions?id=${encodeURIComponent(id)}`, {
+        method: 'DELETE',
+      })
 
-      if (error) throw error
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || 'Failed to delete commission record')
+
       setCommissions((prev) => prev.filter((c) => c.id !== id))
       setSuccessMsg('Commission record removed.')
       setTimeout(() => setSuccessMsg(''), 3000)
@@ -238,7 +274,11 @@ export default function ProjectCommissionsModal({ project, profile, onClose }: P
         padding: '16px',
         overflowY: 'auto',
       }}
-      onClick={onClose}
+      onClick={(e) => {
+        if (e.target === e.currentTarget && !celebrationDeal) {
+          onClose()
+        }
+      }}
     >
       <div
         className="card"
@@ -260,13 +300,14 @@ export default function ProjectCommissionsModal({ project, profile, onClose }: P
         {/* Header */}
         <div
           style={{
-            padding: '20px 24px',
+            padding: '16px 22px',
             borderBottom: '1px solid var(--border)',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'space-between',
             background: 'linear-gradient(135deg, #0F172A 0%, #1E3A8A 100%)',
             color: '#FFFFFF',
+            flexShrink: 0,
           }}
         >
           <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
@@ -332,84 +373,105 @@ export default function ProjectCommissionsModal({ project, profile, onClose }: P
           </button>
         </div>
 
-        {/* Total Metric Overview Bar */}
-        <div
-          style={{
-            padding: '16px 24px',
-            backgroundColor: '#F8FAFC',
-            borderBottom: '1px solid var(--border)',
-            display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
-            gap: '16px',
-            alignItems: 'center',
-          }}
-        >
+        {/* Scrollable Body Content (Includes Metrics + Form + Commission Breakdown Table) */}
+        <div style={{ padding: '16px 20px', overflowY: 'auto', flex: 1, minHeight: 0, WebkitOverflowScrolling: 'touch' }}>
+          {/* Total Metric Overview Bar */}
           <div
             style={{
-              padding: '12px 16px',
-              backgroundColor: '#ECFDF5',
-              border: '1px solid #A7F3D0',
-              borderRadius: '10px',
+              padding: '14px 16px',
+              backgroundColor: '#F8FAFC',
+              border: '1px solid var(--border)',
+              borderRadius: '12px',
+              marginBottom: '16px',
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
+              gap: '12px',
+              alignItems: 'center',
             }}
           >
-            <div style={{ fontSize: '11px', fontWeight: 700, color: '#047857', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-              Total Commission Earned
+            <div
+              style={{
+                padding: '10px 14px',
+                backgroundColor: '#ECFDF5',
+                border: '1px solid #A7F3D0',
+                borderRadius: '8px',
+              }}
+            >
+              <div style={{ fontSize: '11px', fontWeight: 700, color: '#047857', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                Total Commission Earned
+              </div>
+              <div style={{ fontSize: '20px', fontWeight: 800, color: '#065F46', marginTop: '2px' }}>
+                SAR {totalCommission.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              </div>
+              <div style={{ fontSize: '11px', color: '#059669', marginTop: '1px' }}>
+                Across {commissions.length} unit / layout sale{commissions.length === 1 ? '' : 's'}
+              </div>
             </div>
-            <div style={{ fontSize: '22px', fontWeight: 800, color: '#065F46', marginTop: '2px' }}>
-              SAR {totalCommission.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+
+            <div
+              style={{
+                padding: '10px 14px',
+                backgroundColor: '#EFF6FF',
+                border: '1px solid #BFDBFE',
+                borderRadius: '8px',
+              }}
+            >
+              <div style={{ fontSize: '11px', fontWeight: 700, color: '#1D4ED8', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                Units / Layouts Sold
+              </div>
+              <div style={{ fontSize: '20px', fontWeight: 800, color: '#1E40AF', marginTop: '2px' }}>
+                {commissions.length} Sold
+              </div>
+              <div style={{ fontSize: '11px', color: '#2563EB', marginTop: '1px' }}>
+                {project.developer_en || 'Asaheeb Developments'}
+              </div>
             </div>
-            <div style={{ fontSize: '11px', color: '#059669', marginTop: '1px' }}>
-              Across {commissions.length} unit / layout sale{commissions.length === 1 ? '' : 's'}
+
+            <div
+              style={{
+                padding: '10px 14px',
+                backgroundColor: '#FEF3C7',
+                border: '1px solid #FDE68A',
+                borderRadius: '8px',
+              }}
+            >
+              <div style={{ fontSize: '11px', fontWeight: 700, color: '#B45309', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                Total Area Sold (m²)
+              </div>
+              <div style={{ fontSize: '20px', fontWeight: 800, color: '#92400E', marginTop: '2px' }}>
+                {totalAreaSqm.toLocaleString('en-US', { minimumFractionDigits: 1, maximumFractionDigits: 1 })} m²
+              </div>
+              <div style={{ fontSize: '11px', color: '#B45309', marginTop: '1px' }}>
+                Across {commissions.filter(c => Number(c.area_sqm || 0) > 0).length} recorded units
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+              {!isFormOpen && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    resetForm()
+                    setIsFormOpen(true)
+                  }}
+                  className="btn btn-primary"
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '8px',
+                    fontWeight: 700,
+                    fontSize: '13px',
+                    padding: '10px 18px',
+                    backgroundColor: '#1E3A8A',
+                    whiteSpace: 'nowrap',
+                  }}
+                >
+                  <Plus size={16} />
+                  <span>Record Unit Sale</span>
+                </button>
+              )}
             </div>
           </div>
-
-          <div
-            style={{
-              padding: '12px 16px',
-              backgroundColor: '#EFF6FF',
-              border: '1px solid #BFDBFE',
-              borderRadius: '10px',
-            }}
-          >
-            <div style={{ fontSize: '11px', fontWeight: 700, color: '#1D4ED8', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-              Units / Layouts Sold
-            </div>
-            <div style={{ fontSize: '22px', fontWeight: 800, color: '#1E40AF', marginTop: '2px' }}>
-              {commissions.length} Sold
-            </div>
-            <div style={{ fontSize: '11px', color: '#2563EB', marginTop: '1px' }}>
-              {project.developer_en || 'Asaheeb Developments'}
-            </div>
-          </div>
-
-          <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-            {!isFormOpen && (
-              <button
-                type="button"
-                onClick={() => {
-                  resetForm()
-                  setIsFormOpen(true)
-                }}
-                className="btn btn-primary"
-                style={{
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: '8px',
-                  fontWeight: 700,
-                  fontSize: '13px',
-                  padding: '10px 18px',
-                  backgroundColor: '#1E3A8A',
-                }}
-              >
-                <Plus size={16} />
-                <span>Record Unit Sale</span>
-              </button>
-            )}
-          </div>
-        </div>
-
-        {/* Body Content */}
-        <div style={{ padding: '20px 24px', overflowY: 'auto', flex: 1 }}>
           {/* Notification Messages */}
           {errorMsg && (
             <div
@@ -607,6 +669,76 @@ export default function ProjectCommissionsModal({ project, profile, onClose }: P
                   </div>
                 </div>
 
+                {/* Area in Square Meters */}
+                <div>
+                  <label className="form-label" style={{ fontSize: '12px', fontWeight: 700, color: '#334155' }}>
+                    Area (m² / Square Meters)
+                  </label>
+                  <div style={{ position: 'relative' }}>
+                    <input
+                      type="number"
+                      min="0"
+                      step="any"
+                      placeholder="e.g. 145.5"
+                      className="form-input"
+                      value={areaSqm}
+                      onChange={(e) => setAreaSqm(e.target.value)}
+                      style={{ height: '38px', fontSize: '13px', fontWeight: 600, color: '#1E293B' }}
+                    />
+                    <span
+                      style={{
+                        position: 'absolute',
+                        right: '10px',
+                        top: '50%',
+                        transform: 'translateY(-50%)',
+                        fontSize: '11px',
+                        fontWeight: 700,
+                        color: '#64748B',
+                      }}
+                    >
+                      m²
+                    </span>
+                  </div>
+                  <div style={{ fontSize: '10.5px', color: '#94A3B8', marginTop: '2px' }}>
+                    Layout / apartment area in square meters.
+                  </div>
+                </div>
+
+                {/* Total Property Deal Value */}
+                <div>
+                  <label className="form-label" style={{ fontSize: '12px', fontWeight: 700, color: '#334155' }}>
+                    Property Price / Deal Value (SAR)
+                  </label>
+                  <div style={{ position: 'relative' }}>
+                    <span
+                      style={{
+                        position: 'absolute',
+                        left: '10px',
+                        top: '50%',
+                        transform: 'translateY(-50%)',
+                        fontSize: '12px',
+                        fontWeight: 700,
+                        color: '#64748B',
+                      }}
+                    >
+                      SAR
+                    </span>
+                    <input
+                      type="number"
+                      min="0"
+                      step="any"
+                      placeholder="e.g. 1250000"
+                      className="form-input"
+                      value={dealValueSar}
+                      onChange={(e) => setDealValueSar(e.target.value)}
+                      style={{ height: '38px', fontSize: '13px', paddingLeft: '44px', fontWeight: 600, color: '#1E293B' }}
+                    />
+                  </div>
+                  <div style={{ fontSize: '10.5px', color: '#94A3B8', marginTop: '2px' }}>
+                    Gross property purchase price (optional).
+                  </div>
+                </div>
+
                 {/* Sale Date */}
                 <div>
                   <label className="form-label" style={{ fontSize: '12px', fontWeight: 700, color: '#334155' }}>
@@ -711,146 +843,307 @@ export default function ProjectCommissionsModal({ project, profile, onClose }: P
               )}
             </div>
           ) : (
-            <div
-              style={{
-                border: '1px solid var(--border)',
-                borderRadius: '10px',
-                overflow: 'hidden',
-                width: '100%',
-              }}
-            >
-              <table style={{ width: '100%', tableLayout: 'fixed', borderCollapse: 'collapse', fontSize: '12.5px' }}>
-                <thead>
-                  <tr style={{ backgroundColor: '#F8FAFC', borderBottom: '1px solid var(--border)', color: '#475569', fontSize: '11px', fontWeight: 700, textTransform: 'uppercase' }}>
-                    <th style={{ width: '22%', padding: '10px 12px', textAlign: 'left' }}>Unit / Layout</th>
-                    <th style={{ width: '18%', padding: '10px 12px', textAlign: 'left' }}>Sold By (Agent)</th>
-                    <th style={{ width: '20%', padding: '10px 12px', textAlign: 'left' }}>Buyer Name</th>
-                    <th style={{ width: '18%', padding: '10px 12px', textAlign: 'right' }}>Commission</th>
-                    <th style={{ width: '12%', padding: '10px 12px', textAlign: 'center' }}>Sale Date</th>
-                    <th style={{ width: '10%', padding: '10px 12px', textAlign: 'center' }}>Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {commissions.map((c, idx) => {
-                    const agentDisplay = c.agent_name || 'Asaheeb Direct'
-                    const initial = agentDisplay.charAt(0).toUpperCase()
+            <div>
+              {/* DESKTOP TABLE VIEW (Visible on tablet/desktop, min-width >= 640px) */}
+              <div
+                className="commissions-desktop-view"
+                style={{
+                  border: '1px solid var(--border)',
+                  borderRadius: '10px',
+                  width: '100%',
+                  overflow: 'hidden',
+                }}
+              >
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12.5px', tableLayout: 'fixed' }}>
+                  <colgroup>
+                    <col style={{ width: '23%' }} />
+                    <col style={{ width: '18%' }} />
+                    <col style={{ width: '16%' }} />
+                    <col style={{ width: '11%' }} />
+                    <col style={{ width: '17%' }} />
+                    <col style={{ width: '15%' }} />
+                    <col style={{ width: '70px' }} />
+                  </colgroup>
+                  <thead>
+                    <tr style={{ backgroundColor: '#F8FAFC', borderBottom: '1px solid var(--border)', color: '#475569', fontSize: '11px', fontWeight: 700, textTransform: 'uppercase' }}>
+                      <th style={{ padding: '10px 12px', textAlign: 'left' }}>Unit / Layout</th>
+                      <th style={{ padding: '10px 12px', textAlign: 'left' }}>Sold By (Agent)</th>
+                      <th style={{ padding: '10px 12px', textAlign: 'left' }}>Buyer Name</th>
+                      <th style={{ padding: '10px 8px', textAlign: 'center' }}>Area (m²)</th>
+                      <th style={{ padding: '10px 12px', textAlign: 'right' }}>Commission</th>
+                      <th style={{ padding: '10px 8px', textAlign: 'center' }}>Sale Date</th>
+                      <th style={{ padding: '10px 8px', textAlign: 'center' }}>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {commissions.map((c, idx) => {
+                      const agentDisplay = c.agent_name || 'Asaheeb Direct'
+                      const initial = agentDisplay.charAt(0).toUpperCase()
 
-                    return (
-                      <tr
-                        key={c.id}
-                        style={{
-                          borderBottom: idx === commissions.length - 1 ? 'none' : '1px solid #F1F5F9',
-                          transition: 'background-color 0.15s ease',
-                        }}
-                        onMouseEnter={(e) => ((e.currentTarget as HTMLElement).style.backgroundColor = '#F8FAFC')}
-                        onMouseLeave={(e) => ((e.currentTarget as HTMLElement).style.backgroundColor = 'transparent')}
-                      >
-                        {/* Unit / Property Name */}
-                        <td style={{ padding: '10px 12px' }}>
-                          <div style={{ fontWeight: 700, color: '#0F172A', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={c.unit_name}>
-                            {c.unit_name}
-                          </div>
-                          {c.notes && (
-                            <div style={{ fontSize: '11px', color: '#64748B', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={c.notes}>
-                              {c.notes}
-                            </div>
-                          )}
-                        </td>
-
-                        {/* Sold By Agent */}
-                        <td style={{ padding: '10px 12px' }}>
-                          <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', maxWidth: '100%' }}>
-                            <span
+                      return (
+                        <tr
+                          key={c.id}
+                          style={{
+                            borderBottom: idx === commissions.length - 1 ? 'none' : '1px solid #F1F5F9',
+                            transition: 'background-color 0.15s ease',
+                          }}
+                          onMouseEnter={(e) => ((e.currentTarget as HTMLElement).style.backgroundColor = '#F8FAFC')}
+                          onMouseLeave={(e) => ((e.currentTarget as HTMLElement).style.backgroundColor = 'transparent')}
+                        >
+                          <td style={{ padding: '10px 12px', overflow: 'hidden' }}>
+                            <div
                               style={{
-                                width: '20px',
-                                height: '20px',
-                                borderRadius: '50%',
-                                backgroundColor: c.agent_id ? '#EFF6FF' : '#F1F5F9',
-                                color: c.agent_id ? '#2563EB' : '#64748B',
-                                border: `1px solid ${c.agent_id ? '#BFDBFE' : '#CBD5E1'}`,
-                                fontSize: '10px',
                                 fontWeight: 700,
-                                display: 'inline-flex',
-                                alignItems: 'center',
-                                justifyContent: 'center',
-                                flexShrink: 0,
-                              }}
-                            >
-                              {initial}
-                            </span>
-                            <span
-                              style={{
-                                fontWeight: 600,
-                                color: c.agent_id ? '#1E293B' : '#64748B',
-                                fontSize: '12px',
+                                color: '#0F172A',
                                 overflow: 'hidden',
                                 textOverflow: 'ellipsis',
                                 whiteSpace: 'nowrap',
                               }}
-                              title={agentDisplay}
+                              title={c.unit_name}
                             >
-                              {agentDisplay}
+                              {c.unit_name}
+                            </div>
+                            {c.notes && (
+                              <div
+                                style={{
+                                  fontSize: '11px',
+                                  color: '#64748B',
+                                  marginTop: '2px',
+                                  overflow: 'hidden',
+                                  textOverflow: 'ellipsis',
+                                  whiteSpace: 'nowrap',
+                                }}
+                                title={c.notes}
+                              >
+                                {c.notes}
+                              </div>
+                            )}
+                          </td>
+                          <td style={{ padding: '10px 12px', overflow: 'hidden' }}>
+                            <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', maxWidth: '100%' }}>
+                              <span
+                                style={{
+                                  width: '20px',
+                                  height: '20px',
+                                  borderRadius: '50%',
+                                  backgroundColor: c.agent_id ? '#EFF6FF' : '#F1F5F9',
+                                  color: c.agent_id ? '#2563EB' : '#64748B',
+                                  border: `1px solid ${c.agent_id ? '#BFDBFE' : '#CBD5E1'}`,
+                                  fontSize: '10px',
+                                  fontWeight: 700,
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'center',
+                                  flexShrink: 0,
+                                }}
+                              >
+                                {initial}
+                              </span>
+                              <span
+                                style={{
+                                  fontWeight: 600,
+                                  color: c.agent_id ? '#1E293B' : '#64748B',
+                                  fontSize: '12px',
+                                  overflow: 'hidden',
+                                  textOverflow: 'ellipsis',
+                                  whiteSpace: 'nowrap',
+                                }}
+                                title={agentDisplay}
+                              >
+                                {agentDisplay}
+                              </span>
+                            </div>
+                          </td>
+                          <td style={{ padding: '10px 12px', fontWeight: 600, color: '#334155', overflow: 'hidden' }}>
+                            <div
+                              style={{
+                                overflow: 'hidden',
+                                textOverflow: 'ellipsis',
+                                whiteSpace: 'nowrap',
+                              }}
+                              title={c.buyer_name}
+                            >
+                              {c.buyer_name}
+                            </div>
+                          </td>
+                          <td style={{ padding: '10px 8px', textAlign: 'center', whiteSpace: 'nowrap' }}>
+                            {c.area_sqm && Number(c.area_sqm) > 0 ? (
+                              <span style={{ fontSize: '11.5px', fontWeight: 700, color: '#92400E', backgroundColor: '#FEF3C7', padding: '2px 6px', borderRadius: '6px', border: '1px solid #FDE68A' }}>
+                                {Number(c.area_sqm).toLocaleString('en-US')} m²
+                              </span>
+                            ) : (
+                              <span style={{ fontSize: '11px', color: '#94A3B8' }}>—</span>
+                            )}
+                          </td>
+                          <td style={{ padding: '10px 12px', textAlign: 'right', fontWeight: 800, color: '#047857', fontSize: '13px', whiteSpace: 'nowrap' }}>
+                            SAR {Number(c.commission_amount || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          </td>
+                          <td style={{ padding: '10px 8px', textAlign: 'center', color: '#64748B', fontSize: '12px', whiteSpace: 'nowrap' }}>
+                            {c.sale_date}
+                          </td>
+                          <td style={{ padding: '10px 8px', textAlign: 'center', whiteSpace: 'nowrap' }}>
+                            <div style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: '4px' }}>
+                              <button
+                                type="button"
+                                onClick={() => startEdit(c)}
+                                className="btn btn-outline btn-xs"
+                                title="Edit Commission"
+                                style={{ padding: '3px 6px', borderRadius: '5px' }}
+                              >
+                                <Edit2 size={12} />
+                              </button>
+                              <button
+                                type="button"
+                                disabled={deletingId === c.id}
+                                onClick={() => handleDelete(c.id)}
+                                className="btn btn-outline btn-xs"
+                                title="Delete Record"
+                                style={{ padding: '3px 6px', borderRadius: '5px', color: '#DC2626', borderColor: '#FCA5A5', backgroundColor: '#FEF2F2' }}
+                              >
+                                <Trash2 size={12} />
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                  <tfoot>
+                    <tr style={{ backgroundColor: '#F0FDF4', borderTop: '2px solid #A7F3D0', fontWeight: 800 }}>
+                      <td colSpan={4} style={{ padding: '12px 14px', color: '#065F46', fontSize: '13px' }}>
+                        TOTAL COMMISSION ({commissions.length} Units Sold {totalAreaSqm > 0 ? `· ${totalAreaSqm.toLocaleString()} m²` : ''})
+                      </td>
+                      <td style={{ padding: '12px 12px', textAlign: 'right', color: '#047857', fontSize: '13.5px', whiteSpace: 'nowrap' }}>
+                        SAR {totalCommission.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      </td>
+                      <td colSpan={2} style={{ padding: '12px 10px' }}></td>
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+
+              {/* MOBILE CARDS VIEW (Visible strictly on mobile screens, zero cutting or overlapping text!) */}
+              <div className="commissions-mobile-view" style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                {commissions.map((c) => {
+                  const agentDisplay = c.agent_name || 'Asaheeb Direct'
+                  return (
+                    <div
+                      key={c.id}
+                      style={{
+                        backgroundColor: '#FFFFFF',
+                        border: '1px solid var(--border)',
+                        borderRadius: '12px',
+                        padding: '12px 14px',
+                        boxShadow: '0 1px 3px rgba(0,0,0,0.05)',
+                      }}
+                    >
+                      {/* Top: Unit Name + Area badge + Actions */}
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', marginBottom: '8px' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                          <span style={{ fontWeight: 800, fontSize: '14px', color: '#0F172A' }}>
+                            {c.unit_name}
+                          </span>
+                          {c.area_sqm && Number(c.area_sqm) > 0 && (
+                            <span style={{ fontSize: '11px', fontWeight: 800, color: '#92400E', backgroundColor: '#FEF3C7', padding: '1px 6px', borderRadius: '6px', border: '1px solid #FDE68A' }}>
+                              {Number(c.area_sqm).toLocaleString('en-US')} m²
                             </span>
-                          </div>
-                        </td>
-
-                        {/* Buyer Name */}
-                        <td style={{ padding: '10px 12px' }}>
-                          <div style={{ fontWeight: 600, color: '#334155', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={c.buyer_name}>
-                            {c.buyer_name}
-                          </div>
-                        </td>
-
-                        {/* Commission Earned */}
-                        <td style={{ padding: '10px 12px', textAlign: 'right', fontWeight: 800, color: '#047857', fontSize: '13px' }}>
-                          SAR {Number(c.commission_amount || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                        </td>
-
-                        {/* Sale Date */}
-                        <td style={{ padding: '10px 12px', textAlign: 'center', color: '#64748B', fontSize: '12px' }}>
-                          {c.sale_date}
-                        </td>
+                          )}
+                        </div>
 
                         {/* Actions */}
-                        <td style={{ padding: '10px 12px', textAlign: 'center' }}>
-                          <div style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
-                            <button
-                              type="button"
-                              onClick={() => startEdit(c)}
-                              className="btn btn-outline btn-xs"
-                              title="Edit Commission"
-                              style={{ padding: '3px 6px' }}
-                            >
-                              <Edit2 size={12} />
-                            </button>
-                            <button
-                              type="button"
-                              disabled={deletingId === c.id}
-                              onClick={() => handleDelete(c.id)}
-                              className="btn btn-outline btn-xs"
-                              title="Delete"
-                              style={{ padding: '3px 6px', color: '#EF4444' }}
-                            >
-                              <Trash2 size={12} />
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
-                    )
-                  })}
-                </tbody>
-                <tfoot>
-                  <tr style={{ backgroundColor: '#F0FDF4', borderTop: '2px solid #A7F3D0', fontWeight: 800 }}>
-                    <td colSpan={3} style={{ padding: '12px 12px', color: '#065F46', fontSize: '13px' }}>
-                      TOTAL COMMISSION ({commissions.length} Units Sold)
-                    </td>
-                    <td style={{ padding: '12px 12px', textAlign: 'right', color: '#047857', fontSize: '14px' }}>
-                      SAR {totalCommission.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                    </td>
-                    <td colSpan={2}></td>
-                  </tr>
-                </tfoot>
-              </table>
+                        <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', flexShrink: 0 }}>
+                          <button
+                            type="button"
+                            onClick={() => startEdit(c)}
+                            className="btn btn-outline btn-xs"
+                            title="Edit Commission"
+                            style={{ padding: '4px 8px', borderRadius: '6px', height: '28px' }}
+                          >
+                            <Edit2 size={13} />
+                          </button>
+                          <button
+                            type="button"
+                            disabled={deletingId === c.id}
+                            onClick={() => handleDelete(c.id)}
+                            className="btn btn-outline btn-xs"
+                            title="Delete Record"
+                            style={{ padding: '4px 8px', borderRadius: '6px', height: '28px', color: '#DC2626', borderColor: '#FCA5A5', backgroundColor: '#FEF2F2' }}
+                          >
+                            <Trash2 size={13} />
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Middle metadata: Agent, Buyer, Date */}
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', fontSize: '12px', padding: '8px 0', borderTop: '1px dashed #F1F5F9', borderBottom: '1px dashed #F1F5F9' }}>
+                        <div>
+                          <span style={{ fontSize: '10.5px', color: '#94A3B8', textTransform: 'uppercase', fontWeight: 700 }}>Agent</span>
+                          <div style={{ fontWeight: 600, color: '#1E293B', marginTop: '1px' }}>{agentDisplay}</div>
+                        </div>
+                        <div>
+                          <span style={{ fontSize: '10.5px', color: '#94A3B8', textTransform: 'uppercase', fontWeight: 700 }}>Buyer</span>
+                          <div style={{ fontWeight: 600, color: '#334155', marginTop: '1px' }}>{c.buyer_name}</div>
+                        </div>
+                      </div>
+
+                      {/* Bottom: Date + Commission */}
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: '8px', paddingTop: '4px' }}>
+                        <span style={{ fontSize: '11px', color: '#64748B' }}>
+                          Sale Date: {c.sale_date || '—'}
+                        </span>
+                        <div style={{ fontSize: '14px', fontWeight: 900, color: '#047857' }}>
+                          SAR {Number(c.commission_amount || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </div>
+                      </div>
+                    </div>
+                  )
+                })}
+
+                {/* Mobile Total Card */}
+                <div
+                  style={{
+                    backgroundColor: '#ECFDF5',
+                    border: '1.5px solid #A7F3D0',
+                    borderRadius: '12px',
+                    padding: '12px 14px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                  }}
+                >
+                  <div>
+                    <div style={{ fontSize: '11px', fontWeight: 800, color: '#047857', textTransform: 'uppercase' }}>
+                      Total Commission
+                    </div>
+                    <div style={{ fontSize: '11px', color: '#059669', marginTop: '2px' }}>
+                      {commissions.length} Sold {totalAreaSqm > 0 ? `· ${totalAreaSqm.toLocaleString()} m²` : ''}
+                    </div>
+                  </div>
+                  <div style={{ fontSize: '16px', fontWeight: 900, color: '#065F46' }}>
+                    SAR {totalCommission.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </div>
+                </div>
+              </div>
+
+              {/* Responsive Styles for Desktop Table vs Mobile Cards */}
+              <style jsx>{`
+                @media (max-width: 639px) {
+                  .commissions-desktop-view {
+                    display: none !important;
+                  }
+                  .commissions-mobile-view {
+                    display: flex !important;
+                  }
+                }
+                @media (min-width: 640px) {
+                  .commissions-desktop-view {
+                    display: block !important;
+                  }
+                  .commissions-mobile-view {
+                    display: none !important;
+                  }
+                }
+              `}</style>
             </div>
           )}
         </div>
@@ -858,22 +1151,31 @@ export default function ProjectCommissionsModal({ project, profile, onClose }: P
         {/* Modal Footer */}
         <div
           style={{
-            padding: '14px 24px',
+            padding: '12px 20px',
             borderTop: '1px solid var(--border)',
             backgroundColor: '#F8FAFC',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'space-between',
+            flexShrink: 0,
           }}
         >
           <div style={{ fontSize: '11px', color: '#64748B' }}>
-            All commission entries are restricted to Administrator access.
+            All commission entries are restricted to Executive &amp; Sales Management access.
           </div>
           <button type="button" onClick={onClose} className="btn btn-outline btn-sm">
             Close
           </button>
         </div>
       </div>
+
+      {/* Dubai Sales Bell Deal Closed Celebration Modal */}
+      {celebrationDeal && (
+        <DealCelebrationModal
+          deal={celebrationDeal}
+          onClose={() => setCelebrationDeal(null)}
+        />
+      )}
     </div>
   )
 }

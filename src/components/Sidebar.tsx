@@ -19,6 +19,8 @@ import {
   Clock,
   Megaphone,
   Calculator,
+  Award,
+  FileCheck,
 } from 'lucide-react'
 import { logout } from '@/app/login/actions'
 import type { Profile } from '@/types/database'
@@ -42,6 +44,19 @@ export default function Sidebar({
   const role = profile?.role || 'AGENT'
   const isAdmin = role === 'ADMIN'
   const isManager = role === 'SALES_MANAGER'
+  const isChannelPartner = role === 'CHANNEL_PARTNER'
+
+  const channelPartnerNav = [
+    {
+      section: 'Partner Portal',
+      items: [
+        { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
+        { href: '/leads', label: 'My Leads', icon: Users },
+        { href: '/my-sales', label: 'My Sales', icon: Award },
+        { href: '/partner-contract', label: 'Partnership Agreement', icon: FileCheck },
+      ],
+    },
+  ]
 
   const adminNav = [
     {
@@ -50,6 +65,7 @@ export default function Sidebar({
         { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
         { href: '/leads', label: 'Leads Pipeline', icon: Users },
         { href: '/mortgage-leads', label: 'Mortgage Leads', icon: Calculator },
+        { href: '/my-sales', label: 'Sales & Commissions', icon: Award },
         { href: '/leads/import', label: 'Import Leads', icon: FileSpreadsheet },
       ],
     },
@@ -83,6 +99,7 @@ export default function Sidebar({
         { href: '/leads', label: 'All Team Leads', icon: Users },
         { href: '/mortgage-leads', label: 'Mortgage Leads', icon: Calculator },
         { href: '/leads?my_leads=true', label: 'My Assigned Leads', icon: UserCheck },
+        { href: '/my-sales', label: 'Sales & Commissions', icon: Award },
         { href: '/leads/import', label: 'Import Leads', icon: FileSpreadsheet },
       ],
     },
@@ -113,6 +130,7 @@ export default function Sidebar({
         { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
         { href: '/leads', label: 'My Leads', icon: Users },
         { href: '/mortgage-leads', label: 'Mortgage Leads', icon: Calculator },
+        { href: '/my-sales', label: 'My Sales Ledger', icon: Award },
       ],
     },
     {
@@ -134,12 +152,13 @@ export default function Sidebar({
     },
   ]
 
-  const navSections = isAdmin ? adminNav : isManager ? managerNav : agentNav
+  const navSections = isChannelPartner ? channelPartnerNav : isAdmin ? adminNav : isManager ? managerNav : agentNav
 
   const roleLabel =
     isAdmin ? 'ADMIN' :
       isManager ? 'SALES MANAGER' :
-        role === 'EMPLOYEE' ? 'EMPLOYEE' : 'SALES AGENT'
+        isChannelPartner ? 'CHANNEL PARTNER' :
+          role === 'EMPLOYEE' ? 'EMPLOYEE' : 'SALES AGENT'
 
   return (
     <>

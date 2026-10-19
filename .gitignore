@@ -49,4 +49,8 @@ supabase-upgrade.sql
 mock_expenses_dataset.sql
 add_payment_milestones.sql
 add_payment_plans.sql
+add_commission_area_and_tiers.sql
+add_commissions_pin.sql
+fix_commissions_rls.sql
+
 

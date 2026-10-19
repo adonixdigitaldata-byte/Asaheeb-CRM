@@ -7,7 +7,8 @@ import { formatTimeAgo } from '@/lib/utils'
 import {
   UserPlus, Search, Shield, User, Briefcase, Phone, Mail,
   CheckCircle2, AlertCircle, Edit3, Trash2, ChevronRight, Activity,
-  RotateCcw, Link as LinkIcon, Sparkles, ChevronLeft, CalendarClock
+  RotateCcw, Link as LinkIcon, Sparkles, ChevronLeft, CalendarClock,
+  FileCheck, Loader2
 } from 'lucide-react'
 import DocumentExpiryTrackerModal from '@/components/team/DocumentExpiryTrackerModal'
 
@@ -71,6 +72,7 @@ export default function TeamClient({ members: initialMembers, currentProfile }: 
   // Modals
   const [showInviteModal, setShowInviteModal] = useState(false)
   const [showExpiryTracker, setShowExpiryTracker] = useState(false)
+
   const [inviteName, setInviteName] = useState('')
   const [inviteEmail, setInviteEmail] = useState('')
   const [invitePhone, setInvitePhone] = useState('')
@@ -87,6 +89,8 @@ export default function TeamClient({ members: initialMembers, currentProfile }: 
   const [editWorkStatus, setEditWorkStatus] = useState<WorkStatus>('AVAILABLE')
   const [editPhone, setEditPhone] = useState('')
   const [editIsActive, setEditIsActive] = useState(true)
+  const [editCommissionThresholdSar, setEditCommissionThresholdSar] = useState('')
+  const [editCommissionRatePct, setEditCommissionRatePct] = useState('')
   const [editLoading, setEditLoading] = useState(false)
 
   // Delete Modal
@@ -200,6 +204,8 @@ export default function TeamClient({ members: initialMembers, currentProfile }: 
     setEditWorkStatus(m.work_status || 'AVAILABLE')
     setEditPhone(m.phone || '')
     setEditIsActive(m.is_active !== false)
+    setEditCommissionThresholdSar(m.commission_threshold_sar ? String(m.commission_threshold_sar) : '')
+    setEditCommissionRatePct(m.commission_rate_pct ? String(m.commission_rate_pct) : '')
   }
 
   async function handleSaveEdit(e: React.FormEvent) {
@@ -219,6 +225,8 @@ export default function TeamClient({ members: initialMembers, currentProfile }: 
           work_status: editWorkStatus,
           phone: editPhone.trim(),
           is_active: editIsActive,
+          commission_threshold_sar: Number(editCommissionThresholdSar) || 0,
+          commission_rate_pct: Number(editCommissionRatePct) || 0,
         }),
       })
       const result = await res.json()
@@ -235,6 +243,8 @@ export default function TeamClient({ members: initialMembers, currentProfile }: 
                 work_status: editWorkStatus,
                 phone: editPhone.trim(),
                 is_active: editIsActive,
+                commission_threshold_sar: Number(editCommissionThresholdSar) || 0,
+                commission_rate_pct: Number(editCommissionRatePct) || 0,
               }
             : m
         )
@@ -412,6 +422,7 @@ export default function TeamClient({ members: initialMembers, currentProfile }: 
               <option value="ADMIN">Admins</option>
               <option value="SALES_MANAGER">Sales Managers</option>
               <option value="AGENT">Sales Agents</option>
+              <option value="CHANNEL_PARTNER">Channel Partners</option>
               <option value="EMPLOYEE">Technical Staff</option>
             </select>
 
@@ -431,16 +442,16 @@ export default function TeamClient({ members: initialMembers, currentProfile }: 
 
         {/* Team Directory Table */}
         <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
-          <div className="table-responsive-wrapper" style={{ overflowX: 'auto', width: '100%' }}>
-            <table className="table" style={{ width: '100%', minWidth: '850px', tableLayout: 'fixed', fontSize: '13px' }}>
+          <div className="table-responsive-wrapper" style={{ width: '100%' }}>
+            <table className="table" style={{ width: '100%', tableLayout: 'fixed', fontSize: '13px' }}>
               <thead>
                 <tr>
-                  <th style={{ width: '25%', padding: '8px 10px', fontSize: '11px' }}>Team Member</th>
-                  <th style={{ width: '11%', padding: '8px 10px', fontSize: '11px' }}>Role</th>
-                  <th style={{ width: '15%', padding: '8px 10px', fontSize: '11px' }}>Specialization</th>
-                  <th style={{ width: '13%', padding: '8px 10px', fontSize: '11px' }}>Account Status</th>
+                  <th style={{ width: '26%', padding: '8px 10px', fontSize: '11px' }}>Team Member</th>
+                  <th style={{ width: '12%', padding: '8px 10px', fontSize: '11px' }}>Role</th>
+                  <th style={{ width: '16%', padding: '8px 10px', fontSize: '11px' }}>Specialization</th>
+                  <th style={{ width: '12%', padding: '8px 10px', fontSize: '11px' }}>Account Status</th>
                   <th style={{ width: '11%', padding: '8px 10px', fontSize: '11px' }}>Last Active</th>
-                  <th style={{ width: '25%', padding: '8px 10px', fontSize: '11px', textAlign: 'right' }}>Actions</th>
+                  <th style={{ width: '23%', padding: '8px 10px', fontSize: '11px', textAlign: 'right' }}>Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -454,11 +465,13 @@ export default function TeamClient({ members: initialMembers, currentProfile }: 
                   paginatedMembers.map((member) => {
                     const roleBadgeClass =
                       member.role === 'ADMIN' ? 'badge-admin' :
-                      member.role === 'SALES_MANAGER' ? 'badge-admin' : 'badge-agent'
+                      member.role === 'SALES_MANAGER' ? 'badge-admin' :
+                      member.role === 'CHANNEL_PARTNER' ? 'badge-warning' : 'badge-agent'
 
                     const roleDisplay =
                       member.role === 'ADMIN' ? 'Admin' :
                       member.role === 'SALES_MANAGER' ? 'Sales Manager' :
+                      member.role === 'CHANNEL_PARTNER' ? 'Channel Partner' :
                       member.role === 'AGENT' ? 'Sales Agent' : 'Technical'
 
                     const statusClass =
@@ -571,18 +584,30 @@ export default function TeamClient({ members: initialMembers, currentProfile }: 
 
                         {/* Actions Column */}
                         <td style={{ padding: '8px 10px', textAlign: 'right', whiteSpace: 'nowrap' }}>
-                          <div style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-                            {isAdmin && (
-                              <button
-                                onClick={() => handleSendResetLink(member)}
-                                disabled={isActing}
-                                className="btn btn-outline btn-xs"
-                                style={{ fontSize: '11px', padding: '2px 6px', fontWeight: 600 }}
-                                title="Send invitation / password reset link via Resend"
-                              >
-                                Reset Link
-                              </button>
-                            )}
+                          <div style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'flex-end', gap: 4 }}>
+                            {/* Contract Link: Opens dedicated page in new tab */}
+                            <a
+                              href={`/team/${member.id}/contract`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="btn btn-outline btn-xs"
+                              style={{
+                                fontSize: '11px',
+                                padding: '2px 7px',
+                                fontWeight: 700,
+                                color: member.role === 'CHANNEL_PARTNER' ? '#B45309' : '#1D4ED8',
+                                borderColor: member.role === 'CHANNEL_PARTNER' ? '#FDE68A' : '#BFDBFE',
+                                backgroundColor: member.role === 'CHANNEL_PARTNER' ? '#FFFBEB' : '#EFF6FF',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: 4,
+                                textDecoration: 'none',
+                              }}
+                              title="Open official contract in a new tab"
+                            >
+                              <FileCheck size={11} />
+                              <span>{member.role === 'CHANNEL_PARTNER' ? 'Agreement' : 'Contract'}</span>
+                            </a>
 
                             {isAdmin && (
                               <button
@@ -593,6 +618,24 @@ export default function TeamClient({ members: initialMembers, currentProfile }: 
                                 title="Edit Profile"
                               >
                                 Edit
+                              </button>
+                            )}
+
+                            {isAdmin && (
+                              <button
+                                onClick={() => handleSendResetLink(member)}
+                                disabled={isActing}
+                                className="btn btn-outline btn-xs"
+                                style={{
+                                  fontSize: '11px',
+                                  padding: '2px 5px',
+                                  color: 'var(--text-secondary)',
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                }}
+                                title="Send invitation / password reset link via email"
+                              >
+                                <RotateCcw size={11} />
                               </button>
                             )}
 
@@ -607,10 +650,11 @@ export default function TeamClient({ members: initialMembers, currentProfile }: 
                                   color: member.is_active !== false ? '#DC2626' : '#16A34A',
                                   borderColor: member.is_active !== false ? '#FCA5A5' : '#86EFAC',
                                   background: member.is_active !== false ? '#FEF2F2' : '#F0FDF4',
-                                  fontWeight: 600
+                                  fontWeight: 600,
                                 }}
+                                title={member.is_active !== false ? 'Deactivate account' : 'Activate account'}
                               >
-                                {member.is_active !== false ? 'Deactivate' : 'Activate'}
+                                {member.is_active !== false ? 'Off' : 'On'}
                               </button>
                             )}
 
@@ -621,14 +665,16 @@ export default function TeamClient({ members: initialMembers, currentProfile }: 
                                 className="btn btn-outline btn-xs"
                                 style={{
                                   fontSize: '11px',
-                                  padding: '2px 6px',
+                                  padding: '2px 5px',
                                   color: '#DC2626',
                                   borderColor: '#FCA5A5',
                                   background: '#FEF2F2',
-                                  fontWeight: 600
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
                                 }}
+                                title="Delete Staff Member"
                               >
-                                Delete
+                                <Trash2 size={11} />
                               </button>
                             )}
                           </div>
@@ -759,6 +805,7 @@ export default function TeamClient({ members: initialMembers, currentProfile }: 
                     style={{ width: '100%', height: 38 }}
                   >
                     <option value="AGENT">Sales Agent</option>
+                    <option value="CHANNEL_PARTNER">Channel Partner</option>
                     <option value="SALES_MANAGER">Sales Manager</option>
                     <option value="EMPLOYEE">Technical / Operations</option>
                     <option value="ADMIN">System Administrator</option>
@@ -862,6 +909,7 @@ export default function TeamClient({ members: initialMembers, currentProfile }: 
                     style={{ width: '100%', height: 38 }}
                   >
                     <option value="AGENT">Sales Agent</option>
+                    <option value="CHANNEL_PARTNER">Channel Partner</option>
                     <option value="SALES_MANAGER">Sales Manager</option>
                     <option value="EMPLOYEE">Technical / Operations</option>
                     <option value="ADMIN">System Administrator</option>
@@ -901,6 +949,43 @@ export default function TeamClient({ members: initialMembers, currentProfile }: 
                     onChange={(e) => setEditPhone(e.target.value)}
                     className="form-input"
                   />
+                </div>
+
+                {/* Commission Target (X) & Tier Rate (Y%) */}
+                <div style={{ padding: '12px 14px', backgroundColor: '#F8FAFC', borderRadius: '10px', border: '1px solid #E2E8F0' }}>
+                  <div style={{ fontSize: '12px', fontWeight: 700, color: '#0F172A', marginBottom: '8px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <span>🎯 Commission Target &amp; Tier Formula</span>
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+                    <div className="form-group" style={{ margin: 0 }}>
+                      <label className="form-label" style={{ fontSize: '11px', fontWeight: 600 }}>Base Target (X - SAR)</label>
+                      <input
+                        type="number"
+                        min="0"
+                        value={editCommissionThresholdSar}
+                        onChange={(e) => setEditCommissionThresholdSar(e.target.value)}
+                        className="form-input"
+                        placeholder="e.g. 50000"
+                        style={{ height: '34px', fontSize: '12px' }}
+                      />
+                    </div>
+                    <div className="form-group" style={{ margin: 0 }}>
+                      <label className="form-label" style={{ fontSize: '11px', fontWeight: 600 }}>Tier Rate (Y - %)</label>
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        value={editCommissionRatePct}
+                        onChange={(e) => setEditCommissionRatePct(e.target.value)}
+                        className="form-input"
+                        placeholder="e.g. 2.5"
+                        style={{ height: '34px', fontSize: '12px' }}
+                      />
+                    </div>
+                  </div>
+                  <div style={{ fontSize: '11px', color: '#64748B', marginTop: '6px' }}>
+                    Commission = (Closed Volume - Base Target X) × Tier Rate Y%
+                  </div>
                 </div>
 
                 <div style={{ marginTop: 6 }}>

@@ -4,7 +4,7 @@ import React, { useState, useMemo } from 'react'
 import { Profile, Payslip } from '@/types/database'
 import { formatCurrencyAmount, getMonthName } from '@/lib/payroll-utils'
 import PayslipDocument from '@/components/payroll/PayslipDocument'
-import { FileText, Eye, Printer, ShieldCheck, ArrowRight, Archive, Loader2, Download } from 'lucide-react'
+import { FileText, Eye, Printer, ShieldCheck, ArrowRight, Archive, Loader2, Download, FileCheck } from 'lucide-react'
 import Link from 'next/link'
 import { exportPayslipsAsZip, ZipExportProgress } from '@/lib/payslip-pdf-export'
 
@@ -66,6 +66,27 @@ export default function MyPayslipsClient({ currentProfile, payslips }: Props) {
         </div>
 
         <div className="flex items-center gap-2">
+          <a
+            href={`/team/${currentProfile.id}/contract?from=payslips`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="btn btn-outline btn-sm"
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 6,
+              fontWeight: 700,
+              borderColor: '#BFDBFE',
+              backgroundColor: '#EFF6FF',
+              color: '#1D4ED8',
+              textDecoration: 'none',
+            }}
+            title="Open your official sales employment contract in a new tab"
+          >
+            <FileCheck size={14} />
+            <span>📄 My Sales Contract</span>
+          </a>
+
           {payslips.length > 0 && (
             <button
               onClick={handleDownloadZip}

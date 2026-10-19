@@ -62,7 +62,7 @@ export default function AddLeadModal({
     potential_value: '',
     source: 'MANUAL',
     stage_id: stages[0]?.id ?? '',
-    assigned_agent_id: (userRole === 'AGENT' || userRole === 'EMPLOYEE') ? currentUserId : 'AUTO',
+    assigned_agent_id: (userRole === 'AGENT' || userRole === 'EMPLOYEE' || userRole === 'CHANNEL_PARTNER') ? currentUserId : 'AUTO',
     notes: '',
   })
 
@@ -124,7 +124,7 @@ export default function AddLeadModal({
           potential_value: form.potential_value ? parseFloat(form.potential_value) : null,
           source: form.source,
           stage_id: form.stage_id,
-          assigned_agent_id: form.assigned_agent_id || null,
+          assigned_agent_id: (userRole === 'AGENT' || userRole === 'EMPLOYEE' || userRole === 'CHANNEL_PARTNER') ? currentUserId : (form.assigned_agent_id || null),
           property_id: resolvedPropertyId,
           campaign_id: null, // Always none for manual entry
           notes: form.notes.trim() || null,
@@ -308,7 +308,7 @@ export default function AddLeadModal({
               {/* Assigned Agent */}
               <div className="form-group">
                 <label className="form-label">Assign to Agent</label>
-                {(userRole === 'AGENT' || userRole === 'EMPLOYEE') ? (
+                {(userRole === 'AGENT' || userRole === 'EMPLOYEE' || userRole === 'CHANNEL_PARTNER') ? (
                   <div>
                     <div
                       className="form-input flex items-center justify-between"
@@ -326,7 +326,9 @@ export default function AddLeadModal({
                       <span style={{ fontSize: '11px', color: '#64748B', fontWeight: 600 }}>Default</span>
                     </div>
                     <span style={{ fontSize: 11, color: '#16A34A', marginTop: 4, display: 'block' }}>
-                      ✓ As a sales agent, leads you create are automatically assigned to your personal pipeline.
+                      {userRole === 'CHANNEL_PARTNER'
+                        ? '✓ As a channel partner, leads you create are strictly assigned directly to you.'
+                        : '✓ As a sales agent, leads you create are automatically assigned to your personal pipeline.'}
                     </span>
                   </div>
                 ) : (

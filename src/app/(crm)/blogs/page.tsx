@@ -21,5 +21,9 @@ export default async function BlogsPage() {
     .eq('id', user.id)
     .single()
 
+  if (profile?.role === 'CHANNEL_PARTNER') {
+    redirect('/my-sales')
+  }
+
   return <BlogsClient profile={profile as Profile} />
 }

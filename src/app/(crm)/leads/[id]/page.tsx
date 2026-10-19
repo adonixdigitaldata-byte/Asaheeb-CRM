@@ -28,10 +28,12 @@ export default async function LeadDetailPage({
     .single()
 
   // Parallel fetch: lead, stages, agents, notes, followups, activities, projects
+  const isManagerOrAdmin = profile?.role === 'ADMIN' || profile?.role === 'SALES_MANAGER'
+
   const [
     { data: lead },
     { data: stages },
-    { data: agents },
+    agentsRes,
     { data: notes },
     { data: followups },
     { data: activities },
@@ -49,7 +51,9 @@ export default async function LeadDetailPage({
       .eq('id', id)
       .single(),
     supabase.from('lead_stages').select('*'),
-    supabase.from('profiles').select('id, name, email').eq('is_active', true).order('name'),
+    isManagerOrAdmin
+      ? supabase.from('profiles').select('id, name, email').eq('is_active', true).order('name')
+      : Promise.resolve({ data: profile ? [{ id: profile.id, name: profile.name, email: profile.email }] : [] }),
     supabase
       .from('lead_notes')
       .select('*, author:profiles(id, name, email)')
@@ -76,19 +80,20 @@ export default async function LeadDetailPage({
     notFound()
   }
 
-  // Security check: if AGENT and not assigned to this lead, redirect
-  if (profile?.role === 'AGENT' && lead.assigned_agent_id !== profile.id) {
+  // Security check: if not Admin or Sales Manager, lead MUST be assigned to current user
+  if (!isManagerOrAdmin && lead.assigned_agent_id !== profile?.id) {
     redirect('/leads')
   }
 
   const sortedStages = sortLeadStages((stages as LeadStage[]) ?? [])
+  const agents = agentsRes.data ?? []
 
   return (
     <LeadDetailClient
       lead={lead as unknown as Lead}
       profile={profile as Profile}
       stages={sortedStages}
-      agents={agents ?? []}
+      agents={agents}
       notes={(notes as LeadNote[]) ?? []}
       followups={(followups as LeadFollowup[]) ?? []}
       activities={(activities as LeadActivity[]) ?? []}

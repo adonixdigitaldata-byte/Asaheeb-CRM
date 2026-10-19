@@ -10,6 +10,7 @@ export type PinSectionType = 'expenses' | 'attendance' | 'commissions' | 'payrol
 
 interface SecurityPinGuardProps {
   pinType: PinSectionType
+  customColumnName?: string
   profile: Profile | null
   title: string
   subtitle?: string
@@ -24,6 +25,7 @@ interface SecurityPinGuardProps {
 
 export default function SecurityPinGuard({
   pinType,
+  customColumnName,
   profile,
   title,
   subtitle = 'Protected executive area. Please enter your security PIN to access confidential data.',
@@ -36,14 +38,14 @@ export default function SecurityPinGuard({
   const router = useRouter()
   const supabase = createClient()
 
-  const storageKey = `asaheeb_${pinType}_unlocked`
-  const pinStorageKey = `asaheeb_${pinType}_pin`
+  const storageKey = `asaheeb_${customColumnName || pinType}_unlocked`
+  const pinStorageKey = `asaheeb_${customColumnName || pinType}_pin`
   const defaultPin = '1234'
 
-  // Retrieve current PIN from profile column (e.g. expenses_pin, attendance_pin, etc.) or localStorage fallback
+  // Retrieve current PIN from profile column (e.g. sales_admin_password, expenses_pin, etc.) or localStorage fallback
   const getProfilePin = (): string => {
     if (!profile) return localStorage.getItem(pinStorageKey) || defaultPin
-    const colName = `${pinType}_pin` as keyof Profile
+    const colName = (customColumnName || `${pinType}_pin`) as keyof Profile
     const val = profile[colName]
     if (typeof val === 'string' && val.trim()) {
       return val.trim()
@@ -126,8 +128,9 @@ export default function SecurityPinGuard({
 
       // 2. Persist to Supabase profiles table if logged in
       if (profile?.id) {
+        const targetColumn = customColumnName || `${pinType}_pin`
         const updatePayload: Record<string, string> = {
-          [`${pinType}_pin`]: cleanPin,
+          [targetColumn]: cleanPin,
         }
         const { error } = await supabase
           .from('profiles')
@@ -135,10 +138,10 @@ export default function SecurityPinGuard({
           .eq('id', profile.id)
 
         if (error) {
-          console.warn(`Could not persist ${pinType}_pin to database column, using localStorage fallback:`, error.message)
+          console.warn(`Could not persist ${targetColumn} to database column, using localStorage fallback:`, error.message)
         } else {
           // Mutate local profile object
-          ;(profile as any)[`${pinType}_pin`] = cleanPin
+          ;(profile as any)[targetColumn] = cleanPin
         }
       }
 

@@ -83,9 +83,9 @@ export async function POST(req: Request) {
           .select('role')
           .eq('id', user.id)
           .single()
-        if (profile && profile.role !== 'ADMIN' && profile.role !== 'SALES_MANAGER') {
+        if (profile && profile.role !== 'ADMIN') {
           return NextResponse.json(
-            { error: 'Forbidden: Admin or Manager access required' },
+            { error: 'Forbidden: Admin access required' },
             { status: 403, headers: NO_CACHE_HEADERS }
           )
         }

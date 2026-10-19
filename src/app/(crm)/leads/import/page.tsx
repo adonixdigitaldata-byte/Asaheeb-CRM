@@ -14,6 +14,11 @@ export default async function LeadImportPage() {
   const { data: currentProfile } = await supabase.from('profiles').select('*').eq('id', user.id).single()
   if (!currentProfile) redirect('/login')
 
+  // Only Admins and Sales Managers can import leads
+  if (currentProfile.role !== 'ADMIN' && currentProfile.role !== 'SALES_MANAGER') {
+    redirect('/leads')
+  }
+
   const [
     { data: stages },
     { data: agents },

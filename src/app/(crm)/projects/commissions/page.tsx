@@ -28,8 +28,8 @@ export default async function ProjectCommissionsPage() {
 
   if (!profile) redirect('/login')
 
-  // Strictly restricted to ADMIN role only
-  if (profile.role !== 'ADMIN') {
+  // Strictly restricted to ADMIN and SALES_MANAGER roles
+  if (profile.role !== 'ADMIN' && profile.role !== 'SALES_MANAGER') {
     redirect('/projects')
   }
 

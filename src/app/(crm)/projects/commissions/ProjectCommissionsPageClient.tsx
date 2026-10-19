@@ -71,19 +71,19 @@ export default function ProjectCommissionsPageClient({ profile }: Props) {
 
   // Fetch all projects and commissions
   const fetchData = useCallback(async () => {
-    if (profile?.role !== 'ADMIN') return
+    if (profile?.role !== 'ADMIN' && profile?.role !== 'SALES_MANAGER') return
     setLoading(true)
     try {
       const [projectsRes, commsRes] = await Promise.all([
         supabase.from('projects').select('*').order('sort_order', { ascending: true }),
-        supabase.from('project_commissions').select('*').order('sale_date', { ascending: false }),
+        fetch('/api/projects/commissions').then((r) => r.json()),
       ])
 
       if (projectsRes.data) {
         setProjects(projectsRes.data as Project[])
       }
-      if (commsRes.data) {
-        setCommissions(commsRes.data as ProjectCommission[])
+      if (commsRes.commissions) {
+        setCommissions(commsRes.commissions as ProjectCommission[])
       }
     } catch (err) {
       console.error('Error loading commissions page data:', err)
@@ -130,6 +130,7 @@ export default function ProjectCommissionsPageClient({ profile }: Props) {
   const summaryMetrics = useMemo(() => {
     const totalEarned = commissions.reduce((sum, c) => sum + Number(c.commission_amount || 0), 0)
     const totalUnitsSold = commissions.length
+    const totalAreaSold = commissions.reduce((sum, c) => sum + Number(c.area_sqm || 0), 0)
     const projectsWithSales = projectAggregates.filter((p) => p.unitsSold > 0)
     
     // Top revenue project
@@ -140,6 +141,7 @@ export default function ProjectCommissionsPageClient({ profile }: Props) {
     return {
       totalEarned,
       totalUnitsSold,
+      totalAreaSold,
       projectsWithSalesCount: projectsWithSales.length,
       topProject,
       avgPerDeal,
@@ -233,16 +235,16 @@ export default function ProjectCommissionsPageClient({ profile }: Props) {
     return filteredTransactions.slice(start, start + transactionPageSize)
   }, [filteredTransactions, transactionPage, transactionPageSize])
 
-  if (profile?.role !== 'ADMIN') {
+  if (profile?.role !== 'ADMIN' && profile?.role !== 'SALES_MANAGER') {
     return (
       <div className="page-container" style={{ minHeight: '80vh', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '24px' }}>
         <div className="card" style={{ maxWidth: '480px', width: '100%', padding: '36px 24px', textAlign: 'center', border: '1px solid #FECACA', backgroundColor: '#FEF2F2' }}>
           <ShieldCheck size={48} style={{ color: '#DC2626', margin: '0 auto 12px' }} />
           <h2 style={{ fontSize: '18px', fontWeight: 800, color: '#991B1B', margin: '0 0 6px 0' }}>
-            Administrator Access Required
+            Executive Access Required
           </h2>
           <p style={{ fontSize: '13px', color: '#7F1D1D', margin: '0 0 18px 0', lineHeight: '1.5' }}>
-            The Project Commissions Performance Hub and brokerage payout data are strictly restricted to system administrators.
+            The Project Commissions Performance Hub and brokerage payout data are restricted to System Administrators and Sales Managers.
           </p>
           <Link
             href="/projects"
@@ -433,6 +435,31 @@ export default function ProjectCommissionsPageClient({ profile }: Props) {
             </div>
             <div style={{ fontSize: '12px', color: '#2563EB', marginTop: '3px', fontWeight: 500 }}>
               {summaryMetrics.projectsWithSalesCount} of {projects.length} managed project developments have closed deals
+            </div>
+          </div>
+
+          {/* Card 3: Total Area Sold (m²) */}
+          <div
+            className="card"
+            style={{
+              padding: '18px 20px',
+              background: 'linear-gradient(135deg, #FEF3C7 0%, #FDE68A 100%)',
+              border: '1px solid #FCD34D',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <span style={{ fontSize: '11.5px', fontWeight: 700, color: '#92400E', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                Total Area Sold
+              </span>
+              <div style={{ width: '32px', height: '32px', borderRadius: '8px', backgroundColor: '#FDE68A', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#78350F' }}>
+                <Layers size={17} />
+              </div>
+            </div>
+            <div style={{ fontSize: '24px', fontWeight: 800, color: '#78350F', marginTop: '6px' }}>
+              {summaryMetrics.totalAreaSold.toLocaleString('en-US', { minimumFractionDigits: 1, maximumFractionDigits: 1 })} m²
+            </div>
+            <div style={{ fontSize: '12px', color: '#92400E', marginTop: '3px', fontWeight: 500 }}>
+              Layout square meters across {summaryMetrics.totalUnitsSold} recorded sales
             </div>
           </div>
 
@@ -1191,8 +1218,15 @@ export default function ProjectCommissionsPageClient({ profile }: Props) {
 
                             {/* Unit & Buyer */}
                             <td style={{ padding: '14px', verticalAlign: 'middle' }}>
-                              <div style={{ fontWeight: 700, color: '#1E293B', fontSize: '12.5px' }}>
-                                {c.unit_name || 'Unit Deal'}
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                                <span style={{ fontWeight: 700, color: '#1E293B', fontSize: '12.5px' }}>
+                                  {c.unit_name || 'Unit Deal'}
+                                </span>
+                                {c.area_sqm && Number(c.area_sqm) > 0 && (
+                                  <span style={{ fontSize: '10.5px', fontWeight: 700, color: '#92400E', backgroundColor: '#FEF3C7', padding: '1px 6px', borderRadius: '4px', border: '1px solid #FDE68A' }}>
+                                    {Number(c.area_sqm).toLocaleString('en-US')} m²
+                                  </span>
+                                )}
                               </div>
                               <div style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '11px', color: '#64748B', marginTop: '2px' }}>
                                 <User size={10} />

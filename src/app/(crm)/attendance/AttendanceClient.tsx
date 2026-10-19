@@ -94,8 +94,7 @@ interface AttendanceClientProps {
 export default function AttendanceClient({ profile }: AttendanceClientProps) {
   const role = profile?.role || 'AGENT'
   const isAdmin = role === 'ADMIN'
-  const isManager = role === 'SALES_MANAGER'
-  const canManage = isAdmin || isManager
+  const canManage = isAdmin
   const userId = profile?.id || 'guest-user'
 
   // Tab State
@@ -1130,37 +1129,41 @@ export default function AttendanceClient({ profile }: AttendanceClientProps) {
             </button>
           )}
 
-          <button
-            onClick={onChangePin}
-            className="btn btn-outline"
-            style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: 6,
-              fontWeight: 600,
-              backgroundColor: '#FFFFFF',
-            }}
-            title="Change Attendance Security PIN"
-          >
-            <KeyRound size={15} style={{ color: '#0284C7' }} /> Change PIN
-          </button>
+          {isAdmin && (
+            <>
+              <button
+                onClick={onChangePin}
+                className="btn btn-outline"
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  fontWeight: 600,
+                  backgroundColor: '#FFFFFF',
+                }}
+                title="Change Attendance Security PIN"
+              >
+                <KeyRound size={15} style={{ color: '#0284C7' }} /> Change PIN
+              </button>
 
-          <button
-            onClick={onLock}
-            className="btn btn-outline"
-            style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: 6,
-              fontWeight: 700,
-              backgroundColor: '#FEF2F2',
-              color: '#DC2626',
-              borderColor: '#FECACA',
-            }}
-            title="Lock Attendance Vault"
-          >
-            <Lock size={15} /> Lock
-          </button>
+              <button
+                onClick={onLock}
+                className="btn btn-outline"
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  fontWeight: 700,
+                  backgroundColor: '#FEF2F2',
+                  color: '#DC2626',
+                  borderColor: '#FECACA',
+                }}
+                title="Lock Attendance Vault"
+              >
+                <Lock size={15} /> Lock
+              </button>
+            </>
+          )}
 
           {/* Admin Office Location Button */}
           {isAdmin && (

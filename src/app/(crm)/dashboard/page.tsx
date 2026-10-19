@@ -129,27 +129,49 @@ export default async function DashboardPage() {
   ] = await Promise.all([
     supabase.from('lead_stages').select('*').order('sort_order'),
 
-    // Fetch ALL leads in batches to bypass Supabase 1000-row default limit
-    fetchAllInBatches<{ id: string; stage_id: string; source: string; assigned_agent_id: string | null; meeting_date: string | null }>((from, to) =>
-      supabase.from('leads').select('id, stage_id, source, assigned_agent_id, meeting_date').range(from, to)
-    ),
+    // Fetch leads in batches (all for managers, personal only for agents & channel partners)
+    fetchAllInBatches<{ id: string; stage_id: string; source: string; assigned_agent_id: string | null; meeting_date: string | null }>((from, to) => {
+      let q = supabase.from('leads').select('id, stage_id, source, assigned_agent_id, meeting_date')
+      if (!isManagerOrAdmin) {
+        q = q.eq('assigned_agent_id', user.id)
+      }
+      return q.range(from, to)
+    }),
 
     // Exact database count (never truncated)
-    supabase.from('leads').select('*', { count: 'exact', head: true }),
+    (() => {
+      let q = supabase.from('leads').select('*', { count: 'exact', head: true })
+      if (!isManagerOrAdmin) {
+        q = q.eq('assigned_agent_id', user.id)
+      }
+      return q
+    })(),
 
-    supabase
-      .from('leads')
-      .select('id, name, phone, potential_value, stage_id, source, created_at, stage:lead_stages(label, color_hex), property:projects(name_en)')
-      .order('created_at', { ascending: false })
-      .limit(10),
+    (() => {
+      let q = supabase
+        .from('leads')
+        .select('id, name, phone, potential_value, stage_id, source, created_at, stage:lead_stages(label, color_hex), property:projects(name_en)')
+        .order('created_at', { ascending: false })
+        .limit(10)
+      if (!isManagerOrAdmin) {
+        q = q.eq('assigned_agent_id', user.id)
+      }
+      return q
+    })(),
 
-    // Existing: global pending followups for "Scheduled Follow-ups" card
-    supabase
-      .from('lead_followups')
-      .select('*, lead:leads(id, name, phone), agent:profiles(name)')
-      .eq('is_completed', false)
-      .order('scheduled_at', { ascending: true })
-      .limit(10),
+    // Pending followups for "Scheduled Follow-ups" card
+    (() => {
+      let q = supabase
+        .from('lead_followups')
+        .select('*, lead:leads(id, name, phone), agent:profiles(name)')
+        .eq('is_completed', false)
+        .order('scheduled_at', { ascending: true })
+        .limit(10)
+      if (!isManagerOrAdmin) {
+        q = q.eq('agent_id', user.id)
+      }
+      return q
+    })(),
 
     // Overdue followups for current user (past due, not completed)
     supabase

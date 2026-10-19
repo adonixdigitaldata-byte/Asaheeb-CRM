@@ -11,6 +11,7 @@ interface PaginationProps {
   onPageSizeChange?: (pageSize: number) => void
   pageSizeOptions?: number[]
   itemLabel?: string
+  scrollToTop?: boolean
 }
 
 export default function Pagination({
@@ -21,6 +22,7 @@ export default function Pagination({
   onPageSizeChange,
   pageSizeOptions = [15, 20, 50, 100, 500],
   itemLabel = 'items',
+  scrollToTop = true,
 }: PaginationProps) {
   const totalPages = Math.ceil(totalItems / pageSize)
 
@@ -29,7 +31,7 @@ export default function Pagination({
   function handlePageChange(newPage: number) {
     if (newPage < 1 || newPage > totalPages || newPage === currentPage) return
     onPageChange(newPage)
-    if (typeof window !== 'undefined') {
+    if (scrollToTop && typeof window !== 'undefined') {
       window.scrollTo({ top: 0, behavior: 'smooth' })
     }
   }

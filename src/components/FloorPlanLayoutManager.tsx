@@ -37,7 +37,9 @@ export const LAYOUT_CATEGORIES = [
 const FEATURE_PRESETS = [
   { en: 'Private Terrace', ar: 'تراس خاص' },
   { en: 'Open Kitchen', ar: 'مطبخ مفتوح' },
+  { en: 'Separate Kitchen', ar: 'مطبخ منفصل' },
   { en: "Maid's Room", ar: 'غرفة خادمة' },
+  { en: 'Dining Room', ar: 'غرفة طعام' },
   { en: 'Powder Room', ar: 'دورة مياه ضيوف' },
   { en: 'Walk-in Closet', ar: 'خزانة ملابس مدمجة' },
   { en: 'Panoramic View', ar: 'إطلالة بانورامية' },
@@ -47,6 +49,10 @@ const FEATURE_PRESETS = [
   { en: '2 Private Roofs', ar: 'سطحان خاصان' },
   { en: 'Guest Majlis', ar: 'مجلس ضيوف' },
   { en: 'Two entrances', ar: 'مدخلان' },
+  { en: 'One entrance', ar: 'مدخل واحد' },
+  { en: 'Corner Unit', ar: 'وحدة ركنية' },
+  { en: 'Front Facing', ar: 'واجهة أمامية' },
+  { en: 'Rear Facing', ar: 'واجهة خلفية' },
   { en: 'Private Parking', ar: 'موقف خاص' },
 ]
 

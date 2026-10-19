@@ -26,5 +26,9 @@ export default async function MortgageLeadsPage() {
     .eq('id', user.id)
     .single()
 
+  if (profile?.role === 'CHANNEL_PARTNER') {
+    redirect('/leads')
+  }
+
   return <MortgageLeadsClient profile={profile as Profile} />
 }

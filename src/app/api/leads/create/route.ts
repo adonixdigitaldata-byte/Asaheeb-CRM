@@ -46,9 +46,12 @@ export async function POST(request: NextRequest) {
   let targetAgentId = assigned_agent_id || null
   let autoAssignedAgent: any = null
 
-  // 1. Auto-assign to self if current user is an AGENT or EMPLOYEE and no agent was explicitly selected
-  const isIndividualContributor = profile?.role === 'AGENT' || profile?.role === 'EMPLOYEE'
-  if (isIndividualContributor && (!targetAgentId || targetAgentId === 'AUTO')) {
+  // 1. Channel Partner MUST strictly and only assign leads to themselves
+  if (profile?.role === 'CHANNEL_PARTNER') {
+    targetAgentId = user.id
+  }
+  // 2. Auto-assign to self if current user is an AGENT or EMPLOYEE and no agent was explicitly selected
+  else if ((profile?.role === 'AGENT' || profile?.role === 'EMPLOYEE') && (!targetAgentId || targetAgentId === 'AUTO')) {
     targetAgentId = user.id
   } 
   // 2. If left unassigned, empty, or 'AUTO', run Round-Robin among available sales agents

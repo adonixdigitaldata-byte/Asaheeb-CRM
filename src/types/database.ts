@@ -1,4 +1,4 @@
-export type UserRole = 'ADMIN' | 'SALES_MANAGER' | 'AGENT' | 'EMPLOYEE'
+export type UserRole = 'ADMIN' | 'SALES_MANAGER' | 'AGENT' | 'CHANNEL_PARTNER' | 'EMPLOYEE'
 export type WorkStatus = 'AVAILABLE' | 'BUSY' | 'ON_LEAVE'
 
 export type LeadSource =
@@ -31,6 +31,9 @@ export interface Profile {
   expenses_pin?: string | null
   attendance_pin?: string | null
   commissions_pin?: string | null
+  sales_admin_password?: string | null
+  commission_threshold_sar?: number | null
+  commission_rate_pct?: number | null
   iqama_no?: string | null
   iqama_expiry_date?: string | null
   face_descriptor?: number[] | null
@@ -75,6 +78,8 @@ export interface ProjectCommission {
   unit_name: string
   buyer_name: string
   commission_amount: number
+  area_sqm?: number | null
+  deal_value_sar?: number | null
   sale_date: string
   notes?: string | null
   agent_id?: string | null

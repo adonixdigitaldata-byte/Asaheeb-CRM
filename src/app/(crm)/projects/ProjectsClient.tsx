@@ -90,14 +90,17 @@ export default function ProjectsClient({ profile }: Props) {
   const [customEndDate, setCustomEndDate] = useState<string>('')
 
   const fetchCommissions = useCallback(async () => {
-    if (profile?.role !== 'ADMIN') return
-    const { data, error } = await supabase
-      .from('project_commissions')
-      .select('*')
-    if (!error && data) {
-      setAllCommissions(data as ProjectCommission[])
+    if (profile?.role !== 'ADMIN' && profile?.role !== 'SALES_MANAGER') return
+    try {
+      const res = await fetch('/api/projects/commissions')
+      const data = await res.json()
+      if (data.commissions) {
+        setAllCommissions(data.commissions as ProjectCommission[])
+      }
+    } catch (err) {
+      console.error('Error loading project commissions:', err)
     }
-  }, [supabase, profile?.role])
+  }, [profile?.role])
 
   const fetchProjects = useCallback(async () => {
     setLoading(true)
@@ -189,6 +192,7 @@ export default function ProjectsClient({ profile }: Props) {
       }
     })
 
+    const totalAreaSold = filteredCommissions.reduce((sum, c) => sum + Number(c.area_sqm || 0), 0)
     const avgPerDeal = totalUnitsSold > 0 ? totalEarned / totalUnitsSold : 0
     const periodLabel =
       commissionPeriod === 'DAY'
@@ -210,6 +214,7 @@ export default function ProjectsClient({ profile }: Props) {
     return {
       totalEarned,
       totalUnitsSold,
+      totalAreaSold,
       topProjectName,
       topProjectAmount,
       topProjectUnits,
@@ -437,7 +442,7 @@ export default function ProjectsClient({ profile }: Props) {
           </button>
 
           {/* Commission Hub / Performance CTA */}
-          {profile?.role === 'ADMIN' && (
+          {(profile?.role === 'ADMIN' || profile?.role === 'SALES_MANAGER') && (
             <button
               type="button"
               onClick={() => router.push('/projects/commissions')}
@@ -492,8 +497,8 @@ export default function ProjectsClient({ profile }: Props) {
       </div>
 
       <div className="page-body" style={{ paddingBottom: '30px' }}>
-        {/* Admin Commission Performance KPI Cards (Clickable to navigate to Commissions Page) */}
-        {profile?.role === 'ADMIN' && (
+        {/* Commission Performance KPI Cards (Clickable to navigate to Commissions Page) */}
+        {(profile?.role === 'ADMIN' || profile?.role === 'SALES_MANAGER') && (
           <div style={{ marginBottom: '20px' }}>
             {/* Filter Toolbar for Commission Analytics */}
             <div
@@ -723,6 +728,46 @@ export default function ProjectsClient({ profile }: Props) {
               </div>
               <div style={{ fontSize: '10.5px', fontWeight: 700, color: '#1D4ED8', marginTop: '6px', display: 'flex', alignItems: 'center', gap: '3px' }}>
                 <span>View all sales transactions →</span>
+              </div>
+            </div>
+
+            {/* Card: Total Area Sold */}
+            <div
+              className="card"
+              onClick={() => router.push('/projects/commissions')}
+              style={{
+                padding: '16px 18px',
+                background: 'linear-gradient(135deg, #FEF3C7 0%, #FDE68A 100%)',
+                border: '1px solid #FCD34D',
+                cursor: 'pointer',
+                transition: 'all 0.18s ease',
+              }}
+              onMouseEnter={(e) => {
+                ;(e.currentTarget as HTMLElement).style.transform = 'translateY(-2px)'
+                ;(e.currentTarget as HTMLElement).style.boxShadow = '0 6px 16px rgba(217, 119, 6, 0.2)'
+              }}
+              onMouseLeave={(e) => {
+                ;(e.currentTarget as HTMLElement).style.transform = 'none'
+                ;(e.currentTarget as HTMLElement).style.boxShadow = 'none'
+              }}
+              title="Click to view total square meters breakdown"
+            >
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <span style={{ fontSize: '11px', fontWeight: 700, color: '#92400E', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                  Total Area Sold
+                </span>
+                <div style={{ width: '28px', height: '28px', borderRadius: '8px', backgroundColor: '#FDE68A', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#78350F' }}>
+                  <Layers size={15} />
+                </div>
+              </div>
+              <div style={{ fontSize: '22px', fontWeight: 800, color: '#78350F', marginTop: '6px' }}>
+                {commissionMetrics.totalAreaSold.toLocaleString('en-US', { minimumFractionDigits: 1, maximumFractionDigits: 1 })} m²
+              </div>
+              <div style={{ fontSize: '11.5px', color: '#92400E', marginTop: '2px', fontWeight: 500 }}>
+                Across {commissionMetrics.totalUnitsSold} recorded closed deal{commissionMetrics.totalUnitsSold === 1 ? '' : 's'}
+              </div>
+              <div style={{ fontSize: '10.5px', fontWeight: 700, color: '#92400E', marginTop: '6px', display: 'flex', alignItems: 'center', gap: '3px' }}>
+                <span>View square meters details →</span>
               </div>
             </div>
 
@@ -1438,6 +1483,29 @@ export default function ProjectsClient({ profile }: Props) {
                           >
                             <ShieldCheck size={14} />
                           </button>
+
+                          {(profile?.role === 'ADMIN' || profile?.role === 'SALES_MANAGER') && (
+                            <button
+                              type="button"
+                              onClick={() => setCommissioningProject(project)}
+                              className="btn btn-outline btn-sm"
+                              style={{
+                                fontSize: '11.5px',
+                                padding: '3px 8px',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '4px',
+                                borderColor: '#10B981',
+                                color: '#059669',
+                                backgroundColor: '#ECFDF5',
+                                fontWeight: 600,
+                              }}
+                              title="Record & View Unit Sales Commissions"
+                            >
+                              <SaudiRiyalIcon size={11} />
+                              <span>Sales</span>
+                            </button>
+                          )}
 
 
                           {project.is_published && (

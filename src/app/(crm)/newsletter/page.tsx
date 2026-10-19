@@ -21,5 +21,9 @@ export default async function NewsletterPage() {
     .eq('id', user.id)
     .single()
 
+  if (profile?.role === 'CHANNEL_PARTNER') {
+    redirect('/my-sales')
+  }
+
   return <NewsletterClient profile={profile as Profile} />
 }

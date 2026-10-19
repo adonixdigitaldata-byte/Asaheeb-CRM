@@ -27,19 +27,21 @@ export default async function LeadsPage({
     .eq('id', user.id)
     .single()
 
+  const isManagerOrAdmin = profile?.role === 'ADMIN' || profile?.role === 'SALES_MANAGER'
+
   const [
     { data: stages },
     { data: campaigns },
-    { data: agents },
+    agentsRes,
     { data: projects },
   ] = await Promise.all([
     supabase.from('lead_stages').select('*').order('sort_order'),
-    supabase.from('ad_campaigns').select('id, name').order('name'),
-    supabase
-      .from('profiles')
-      .select('id, name, email')
-      .eq('is_active', true)
-      .order('name'),
+    profile?.role === 'CHANNEL_PARTNER'
+      ? Promise.resolve({ data: [] })
+      : supabase.from('ad_campaigns').select('id, name').order('name'),
+    isManagerOrAdmin
+      ? supabase.from('profiles').select('id, name, email').eq('is_active', true).order('name')
+      : Promise.resolve({ data: profile ? [{ id: profile.id, name: profile.name, email: profile.email }] : [] }),
     supabase
       .from('projects')
       .select('id, name_en, name_ar, city_en, city_ar, district_en, district_ar, starting_price_en, developer_en')
@@ -47,13 +49,14 @@ export default async function LeadsPage({
   ])
 
   const sortedStages = sortLeadStages((stages as LeadStage[]) ?? [])
+  const agents = agentsRes.data ?? []
 
   return (
     <LeadsClient
       profile={profile as Profile}
       stages={sortedStages}
       campaigns={(campaigns as AdCampaign[]) ?? []}
-      agents={agents ?? []}
+      agents={agents}
       projects={(projects as Project[]) ?? []}
       initialSearchParams={resolvedSearchParams}
     />

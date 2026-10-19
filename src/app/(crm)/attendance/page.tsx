@@ -28,5 +28,9 @@ export default async function AttendancePage() {
     redirect('/login')
   }
 
+  if (currentProfile.role === 'CHANNEL_PARTNER') {
+    redirect('/dashboard')
+  }
+
   return <AttendanceClient profile={currentProfile} />
 }

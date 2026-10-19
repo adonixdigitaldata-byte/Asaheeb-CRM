@@ -15,6 +15,10 @@ export default async function TeamPage() {
   const { data: currentProfile } = await supabase.from('profiles').select('*').eq('id', user.id).single()
   if (!currentProfile) redirect('/login')
 
+  if (currentProfile.role === 'CHANNEL_PARTNER') {
+    redirect('/dashboard')
+  }
+
   // Parallel fetch: profiles, authUsers, leadCounts, wonLeads, followups
   const serviceSupabase = await createServiceClient()
 

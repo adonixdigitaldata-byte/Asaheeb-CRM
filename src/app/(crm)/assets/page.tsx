@@ -22,6 +22,10 @@ export default async function AssetsPage() {
 
   if (!currentProfile) redirect('/login')
 
+  if (currentProfile.role === 'CHANNEL_PARTNER') {
+    redirect('/dashboard')
+  }
+
   const serviceSupabase = await createServiceClient()
 
   const isAdmin = currentProfile.role === 'ADMIN'
