@@ -28,6 +28,8 @@ import {
   Clock,
   AlertTriangle,
   CheckCircle,
+  Sparkles,
+  Bot,
 } from 'lucide-react'
 import type { Lead, LeadStage, Profile } from '@/types/database'
 import { formatTimeAgo, formatDate } from '@/lib/utils'
@@ -113,6 +115,49 @@ function KanbanCardItem({
           title={lead.name || 'Unnamed Lead'}
         >
           <span>{lead.name || 'Unnamed Lead'}</span>
+          {lead.source === 'AI_AGENT' && (
+            <span
+              style={{
+                fontSize: '9.5px',
+                fontWeight: 800,
+                backgroundColor: '#FEF3C7',
+                color: '#92400E',
+                padding: '1px 6px',
+                borderRadius: '4px',
+                border: '1px solid #FCD34D',
+                flexShrink: 0,
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '3px',
+                boxShadow: '0 1px 2px rgba(245, 158, 11, 0.15)',
+              }}
+              title="Captured via AI Property Advisor"
+            >
+              <Sparkles size={9} style={{ color: '#D97706' }} />
+              <span>AI</span>
+            </span>
+          )}
+          {typeof lead.ai_qualification_score === 'number' && lead.ai_qualification_score > 0 && (
+            <span
+              style={{
+                fontSize: '9.5px',
+                fontWeight: 800,
+                backgroundColor: lead.ai_qualification_score >= 80 ? '#FEF2F2' : '#F0FDF4',
+                color: lead.ai_qualification_score >= 80 ? '#DC2626' : '#15803D',
+                padding: '1px 5px',
+                borderRadius: '4px',
+                border: `1px solid ${lead.ai_qualification_score >= 80 ? '#FECACA' : '#BBF7D0'}`,
+                flexShrink: 0,
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '2px',
+              }}
+              title={`AI Score: ${lead.ai_qualification_score}/100`}
+            >
+              <span>{lead.ai_qualification_score >= 80 ? '🔥' : '🎯'}</span>
+              <span>{lead.ai_qualification_score}%</span>
+            </span>
+          )}
           {lead.client_category === 'VIP' && (
             <span
               style={{
@@ -124,7 +169,7 @@ function KanbanCardItem({
                 borderRadius: '4px',
                 border: '1px solid #FCD34D',
                 flexShrink: 0,
-                marginLeft: '4px',
+                marginLeft: '2px',
                 display: 'inline-flex',
                 alignItems: 'center',
                 gap: '3px',
@@ -260,6 +305,16 @@ function KanbanCardItem({
           <Building size={11} style={{ flexShrink: 0 }} />
           <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
             {propertyDisplayName}
+          </span>
+        </div>
+      ) : null}
+
+      {/* Target Unit from AI Qualification */}
+      {lead.ai_preferred_unit ? (
+        <div className="flex items-center gap-1" style={{ fontSize: 11, color: '#6366F1', fontWeight: 600, marginBottom: 4 }}>
+          <span style={{ fontSize: 10 }}>🏢</span>
+          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {lead.ai_preferred_unit}
           </span>
         </div>
       ) : null}
@@ -686,6 +741,7 @@ export default function KanbanBoard({
         'site_visit_scheduled',
         'meeting_done',
         'negotiation',
+        'token_paid',
         'lost',
         'won',
       ]
@@ -859,6 +915,7 @@ export default function KanbanBoard({
       'site_visit_scheduled',
       'meeting_done',
       'negotiation',
+      'token_paid',
       'lost',
       'won',
     ]

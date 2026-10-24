@@ -11,6 +11,7 @@ export type LeadSource =
   | 'WEBSITE_FORM'
   | 'PROPERTY_INQUIRY'
   | 'BROCHURE_DOWNLOAD'
+  | 'AI_AGENT'
 
 export interface Profile {
   id: string
@@ -60,8 +61,9 @@ export const STAGE_ORDER_MAP: Record<string, number> = {
   meeting_done: 8,
   site_visit_scheduled: 9,
   negotiation: 10,
-  won: 11,
-  lost: 12,
+  token_paid: 11,
+  won: 12,
+  lost: 13,
 }
 
 export function sortLeadStages(stages: LeadStage[]): LeadStage[] {
@@ -261,11 +263,47 @@ export interface Project {
   commission_notes_en?: string | null
   commission_notes_ar?: string | null
   discount_offer?: ProjectDiscountOffer | null
+  // AI Advisor & Foreign Ownership
+  foreign_eligibility?: 'ELIGIBLE' | 'ELIGIBLE_MUSLIMS_ONLY' | 'NOT_ELIGIBLE' | 'REQUIRES_PREMIUM_RESIDENCY' | string | null
+  foreign_eligibility_en?: string | null
+  foreign_eligibility_ar?: string | null
+  ai_agent_enabled?: boolean
+  ai_agent_name_en?: string | null
+  ai_agent_name_ar?: string | null
+  ai_agent_welcome_en?: string | null
+  ai_agent_welcome_ar?: string | null
+  ai_agent_tone?: 'EXECUTIVE_LUXURY' | 'CONSULTATIVE_ADVISOR' | 'INVESTMENT_ANALYST' | string | null
+  ai_agent_custom_instructions?: string | null
+  ai_agent_quick_prompts?: Array<{
+    labelEn: string
+    labelAr: string
+    promptEn?: string
+    promptAr?: string
+  }> | null
   is_published: boolean
   sort_order: number
   created_by?: string | null
   created_at: string
   updated_at: string
+}
+
+export interface ProjectAIOptions {
+  ai_agent_enabled: boolean
+  ai_agent_name_en?: string | null
+  ai_agent_name_ar?: string | null
+  ai_agent_welcome_en?: string | null
+  ai_agent_welcome_ar?: string | null
+  ai_agent_tone?: 'EXECUTIVE_LUXURY' | 'CONSULTATIVE_ADVISOR' | 'INVESTMENT_ANALYST' | string | null
+  ai_agent_custom_instructions?: string | null
+  foreign_eligibility?: 'ELIGIBLE' | 'ELIGIBLE_MUSLIMS_ONLY' | 'NOT_ELIGIBLE' | 'REQUIRES_PREMIUM_RESIDENCY' | string | null
+  foreign_eligibility_en?: string | null
+  foreign_eligibility_ar?: string | null
+  ai_agent_quick_prompts?: Array<{
+    labelEn: string
+    labelAr: string
+    promptEn?: string
+    promptAr?: string
+  }> | null
 }
 
 export interface BlogSection {
@@ -338,13 +376,35 @@ export interface Lead {
   is_duplicate?: boolean
   duplicate_of?: string | null
   import_batch_id?: string | null
+  // AI Advisor Lead Intelligence
+  ai_qualification_score?: number | null
+  ai_buyer_intent?: 'INVESTOR' | 'FAMILY_HOME' | 'FIRST_TIME_BUYER' | 'HIGH_INTENT' | 'GENERAL' | string | null
+  ai_preferred_unit?: string | null
+  ai_chat_summary?: string | null
+  ai_session_id?: string | null
   created_at: string
   updated_at: string
   // Joins
   stage?: LeadStage | null
   assigned_agent?: { id: string; name: string; email?: string } | null
   campaign?: { id: string; name: string } | null
-  property?: { id: string; name_en: string; name_ar: string } | null
+  property?: {
+    id: string
+    name_en: string
+    name_ar: string
+    foreign_eligibility?: string | null
+    foreign_eligibility_en?: string | null
+    foreign_eligibility_ar?: string | null
+  } | null
+}
+
+export interface LeadAIData {
+  source: 'AI_AGENT' | string
+  ai_qualification_score?: number | null
+  ai_buyer_intent?: 'INVESTOR' | 'FAMILY_HOME' | 'FIRST_TIME_BUYER' | 'HIGH_INTENT' | 'GENERAL' | string | null
+  ai_preferred_unit?: string | null
+  ai_chat_summary?: string | null
+  ai_session_id?: string | null
 }
 
 export const CLIENT_CATEGORIES = [

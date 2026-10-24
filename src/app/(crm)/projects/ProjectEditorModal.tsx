@@ -31,6 +31,8 @@ import {
   ExternalLink,
   Sliders,
   Search,
+  Bot,
+  Globe,
 } from 'lucide-react'
 import { SaudiRiyalIcon } from '@/components/SaudiRiyalIcon'
 import type { Project, ProjectVideo, Landmark, Amenity, ProjectDiscountOffer, FloorPlanLayout, PaymentMilestone, PaymentPlanItem } from '@/types/database'
@@ -47,7 +49,7 @@ interface Props {
   onSuccess: () => void
 }
 
-type TabType = 'basic' | 'specs' | 'content' | 'amenities' | 'brochure' | 'floorplans' | 'payment_plans' | 'gallery' | 'activity'
+type TabType = 'basic' | 'specs' | 'content' | 'amenities' | 'brochure' | 'floorplans' | 'payment_plans' | 'gallery' | 'ai_advisor' | 'activity'
 
 function slugify(text: string): string {
   return text
@@ -185,9 +187,52 @@ export default function ProjectEditorModal({
     brochure_url_ar: project?.brochure_url_ar || '',
     brochure_size_en: project?.brochure_size_en || '',
     brochure_size_ar: project?.brochure_size_ar || '',
+    // AI Advisor & Foreign Ownership
+    foreign_eligibility: project?.foreign_eligibility || 'ELIGIBLE',
+    foreign_eligibility_en: project?.foreign_eligibility_en || '100% Freehold eligible for foreign nationals, GCC citizens, and expatriates via the Absher Real Estate Ownership portal.',
+    foreign_eligibility_ar: project?.foreign_eligibility_ar || 'تملك حر بنسبة 100% متاح لغير السعوديين والخليجيين والمقيمين عبر بوابة أبشر لتملك العقار.',
+    ai_agent_enabled: project?.ai_agent_enabled ?? false,
+    ai_agent_name_en: project?.ai_agent_name_en || 'Asaheeb Property Specialist',
+    ai_agent_name_ar: project?.ai_agent_name_ar || 'مستشار سحاب العقاري',
+    ai_agent_welcome_en: project?.ai_agent_welcome_en || 'Welcome! I am your dedicated advisor for this project. How can I assist you with floor plans, pricing, or payment schedules today?',
+    ai_agent_welcome_ar: project?.ai_agent_welcome_ar || 'أهلاً بك! أنا مستشارك المخصص لهذا المشروع. كيف يمكنني مساعدتك اليوم في استعراض المخططات، الأسعار، أو خطط السداد؟',
+    ai_agent_tone: project?.ai_agent_tone || 'EXECUTIVE_LUXURY',
+    ai_agent_custom_instructions: project?.ai_agent_custom_instructions || '',
+    ai_agent_quick_prompts: project?.ai_agent_quick_prompts || [
+      { labelEn: 'Starting price & payment plan', labelAr: 'الأسعار وخطط السداد', promptEn: 'What is the starting price and what payment terms are offered?', promptAr: 'ما هو السعر المبدئي وما هي خطة السداد المتاحة؟' },
+      { labelEn: 'Foreign buyer freehold rules', labelAr: 'شروط تملك غير السعوديين', promptEn: 'Can non-Saudi or expat buyers purchase a unit here?', promptAr: 'هل يحق للمقيم أو غير السعودي الشراء والتملك في هذا المشروع؟' },
+      { labelEn: 'Handover date & layouts', labelAr: 'موعد التسليم والمساحات', promptEn: 'When is the expected delivery date and what unit sizes are available?', promptAr: 'متى موعد التسليم المتوقع وما هي المساحات المتوفرة؟' }
+    ],
     is_published: project ? project.is_published : true,
     sort_order: project?.sort_order || 0,
   })
+
+  // Quick Prompt Chips state
+  const [newPromptChipEn, setNewPromptChipEn] = useState('')
+  const [newPromptChipAr, setNewPromptChipAr] = useState('')
+
+  function handleAddPromptChip() {
+    if (!newPromptChipEn.trim() && !newPromptChipAr.trim()) return
+    const newChip = {
+      labelEn: newPromptChipEn.trim() || newPromptChipAr.trim(),
+      labelAr: newPromptChipAr.trim() || newPromptChipEn.trim(),
+      promptEn: newPromptChipEn.trim(),
+      promptAr: newPromptChipAr.trim(),
+    }
+    setForm({
+      ...form,
+      ai_agent_quick_prompts: [...(form.ai_agent_quick_prompts || []), newChip],
+    })
+    setNewPromptChipEn('')
+    setNewPromptChipAr('')
+  }
+
+  function handleRemovePromptChip(index: number) {
+    setForm({
+      ...form,
+      ai_agent_quick_prompts: (form.ai_agent_quick_prompts || []).filter((_, i) => i !== index),
+    })
+  }
 
   // Dynamic Video items state
   const [newVideo, setNewVideo] = useState<ProjectVideo>({ url: '', titleEn: '', titleAr: '' })
@@ -624,6 +669,27 @@ export default function ProjectEditorModal({
             <span>8. Photos ({(form.images || []).length})</span>
           </button>
 
+          <button
+            type="button"
+            onClick={() => setActiveTab('ai_advisor')}
+            className={`btn btn-sm ${activeTab === 'ai_advisor' ? 'btn-primary' : 'btn-ghost'}`}
+            style={{
+              fontSize: '12.5px',
+              padding: '5px 12px',
+              color: activeTab === 'ai_advisor' ? '#FFFFFF' : '#7C3AED',
+              backgroundColor: activeTab === 'ai_advisor' ? '#7C3AED' : '#F5F3FF',
+              border: '1px solid #DDD6FE',
+            }}
+          >
+            <Bot size={14} />
+            <span>9. ✨ AI Advisor & Ownership</span>
+            {form.ai_agent_enabled && (
+              <span style={{ fontSize: 9.5, backgroundColor: '#10B981', color: '#FFFFFF', padding: '1px 5px', borderRadius: 9999, fontWeight: 700 }}>
+                ON
+              </span>
+            )}
+          </button>
+
           {isEdit && (
             <button
               type="button"
@@ -637,7 +703,7 @@ export default function ProjectEditorModal({
               }}
             >
               <ShieldCheck size={14} />
-              <span>9. Activity Log</span>
+              <span>10. Activity Log</span>
             </button>
           )}
         </div>
@@ -2714,7 +2780,357 @@ export default function ProjectEditorModal({
               />
             )}
 
-            {/* TAB 9: ACTIVITY LOG */}
+            {/* TAB 9: AI ADVISOR & OWNERSHIP RULES */}
+            {activeTab === 'ai_advisor' && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+                {/* 1. AI Advisor Activation Switch */}
+                <div
+                  style={{
+                    padding: '18px 20px',
+                    borderRadius: '10px',
+                    border: form.ai_agent_enabled ? '1.5px solid #8B5CF6' : '1px solid #E2E8F0',
+                    backgroundColor: form.ai_agent_enabled ? '#F5F3FF' : '#F8FAFC',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    gap: '16px',
+                    flexWrap: 'wrap',
+                    transition: 'all 0.2s ease',
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '14px', flex: 1, minWidth: '260px' }}>
+                    <div
+                      style={{
+                        width: '42px',
+                        height: '42px',
+                        borderRadius: '10px',
+                        backgroundColor: form.ai_agent_enabled ? '#7C3AED' : '#94A3B8',
+                        color: '#FFFFFF',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        boxShadow: form.ai_agent_enabled ? '0 4px 12px rgba(124, 58, 237, 0.3)' : 'none',
+                        flexShrink: 0,
+                      }}
+                    >
+                      <Bot size={22} />
+                    </div>
+                    <div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <h4 style={{ fontSize: '15px', fontWeight: 800, color: '#0F172A', margin: 0 }}>
+                          Enable AI Property Advisor Widget
+                        </h4>
+                        <span
+                          style={{
+                            fontSize: '11px',
+                            fontWeight: 700,
+                            padding: '2px 8px',
+                            borderRadius: '9999px',
+                            backgroundColor: form.ai_agent_enabled ? '#DCFCE7' : '#E2E8F0',
+                            color: form.ai_agent_enabled ? '#15803D' : '#64748B',
+                          }}
+                        >
+                          {form.ai_agent_enabled ? '● Active on Public Page' : '○ Disabled (Pilot Off)'}
+                        </span>
+                      </div>
+                      <p style={{ fontSize: '12px', color: '#64748B', margin: '4px 0 0' }}>
+                        When turned on, a floating AI conversational specialist will guide buyers on the project page and auto-log qualified leads to your CRM.
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Toggle button */}
+                  <label
+                    style={{
+                      position: 'relative',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={form.ai_agent_enabled}
+                      onChange={(e) => setForm({ ...form, ai_agent_enabled: e.target.checked })}
+                      style={{ srOnly: true, width: 0, height: 0, opacity: 0, position: 'absolute' } as any}
+                    />
+                    <div
+                      style={{
+                        width: '52px',
+                        height: '28px',
+                        backgroundColor: form.ai_agent_enabled ? '#7C3AED' : '#CBD5E1',
+                        borderRadius: '9999px',
+                        transition: 'background-color 0.2s',
+                        position: 'relative',
+                      }}
+                    >
+                      <div
+                        style={{
+                          width: '22px',
+                          height: '22px',
+                          backgroundColor: '#FFFFFF',
+                          borderRadius: '50%',
+                          position: 'absolute',
+                          top: '3px',
+                          left: form.ai_agent_enabled ? '27px' : '3px',
+                          transition: 'left 0.2s cubic-bezier(0.16, 1, 0.3, 1)',
+                          boxShadow: '0 2px 4px rgba(0,0,0,0.2)',
+                        }}
+                      />
+                    </div>
+                  </label>
+                </div>
+
+                {/* 2. Persona Tone & Advisor Names */}
+                <div className="card" style={{ padding: '18px 20px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
+                  <div style={{ borderBottom: '1px solid #F1F5F9', paddingBottom: '8px' }}>
+                    <h4 style={{ fontSize: '14px', fontWeight: 800, color: '#0F172A', margin: 0 }}>
+                      Advisor Persona & Identity
+                    </h4>
+                    <p style={{ fontSize: '11.5px', color: '#64748B', margin: '2px 0 0' }}>
+                      Configure how the AI introduces itself and the tone of conversation.
+                    </p>
+                  </div>
+
+                  <div className="grid-2-col" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '14px' }}>
+                    <div>
+                      <label className="form-label">Persona Tone</label>
+                      <select
+                        value={form.ai_agent_tone || 'EXECUTIVE_LUXURY'}
+                        onChange={(e) => setForm({ ...form, ai_agent_tone: e.target.value as any })}
+                        className="form-select"
+                      >
+                        <option value="EXECUTIVE_LUXURY">Executive Luxury Advisor (Prestigious & Elegant)</option>
+                        <option value="CONSULTATIVE_ADVISOR">Consultative Advisor (Helpful & Technical)</option>
+                        <option value="INVESTMENT_ANALYST">Investment Analyst (ROI & Yield Focused)</option>
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="form-label">Advisor Name (English)</label>
+                      <input
+                        type="text"
+                        value={form.ai_agent_name_en || ''}
+                        onChange={(e) => setForm({ ...form, ai_agent_name_en: e.target.value })}
+                        placeholder="e.g. Asaheeb Property Specialist"
+                        className="form-input"
+                      />
+                    </div>
+
+                    <div style={{ gridColumn: '1 / -1' }}>
+                      <label className="form-label">اسم المستشار (بالعربية)</label>
+                      <input
+                        type="text"
+                        value={form.ai_agent_name_ar || ''}
+                        onChange={(e) => setForm({ ...form, ai_agent_name_ar: e.target.value })}
+                        placeholder="مثال: مستشار سحاب العقاري"
+                        dir="rtl"
+                        className="form-input"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                {/* 3. Welcome Greetings */}
+                <div className="card" style={{ padding: '18px 20px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
+                  <div style={{ borderBottom: '1px solid #F1F5F9', paddingBottom: '8px' }}>
+                    <h4 style={{ fontSize: '14px', fontWeight: 800, color: '#0F172A', margin: 0 }}>
+                      Opening Welcome Greetings
+                    </h4>
+                    <p style={{ fontSize: '11.5px', color: '#64748B', margin: '2px 0 0' }}>
+                      The first message sent to website visitors when opening the chat.
+                    </p>
+                  </div>
+
+                  <div>
+                    <label className="form-label">Welcome Message (English)</label>
+                    <textarea
+                      rows={2}
+                      value={form.ai_agent_welcome_en || ''}
+                      onChange={(e) => setForm({ ...form, ai_agent_welcome_en: e.target.value })}
+                      placeholder="Welcome greeting in English..."
+                      className="form-input"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="form-label">رسالة الترحيب (بالعربية)</label>
+                    <textarea
+                      rows={2}
+                      value={form.ai_agent_welcome_ar || ''}
+                      onChange={(e) => setForm({ ...form, ai_agent_welcome_ar: e.target.value })}
+                      placeholder="رسالة الترحيب الافتتاحية بالعربية..."
+                      dir="rtl"
+                      className="form-input"
+                    />
+                  </div>
+                </div>
+
+                {/* 4. Foreign Ownership & REGA Regulations */}
+                <div className="card" style={{ padding: '18px 20px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
+                  <div style={{ borderBottom: '1px solid #F1F5F9', paddingBottom: '8px' }}>
+                    <h4 style={{ fontSize: '14px', fontWeight: 800, color: '#0F172A', margin: 0, display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <Globe size={16} style={{ color: '#059669' }} />
+                      <span>Foreign Buyer Eligibility &amp; REGA Regulations</span>
+                    </h4>
+                    <p style={{ fontSize: '11.5px', color: '#64748B', margin: '2px 0 0' }}>
+                      Governs legal disclosures provided to expatriates and non-Saudi property investors.
+                    </p>
+                  </div>
+
+                  <div>
+                    <label className="form-label">Foreign Buyer Ownership Status</label>
+                    <select
+                      value={form.foreign_eligibility || 'ELIGIBLE'}
+                      onChange={(e) => setForm({ ...form, foreign_eligibility: e.target.value as any })}
+                      className="form-select"
+                    >
+                      <option value="ELIGIBLE">✓ 100% Freehold Eligible (Non-Saudis, GCC &amp; Expats via Absher)</option>
+                      <option value="ELIGIBLE_MUSLIMS_ONLY">🕋 Holy Sanctuary Boundaries (Muslim Freehold / Usufruct Rights)</option>
+                      <option value="REQUIRES_PREMIUM_RESIDENCY">👑 Requires Saudi Premium Residency (الإقامة المميزة)</option>
+                      <option value="NOT_ELIGIBLE">🚫 Restricted to Saudi Nationals</option>
+                    </select>
+                  </div>
+
+                  <div className="grid-2-col" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '14px' }}>
+                    <div>
+                      <label className="form-label">Legal Disclosure Note (English)</label>
+                      <textarea
+                        rows={2}
+                        value={form.foreign_eligibility_en || ''}
+                        onChange={(e) => setForm({ ...form, foreign_eligibility_en: e.target.value })}
+                        placeholder="e.g. 100% Freehold eligible for foreign nationals via Absher portal."
+                        className="form-input"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="form-label">الإشعار القانوني للتملك (بالعربية)</label>
+                      <textarea
+                        rows={2}
+                        value={form.foreign_eligibility_ar || ''}
+                        onChange={(e) => setForm({ ...form, foreign_eligibility_ar: e.target.value })}
+                        placeholder="مثال: تملك حر بنسبة 100% متاح لغير السعوديين عبر بوابة أبشر."
+                        dir="rtl"
+                        className="form-input"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                {/* 5. Private Sales Directives (Zero-Hallucination Guidelines) */}
+                <div className="card" style={{ padding: '18px 20px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                  <div style={{ borderBottom: '1px solid #F1F5F9', paddingBottom: '8px' }}>
+                    <h4 style={{ fontSize: '14px', fontWeight: 800, color: '#0F172A', margin: 0, display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <ShieldCheck size={16} style={{ color: '#7C3AED' }} />
+                      <span>Private Sales Directives (Zero-Hallucination Guidelines)</span>
+                    </h4>
+                    <p style={{ fontSize: '11.5px', color: '#64748B', margin: '2px 0 0' }}>
+                      Confidential selling points, promotions, or constraints injected directly into the AI Advisor system prompt.
+                    </p>
+                  </div>
+
+                  <div>
+                    <textarea
+                      rows={4}
+                      value={form.ai_agent_custom_instructions || ''}
+                      onChange={(e) => setForm({ ...form, ai_agent_custom_instructions: e.target.value })}
+                      placeholder={"Directives for AI Advisor (one per line). Examples:\n- Mention 5% cash reservation discount valid this month.\n- Emphasize high ROI due to proximity to King Abdulaziz University.\n- Do not negotiate on down payments below 10%.\n- For 3-bedroom inquiries, mention that corner units have panoramic city views."}
+                      className="form-input"
+                      style={{ fontSize: '12.5px', lineHeight: '1.6' }}
+                    />
+                  </div>
+                </div>
+
+                {/* 6. Quick Prompt Chips Manager */}
+                <div className="card" style={{ padding: '18px 20px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
+                  <div style={{ borderBottom: '1px solid #F1F5F9', paddingBottom: '8px' }}>
+                    <h4 style={{ fontSize: '14px', fontWeight: 800, color: '#0F172A', margin: 0 }}>
+                      Quick Prompt Chips (Suggested Questions)
+                    </h4>
+                    <p style={{ fontSize: '11.5px', color: '#64748B', margin: '2px 0 0' }}>
+                      Interactive pills presented to visitors at the bottom of the chat to kickstart the qualification conversation.
+                    </p>
+                  </div>
+
+                  {/* Chips Preview */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                    {(form.ai_agent_quick_prompts || []).map((chip, idx) => (
+                      <div
+                        key={idx}
+                        style={{
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '6px',
+                          backgroundColor: '#F5F3FF',
+                          border: '1px solid #DDD6FE',
+                          borderRadius: '20px',
+                          padding: '4px 10px',
+                          fontSize: '12px',
+                          fontWeight: 600,
+                          color: '#6D28D9',
+                        }}
+                      >
+                        <span>{chip.labelEn} / {chip.labelAr}</span>
+                        <button
+                          type="button"
+                          onClick={() => handleRemovePromptChip(idx)}
+                          style={{
+                            border: 'none',
+                            background: 'none',
+                            color: '#94A3B8',
+                            cursor: 'pointer',
+                            display: 'flex',
+                            alignItems: 'center',
+                            padding: '1px',
+                          }}
+                          title="Remove chip"
+                        >
+                          <X size={12} />
+                        </button>
+                      </div>
+                    ))}
+                    {(form.ai_agent_quick_prompts || []).length === 0 && (
+                      <span style={{ fontSize: '12px', color: '#94A3B8', fontStyle: 'italic' }}>
+                        No prompt chips added yet. Add suggested questions below.
+                      </span>
+                    )}
+                  </div>
+
+                  {/* Add New Chip Form */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap', marginTop: '6px' }}>
+                    <input
+                      type="text"
+                      value={newPromptChipEn}
+                      onChange={(e) => setNewPromptChipEn(e.target.value)}
+                      placeholder="Chip text in English (e.g. Price & Payment Plan)"
+                      className="form-input"
+                      style={{ flex: 1, minWidth: '180px', fontSize: '12px' }}
+                    />
+                    <input
+                      type="text"
+                      value={newPromptChipAr}
+                      onChange={(e) => setNewPromptChipAr(e.target.value)}
+                      placeholder="نص الزر بالعربية (مثال: الأسعار وخطط السداد)"
+                      dir="rtl"
+                      className="form-input"
+                      style={{ flex: 1, minWidth: '180px', fontSize: '12px' }}
+                    />
+                    <button
+                      type="button"
+                      onClick={handleAddPromptChip}
+                      className="btn btn-primary btn-sm"
+                      style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}
+                    >
+                      <Plus size={13} />
+                      <span>Add Chip</span>
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* TAB 10: ACTIVITY LOG */}
             {activeTab === 'activity' && project && (
               <CmsActivityTimeline
                 entityType="PROJECT"

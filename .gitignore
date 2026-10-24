@@ -45,6 +45,9 @@ Reference/
 # documentation / local notes & private sql
 FRONTEND_INTEGRATION_GUIDE.md
 new-crm-build-plan.md
+ASAHEEB_CRM_AI_INTEGRATION_SPEC.md
+FULL_STACK_INTERVIEW_PREP_GUIDE.md
+ROLE_BASED_ACCESS_CONTROL_PLAN.md
 supabase-upgrade.sql
 mock_expenses_dataset.sql
 add_payment_milestones.sql
@@ -52,5 +55,6 @@ add_payment_plans.sql
 add_commission_area_and_tiers.sql
 add_commissions_pin.sql
 fix_commissions_rls.sql
+
 
 

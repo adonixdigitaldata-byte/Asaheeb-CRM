@@ -38,6 +38,7 @@ import {
   Flame,
   Clock,
   Calendar,
+  Bot,
 } from 'lucide-react'
 import { SaudiRiyalIcon } from '@/components/SaudiRiyalIcon'
 import { createClient } from '@/lib/supabase/client'
@@ -74,6 +75,7 @@ export default function ProjectsClient({ profile }: Props) {
   const [statusFilter, setStatusFilter] = useState('ALL')
   const [stageFilter, setStageFilter] = useState('ALL')
   const [offerFilter, setOfferFilter] = useState<'ALL' | 'ACTIVE_OFFER'>('ALL')
+  const [aiFilter, setAiFilter] = useState<'ALL' | 'AI_ENABLED' | 'AI_DISABLED'>('ALL')
   const [sortBy, setSortBy] = useState<'default' | 'name' | 'price_asc' | 'price_desc' | 'photos'>('default')
 
   // Modal States
@@ -328,6 +330,9 @@ export default function ProjectsClient({ profile }: Props) {
       if (statusFilter === 'DRAFT' && p.is_published) return false
 
       if (stageFilter !== 'ALL' && p.status_en !== stageFilter) return false
+
+      if (aiFilter === 'AI_ENABLED' && !p.ai_agent_enabled) return false
+      if (aiFilter === 'AI_DISABLED' && p.ai_agent_enabled) return false
 
       if (offerFilter === 'ACTIVE_OFFER') {
         const isOfferActive = p.discount_offer?.is_active
@@ -912,6 +917,28 @@ export default function ProjectsClient({ profile }: Props) {
 
           <button
             type="button"
+            onClick={() => setAiFilter(aiFilter === 'AI_ENABLED' ? 'ALL' : 'AI_ENABLED')}
+            style={{
+              padding: '4px 12px',
+              borderRadius: '20px',
+              fontSize: '12px',
+              fontWeight: 700,
+              border: 'none',
+              cursor: 'pointer',
+              backgroundColor: aiFilter === 'AI_ENABLED' ? '#7C3AED' : '#F5F3FF',
+              color: aiFilter === 'AI_ENABLED' ? '#FFFFFF' : '#6D28D9',
+              transition: 'all 0.15s ease',
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '4px',
+            }}
+          >
+            <Bot size={13} />
+            <span>✨ AI Active ({projects.filter((p) => p.ai_agent_enabled).length})</span>
+          </button>
+
+          <button
+            type="button"
             onClick={() => setOfferFilter(offerFilter === 'ACTIVE_OFFER' ? 'ALL' : 'ACTIVE_OFFER')}
             style={{
               padding: '4px 12px',
@@ -1254,6 +1281,64 @@ export default function ProjectsClient({ profile }: Props) {
                           >
                             {project.is_published ? 'LIVE' : 'DRAFT'}
                           </span>
+                        </div>
+
+                        {/* AI Property Advisor Quick Toggle & Foreign Ownership Status */}
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '4px', marginTop: '3px', flexWrap: 'wrap' }}>
+                          <button
+                            type="button"
+                            onClick={async (e) => {
+                              e.stopPropagation()
+                              const newStatus = !project.ai_agent_enabled
+                              setProjects((prev) => prev.map((p) => (p.id === project.id ? { ...p, ai_agent_enabled: newStatus } : p)))
+                              try {
+                                await fetch('/api/projects/toggle-ai', {
+                                  method: 'POST',
+                                  headers: { 'Content-Type': 'application/json' },
+                                  body: JSON.stringify({ id: project.id, ai_agent_enabled: newStatus }),
+                                })
+                              } catch (err) {
+                                console.error('Failed to toggle AI agent:', err)
+                                fetchProjects()
+                              }
+                            }}
+                            style={{
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '3px',
+                              fontSize: '10.5px',
+                              fontWeight: 700,
+                              padding: '2px 7px',
+                              borderRadius: '9999px',
+                              border: project.ai_agent_enabled ? '1px solid #C4B5FD' : '1px solid #E2E8F0',
+                              backgroundColor: project.ai_agent_enabled ? '#F5F3FF' : '#F8FAFC',
+                              color: project.ai_agent_enabled ? '#7C3AED' : '#94A3B8',
+                              cursor: 'pointer',
+                              transition: 'all 0.15s ease',
+                              boxShadow: project.ai_agent_enabled ? '0 1px 3px rgba(124, 58, 237, 0.15)' : 'none',
+                            }}
+                            title={project.ai_agent_enabled ? 'AI Property Advisor Active. Click to pause.' : 'AI Property Advisor Inactive. Click to turn on.'}
+                          >
+                            <Bot size={11} style={{ color: project.ai_agent_enabled ? '#7C3AED' : '#94A3B8' }} />
+                            <span>{project.ai_agent_enabled ? '✨ AI Active' : 'AI Off'}</span>
+                          </button>
+
+                          {project.foreign_eligibility === 'ELIGIBLE' && (
+                            <span
+                              style={{
+                                fontSize: '10px',
+                                fontWeight: 700,
+                                color: '#047857',
+                                backgroundColor: '#ECFDF5',
+                                border: '1px solid #A7F3D0',
+                                padding: '1px 5px',
+                                borderRadius: '4px',
+                              }}
+                              title="100% Freehold Eligible for Foreigners & Expats"
+                            >
+                              🌍 Freehold
+                            </span>
+                          )}
                         </div>
                         <div style={{ fontWeight: 700, color: '#16A34A', fontSize: '12px', marginTop: '2px' }}>
                           {project.discount_offer?.is_active && project.discount_offer?.discounted_price_en ? (

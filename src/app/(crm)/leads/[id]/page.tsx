@@ -46,7 +46,7 @@ export default async function LeadDetailPage({
         stage:lead_stages(*),
         assigned_agent:profiles(id, name, email),
         campaign:ad_campaigns(id, name),
-        property:projects(id, name_en, name_ar)
+        property:projects(id, name_en, name_ar, foreign_eligibility, foreign_eligibility_en, foreign_eligibility_ar)
       `)
       .eq('id', id)
       .single(),

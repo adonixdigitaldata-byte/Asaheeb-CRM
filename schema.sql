@@ -92,8 +92,9 @@ values
   ('meeting_done',        'Meeting Done',         8, '#06B6D4'),
   ('site_visit_scheduled','Site Visit Scheduled', 9, '#F59E0B'),
   ('negotiation',         'Negotiation',          10, '#EA580C'),
-  ('won',                 'Won',                 11, '#16A34A'),
-  ('lost',                'Lost',                12, '#DC2626')
+  ('token_paid',          'Token Paid',           11, '#0D9488'),
+  ('won',                 'Won',                 12, '#16A34A'),
+  ('lost',                'Lost',                13, '#DC2626')
 on conflict (key) do update set
   label = excluded.label,
   sort_order = excluded.sort_order,

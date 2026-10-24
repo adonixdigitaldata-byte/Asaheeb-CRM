@@ -29,6 +29,8 @@ import {
   Search,
   Sparkles,
   AlertTriangle,
+  Bot,
+  MessageCircle,
 } from 'lucide-react'
 import { checkFollowupConflict, type ScheduleConflict } from '@/lib/followupConflictService'
 import { SaudiRiyalIcon } from '@/components/SaudiRiyalIcon'
@@ -89,6 +91,7 @@ export default function LeadDetailClient({
 
   // Local state for instantaneous optimistic UI updates
   const [lead, setLead] = useState<Lead>(initialLead)
+  const matchedProject = projects.find((p) => p.id === (lead.property_id || lead.property?.id || initialLead.property_id || initialLead.property?.id))
   const [notes, setNotes] = useState<LeadNote[]>(initialNotes)
   const [followups, setFollowups] = useState<LeadFollowup[]>(initialFollowups)
   const [activities, setActivities] = useState<LeadActivity[]>(initialActivities)
@@ -389,6 +392,7 @@ export default function LeadDetailClient({
       'site_visit_scheduled',
       'meeting_done',
       'negotiation',
+      'token_paid',
       'lost',
       'won',
     ]
@@ -1008,7 +1012,72 @@ export default function LeadDetailClient({
           <div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
               <h1 className="text-page-title" style={{ fontSize: 20 }}>{lead.name || 'Unnamed Lead'}</h1>
-              <span className="badge badge-source">{lead.source}</span>
+              {lead.source === 'AI_AGENT' ? (
+                <span
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 4,
+                    padding: '3px 10px',
+                    borderRadius: '9999px',
+                    fontSize: '11.5px',
+                    fontWeight: 800,
+                    backgroundColor: '#FEF3C7',
+                    color: '#92400E',
+                    border: '1px solid #FCD34D',
+                    boxShadow: '0 1px 3px rgba(245, 158, 11, 0.2)',
+                  }}
+                >
+                  <Sparkles size={12} style={{ color: '#D97706' }} />
+                  <span>AI Agent</span>
+                </span>
+              ) : (
+                <span className="badge badge-source">{lead.source}</span>
+              )}
+
+              {/* AI Qualification Score */}
+              {typeof lead.ai_qualification_score === 'number' && lead.ai_qualification_score > 0 && (
+                <span
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 3,
+                    padding: '3px 9px',
+                    borderRadius: '9999px',
+                    fontSize: '11px',
+                    fontWeight: 800,
+                    backgroundColor: lead.ai_qualification_score >= 80 ? '#FEF2F2' : '#F0FDF4',
+                    color: lead.ai_qualification_score >= 80 ? '#DC2626' : '#15803D',
+                    border: `1px solid ${lead.ai_qualification_score >= 80 ? '#FECACA' : '#BBF7D0'}`,
+                  }}
+                  title={`AI Qualification Score: ${lead.ai_qualification_score}/100`}
+                >
+                  <span>{lead.ai_qualification_score >= 80 ? '🔥' : '🎯'}</span>
+                  <span>{lead.ai_qualification_score}% {lead.ai_qualification_score >= 80 ? 'High Intent' : 'Score'}</span>
+                </span>
+              )}
+
+              {/* AI Buyer Intent Pill */}
+              {lead.ai_buyer_intent && (
+                <span
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 3,
+                    padding: '3px 8px',
+                    borderRadius: '6px',
+                    fontSize: '11px',
+                    fontWeight: 700,
+                    backgroundColor: '#EEF2FF',
+                    color: '#4338CA',
+                    border: '1px solid #C7D2FE',
+                    textTransform: 'uppercase',
+                    letterSpacing: '0.03em',
+                  }}
+                >
+                  🏷️ {lead.ai_buyer_intent.replace('_', ' ')}
+                </span>
+              )}
             </div>
             <p className="text-meta" style={{ marginTop: 2 }}>
               Created on {formatDate(lead.created_at)} ({formatExactTime(lead.created_at)})
@@ -1222,10 +1291,59 @@ export default function LeadDetailClient({
               <div className="lead-info-compact-grid">
                 <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
                   <Phone size={16} style={{ color: '#3B82F6', marginTop: 2, flexShrink: 0 }} />
-                  <div style={{ minWidth: 0 }}>
+                  <div style={{ minWidth: 0, flex: 1 }}>
                     <div className="text-label" style={{ fontSize: 11 }}>PHONE</div>
-                    <div style={{ color: '#0F172A', fontWeight: 600, fontSize: 13.5, wordBreak: 'break-word' }}>
-                      {lead.phone || '—'}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginTop: 2 }}>
+                      <span style={{ color: '#0F172A', fontWeight: 600, fontSize: 13.5, wordBreak: 'break-word' }}>
+                        {lead.phone || '—'}
+                      </span>
+                      {lead.phone && (
+                        <div style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                          <a
+                            href={`tel:${lead.phone}`}
+                            className="btn btn-ghost btn-sm"
+                            style={{
+                              padding: '2px 6px',
+                              fontSize: '11px',
+                              color: '#2563EB',
+                              backgroundColor: '#EFF6FF',
+                              borderRadius: '4px',
+                              textDecoration: 'none',
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '3px',
+                            }}
+                            title="Call client phone"
+                          >
+                            <Phone size={11} />
+                            <span>Call</span>
+                          </a>
+                          <a
+                            href={`https://api.whatsapp.com/send?phone=${(lead.phone || '').replace(/[^0-9]/g, '')}&text=${encodeURIComponent(
+                              `Hello ${lead.name || 'there'}, this is ${profile?.name || 'Asaheeb Real Estate'} from Asaheeb Real Estate. I noticed you were inquiring about ${lead.property?.name_en || lead.interest || 'our project'}${lead.ai_preferred_unit ? ` regarding ${lead.ai_preferred_unit}` : ''}. How can I assist you today?`
+                            )}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="btn btn-ghost btn-sm"
+                            style={{
+                              padding: '2px 6px',
+                              fontSize: '11px',
+                              color: '#15803D',
+                              backgroundColor: '#DCFCE7',
+                              borderRadius: '4px',
+                              textDecoration: 'none',
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '3px',
+                              fontWeight: 700,
+                            }}
+                            title="Open WhatsApp chat with prefilled property details"
+                          >
+                            <MessageCircle size={11} />
+                            <span>WhatsApp</span>
+                          </a>
+                        </div>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -1313,7 +1431,7 @@ export default function LeadDetailClient({
                     {(() => {
                       const currentStageKey = stages.find((s) => s.id === lead.stage_id)?.key || lead.stage?.key || ''
                       const isSiteVisit = currentStageKey === 'site_visit_scheduled'
-                      const isMeetingDone = ['meeting_done', 'proposal', 'negotiation', 'won', 'lost'].includes(currentStageKey) && !isSiteVisit
+                      const isMeetingDone = ['meeting_done', 'proposal', 'negotiation', 'token_paid', 'won', 'lost'].includes(currentStageKey) && !isSiteVisit
                       const labelText = isSiteVisit ? 'SCHEDULED SITE VISIT' : 'SCHEDULED MEETING'
 
                       return (
@@ -1620,6 +1738,296 @@ export default function LeadDetailClient({
 
           {/* Right Column: Follow-ups, Notes & Activity */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+            {/* 🤖 AI Advisor Intelligence Briefing Card */}
+            {(lead.source === 'AI_AGENT' || lead.ai_chat_summary || (typeof lead.ai_qualification_score === 'number' && lead.ai_qualification_score > 0) || lead.ai_session_id) && (
+              <div
+                className="card"
+                style={{
+                  padding: '20px',
+                  background: 'linear-gradient(145deg, #FFFFFF 0%, #FAF5FF 100%)',
+                  border: '1.5px solid #DDD6FE',
+                  boxShadow: '0 4px 18px rgba(124, 58, 237, 0.08)',
+                  position: 'relative',
+                  overflow: 'hidden',
+                }}
+              >
+                {/* Decorative glow */}
+                <div
+                  style={{
+                    position: 'absolute',
+                    top: 0,
+                    right: 0,
+                    width: '140px',
+                    height: '140px',
+                    background: 'radial-gradient(circle at top right, rgba(124, 58, 237, 0.12) 0%, transparent 70%)',
+                    pointerEvents: 'none',
+                  }}
+                />
+
+                {/* Header */}
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    paddingBottom: '14px',
+                    marginBottom: '16px',
+                    borderBottom: '1px solid #EDE9FE',
+                    flexWrap: 'wrap',
+                    gap: '10px',
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                    <div
+                      style={{
+                        width: '38px',
+                        height: '38px',
+                        borderRadius: '10px',
+                        background: 'linear-gradient(135deg, #7C3AED 0%, #4F46E5 100%)',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        color: '#FFFFFF',
+                        boxShadow: '0 2px 8px rgba(124, 58, 237, 0.25)',
+                        flexShrink: 0,
+                      }}
+                    >
+                      <Bot size={20} />
+                    </div>
+                    <div>
+                      <h3
+                        style={{
+                          fontSize: '15px',
+                          fontWeight: 800,
+                          color: '#0F172A',
+                          margin: 0,
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '6px',
+                          flexWrap: 'wrap',
+                        }}
+                      >
+                        <span>AI Advisor Intelligence Briefing</span>
+                        <span
+                          style={{
+                            fontSize: '10px',
+                            fontWeight: 700,
+                            backgroundColor: '#FEF3C7',
+                            color: '#92400E',
+                            border: '1px solid #FCD34D',
+                            padding: '1px 6px',
+                            borderRadius: '9999px',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '2px',
+                          }}
+                        >
+                          <Sparkles size={10} />
+                          <span>Live In-Chat Capture</span>
+                        </span>
+                      </h3>
+                      <p style={{ fontSize: '11.5px', color: '#64748B', margin: '2px 0 0' }}>
+                        Autonomous real-time buyer qualification on property page
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Score Progress Bar */}
+                <div style={{ marginBottom: '16px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' }}>
+                    <div style={{ fontSize: '11px', fontWeight: 700, color: '#475569', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                      🎯 AI Qualification Score
+                    </div>
+                    <div style={{ fontSize: '13px', fontWeight: 800, color: (lead.ai_qualification_score || 0) >= 80 ? '#DC2626' : '#2563EB', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                      <span>{(lead.ai_qualification_score || 0) >= 80 ? '🔥' : '🎯'}</span>
+                      <span>{lead.ai_qualification_score || 0} / 100</span>
+                      {(lead.ai_qualification_score || 0) >= 80 && (
+                        <span style={{ fontSize: '10.5px', fontWeight: 800, color: '#DC2626', backgroundColor: '#FEE2E2', border: '1px solid #FECACA', padding: '1px 6px', borderRadius: '4px', marginLeft: '4px' }}>
+                          High Intent
+                        </span>
+                      )}
+                    </div>
+                  </div>
+
+                  <div
+                    style={{
+                      width: '100%',
+                      height: '10px',
+                      backgroundColor: '#E2E8F0',
+                      borderRadius: '9999px',
+                      overflow: 'hidden',
+                      padding: '1.5px',
+                    }}
+                  >
+                    <div
+                      style={{
+                        height: '100%',
+                        width: `${Math.min(Math.max(lead.ai_qualification_score || 10, 5), 100)}%`,
+                        borderRadius: '9999px',
+                        background: (lead.ai_qualification_score || 0) >= 80
+                          ? 'linear-gradient(90deg, #F59E0B 0%, #EF4444 100%)'
+                          : 'linear-gradient(90deg, #3B82F6 0%, #6366F1 100%)',
+                        transition: 'width 0.6s cubic-bezier(0.16, 1, 0.3, 1)',
+                        boxShadow: '0 1px 3px rgba(0,0,0,0.15)',
+                      }}
+                    />
+                  </div>
+                </div>
+
+                {/* Intelligence Metrics Grid */}
+                <div
+                  style={{
+                    display: 'grid',
+                    gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
+                    gap: '12px',
+                    marginBottom: '16px',
+                  }}
+                >
+                  {/* Buyer Intent */}
+                  <div
+                    style={{
+                      padding: '10px 12px',
+                      backgroundColor: '#FFFFFF',
+                      borderRadius: '8px',
+                      border: '1px solid #E2E8F0',
+                    }}
+                  >
+                    <div style={{ fontSize: '10.5px', fontWeight: 700, color: '#64748B', textTransform: 'uppercase' }}>
+                      🏷️ Buyer Intent Category
+                    </div>
+                    <div style={{ fontSize: '12.5px', fontWeight: 700, color: '#1E293B', marginTop: '3px' }}>
+                      {lead.ai_buyer_intent === 'INVESTOR'
+                        ? 'Investor · High-Yield / Capital'
+                        : lead.ai_buyer_intent === 'FAMILY_HOME'
+                        ? 'Family Home · End-User Living'
+                        : lead.ai_buyer_intent === 'FIRST_TIME_BUYER'
+                        ? 'First-Time Buyer · Entry Level'
+                        : lead.ai_buyer_intent === 'HIGH_INTENT'
+                        ? 'High-Intent Serious Buyer'
+                        : lead.ai_buyer_intent || 'General Property Inquiry'}
+                    </div>
+                  </div>
+
+                  {/* Target Unit Preference */}
+                  <div
+                    style={{
+                      padding: '10px 12px',
+                      backgroundColor: '#FFFFFF',
+                      borderRadius: '8px',
+                      border: '1px solid #E2E8F0',
+                    }}
+                  >
+                    <div style={{ fontSize: '10.5px', fontWeight: 700, color: '#64748B', textTransform: 'uppercase' }}>
+                      🏢 Target Unit Preference
+                    </div>
+                    <div style={{ fontSize: '12.5px', fontWeight: 700, color: '#2563EB', marginTop: '3px', wordBreak: 'break-word' }}>
+                      {lead.ai_preferred_unit || 'General Project Layout'}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Executive AI Briefing */}
+                {lead.ai_chat_summary && (
+                  <div
+                    style={{
+                      padding: '12px 14px',
+                      backgroundColor: '#FFFFFF',
+                      borderLeft: '4px solid #7C3AED',
+                      borderRadius: '0 8px 8px 0',
+                      marginBottom: '16px',
+                      borderTop: '1px solid #EDE9FE',
+                      borderRight: '1px solid #EDE9FE',
+                      borderBottom: '1px solid #EDE9FE',
+                    }}
+                  >
+                    <div style={{ fontSize: '11px', fontWeight: 800, color: '#6D28D9', textTransform: 'uppercase', marginBottom: '4px', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                      <span>📋 Executive AI Briefing</span>
+                    </div>
+                    <p style={{ fontSize: '12.5px', color: '#1E1B4B', lineHeight: '1.55', margin: 0, fontStyle: 'italic' }}>
+                      "{lead.ai_chat_summary}"
+                    </p>
+                  </div>
+                )}
+
+                {/* Foreign Ownership Regulations & REGA Legal Status */}
+                <div
+                  style={{
+                    padding: '12px 14px',
+                    backgroundColor: '#F0FDF4',
+                    border: '1px solid #BBF7D0',
+                    borderRadius: '8px',
+                    marginBottom: '14px',
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '4px', flexWrap: 'wrap', gap: '4px' }}>
+                    <div style={{ fontSize: '11px', fontWeight: 700, color: '#166534', textTransform: 'uppercase', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                      <Globe size={13} />
+                      <span>Foreign Buyer Eligibility (REGA Legal Status)</span>
+                    </div>
+                    <span style={{ fontSize: '11px', fontWeight: 800, color: '#15803D', backgroundColor: '#DCFCE7', padding: '1px 6px', borderRadius: '4px' }}>
+                      {lead.property?.foreign_eligibility === 'ELIGIBLE' || matchedProject?.foreign_eligibility === 'ELIGIBLE'
+                        ? '✓ 100% Freehold Eligible'
+                        : lead.property?.foreign_eligibility === 'ELIGIBLE_MUSLIMS_ONLY' || matchedProject?.foreign_eligibility === 'ELIGIBLE_MUSLIMS_ONLY'
+                        ? '🕋 Holy Sanctuary Boundary'
+                        : lead.property?.foreign_eligibility === 'REQUIRES_PREMIUM_RESIDENCY' || matchedProject?.foreign_eligibility === 'REQUIRES_PREMIUM_RESIDENCY'
+                        ? '👑 Requires Premium Residency'
+                        : 'Standard Regulations'}
+                    </span>
+                  </div>
+                  <p style={{ fontSize: '12px', color: '#14532D', margin: 0, lineHeight: '1.5' }}>
+                    {lead.property?.foreign_eligibility_en || matchedProject?.foreign_eligibility_en ||
+                      '100% Freehold eligible for foreign nationals, GCC citizens, and expatriates via the Absher Real Estate Ownership portal.'}
+                  </p>
+                </div>
+
+                {/* Footer Meta & WhatsApp */}
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    paddingTop: '10px',
+                    borderTop: '1px solid #EDE9FE',
+                    flexWrap: 'wrap',
+                    gap: '8px',
+                  }}
+                >
+                  <div style={{ fontSize: '11.5px', color: '#64748B' }}>
+                    Session ID: <code style={{ backgroundColor: '#EDE9FE', color: '#5B21B6', padding: '2px 6px', borderRadius: '4px', fontSize: '11px', fontWeight: 600 }}>{lead.ai_session_id || 'Direct Chat'}</code>
+                  </div>
+
+                  {lead.phone && (
+                    <a
+                      href={`https://api.whatsapp.com/send?phone=${(lead.phone || '').replace(/[^0-9]/g, '')}&text=${encodeURIComponent(
+                        `Hello ${lead.name || 'there'}, this is ${profile?.name || 'Asaheeb Real Estate'} from Asaheeb Real Estate. I noticed you were inquiring about ${lead.property?.name_en || lead.interest || 'our project'}${lead.ai_preferred_unit ? ` regarding ${lead.ai_preferred_unit}` : ''}. How can I assist you today?`
+                      )}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="btn btn-sm"
+                      style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '4px',
+                        fontSize: '11.5px',
+                        fontWeight: 700,
+                        backgroundColor: '#25D366',
+                        color: '#FFFFFF',
+                        border: 'none',
+                        padding: '4px 10px',
+                        borderRadius: '6px',
+                        textDecoration: 'none',
+                        boxShadow: '0 2px 5px rgba(37, 211, 102, 0.25)',
+                      }}
+                    >
+                      <MessageCircle size={12} />
+                      <span>Engage on WhatsApp</span>
+                    </a>
+                  )}
+                </div>
+              </div>
+            )}
+
             {/* Follow-ups Section */}
             <div className="card">
               <div className="flex items-center justify-between mb-4">

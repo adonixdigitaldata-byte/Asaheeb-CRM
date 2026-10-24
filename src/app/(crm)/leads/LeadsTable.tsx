@@ -9,6 +9,7 @@ import {
   Trash2,
   CheckSquare,
   Square,
+  Sparkles,
 } from 'lucide-react'
 import type { Lead, LeadStage } from '@/types/database'
 import { formatCurrency, formatDate } from '@/lib/utils'
@@ -288,9 +289,47 @@ export default function LeadsTable({
                   </td>
 
                   <td style={{ padding: '8px 10px' }}>
-                    <span className="badge badge-source" style={{ fontSize: 11, padding: '2px 6px' }}>
-                      {lead.source}
-                    </span>
+                    {lead.source === 'AI_AGENT' ? (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
+                        <span
+                          style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '3px',
+                            fontSize: '11px',
+                            fontWeight: 800,
+                            backgroundColor: '#FEF3C7',
+                            color: '#92400E',
+                            border: '1px solid #FCD34D',
+                            padding: '2px 7px',
+                            borderRadius: '9999px',
+                            width: 'fit-content',
+                          }}
+                        >
+                          <Sparkles size={11} style={{ color: '#D97706' }} />
+                          <span>AI Agent</span>
+                        </span>
+                        {typeof lead.ai_qualification_score === 'number' && lead.ai_qualification_score > 0 && (
+                          <span
+                            style={{
+                              fontSize: '10.5px',
+                              fontWeight: 700,
+                              color: lead.ai_qualification_score >= 80 ? '#DC2626' : '#15803D',
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: '2px',
+                            }}
+                          >
+                            <span>{lead.ai_qualification_score >= 80 ? '🔥' : '🎯'}</span>
+                            <span>{lead.ai_qualification_score}%</span>
+                          </span>
+                        )}
+                      </div>
+                    ) : (
+                      <span className="badge badge-source" style={{ fontSize: 11, padding: '2px 6px' }}>
+                        {lead.source}
+                      </span>
+                    )}
                   </td>
 
                   <td style={{ padding: '8px 10px' }}>

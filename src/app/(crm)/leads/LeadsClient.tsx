@@ -57,6 +57,8 @@ export default function LeadsClient({
   // Filters
   const [search, setSearch] = useState('')
   const [monthFilter, setMonthFilter] = useState<string>('ALL')
+  const [customStartDate, setCustomStartDate] = useState<string>('')
+  const [customEndDate, setCustomEndDate] = useState<string>('')
   const [stageFilter, setStageFilter] = useState<string>('ALL')
   const [agentFilter, setAgentFilter] = useState<string>(() => {
     if (initialSearchParams?.my_leads === 'true' && profile?.id) return profile.id
@@ -66,6 +68,7 @@ export default function LeadsClient({
   const [sourceFilter, setSourceFilter] = useState<string>('ALL')
   const [categoryFilter, setCategoryFilter] = useState<string>('ALL')
   const [budgetTierFilter, setBudgetTierFilter] = useState<string>('ALL')
+  const [sortBy, setSortBy] = useState<'NEWEST' | 'AI_SCORE' | 'VALUE'>('NEWEST')
   const [pendingFollowupLeadIds, setPendingFollowupLeadIds] = useState<string[]>([])
 
   const isAdmin = profile?.role === 'ADMIN'
@@ -194,8 +197,13 @@ export default function LeadsClient({
       }
     }
 
-    // Month Filter (based on lead creation date: YYYY-MM)
-    if (monthFilter !== 'ALL') {
+    // Month / Custom Date Range Filter
+    if (monthFilter === 'CUSTOM') {
+      if (!lead.created_at) return false
+      const leadDate = lead.created_at.substring(0, 10)
+      if (customStartDate && leadDate < customStartDate) return false
+      if (customEndDate && leadDate > customEndDate) return false
+    } else if (monthFilter !== 'ALL') {
       if (!lead.created_at) return false
       const leadMonth = lead.created_at.substring(0, 7) // e.g. "2026-09"
       if (leadMonth !== monthFilter) return false
@@ -206,6 +214,17 @@ export default function LeadsClient({
     if (budgetTierFilter !== 'ALL' && lead.budget_tier !== budgetTierFilter) return false
 
     return true
+  })
+
+  // Apply Sorting
+  const sortedLeads = [...filteredLeads].sort((a, b) => {
+    if (sortBy === 'AI_SCORE') {
+      return (b.ai_qualification_score || 0) - (a.ai_qualification_score || 0)
+    }
+    if (sortBy === 'VALUE') {
+      return (b.potential_value || 0) - (a.potential_value || 0)
+    }
+    return new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime()
   })
 
   // Dynamically compute available distinct months from leads (sorted newest to oldest)
@@ -253,6 +272,11 @@ export default function LeadsClient({
           'Budget Tier': l.budget_tier || '',
           'Estimated Deal Value (SAR)': l.potential_value ? Number(l.potential_value) : '',
           'Source': l.source || 'MANUAL',
+          'AI Qualification Score': l.ai_qualification_score ? `${l.ai_qualification_score}/100` : '',
+          'AI Buyer Intent': l.ai_buyer_intent || '',
+          'AI Target Unit': l.ai_preferred_unit || '',
+          'AI Executive Briefing': l.ai_chat_summary || '',
+          'AI Session ID': l.ai_session_id || '',
           'Meeting Date': l.meeting_date || '',
           'Meeting Time': l.meeting_time || '',
           'Created At': l.created_at ? new Date(l.created_at).toLocaleString() : '',
@@ -469,28 +493,116 @@ export default function LeadsClient({
             )}
           </div>
 
-          {/* Month Filter */}
-          <div style={{ display: 'flex', alignItems: 'center', position: 'relative' }}>
-            <select
-              value={monthFilter}
-              onChange={(e) => setMonthFilter(e.target.value)}
-              className="form-select"
-              style={{
-                width: 'auto',
-                fontSize: 12.5,
-                fontWeight: monthFilter !== 'ALL' ? 600 : 400,
-                color: monthFilter !== 'ALL' ? '#1D4ED8' : '#334155',
-                borderColor: monthFilter !== 'ALL' ? '#93C5FD' : 'var(--border)',
-                backgroundColor: monthFilter !== 'ALL' ? '#EFF6FF' : '#FFFFFF',
-              }}
-            >
-              <option value="ALL">📅 All Months</option>
-              {availableMonths.map((m) => (
-                <option key={m} value={m}>
-                  {formatMonthLabel(m)}
-                </option>
-              ))}
-            </select>
+          {/* Month & Custom Date Range Filter */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+            <div style={{ display: 'flex', alignItems: 'center', position: 'relative' }}>
+              <select
+                value={monthFilter}
+                onChange={(e) => {
+                  const val = e.target.value
+                  setMonthFilter(val)
+                  if (val !== 'CUSTOM') {
+                    setCustomStartDate('')
+                    setCustomEndDate('')
+                  }
+                }}
+                className="form-select"
+                style={{
+                  width: 'auto',
+                  fontSize: 12.5,
+                  fontWeight: monthFilter !== 'ALL' ? 600 : 400,
+                  color: monthFilter !== 'ALL' ? '#1D4ED8' : '#334155',
+                  borderColor: monthFilter !== 'ALL' ? '#93C5FD' : 'var(--border)',
+                  backgroundColor: monthFilter !== 'ALL' ? '#EFF6FF' : '#FFFFFF',
+                }}
+              >
+                <option value="ALL">📅 All Dates</option>
+                <optgroup label="Calendar Months">
+                  {availableMonths.map((m) => (
+                    <option key={m} value={m}>
+                      {formatMonthLabel(m)}
+                    </option>
+                  ))}
+                </optgroup>
+                <option value="CUSTOM">🗓️ Custom Date Range...</option>
+              </select>
+            </div>
+
+            {/* Custom Date Range Pickers (shown when Custom Date Range is selected) */}
+            {monthFilter === 'CUSTOM' && (
+              <div
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  backgroundColor: '#EFF6FF',
+                  padding: '3px 8px',
+                  borderRadius: '6px',
+                  border: '1px solid #93C5FD',
+                  fontSize: '12px',
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                  <span style={{ fontSize: '11px', color: '#1E40AF', fontWeight: 600 }}>From:</span>
+                  <input
+                    type="date"
+                    value={customStartDate}
+                    onChange={(e) => setCustomStartDate(e.target.value)}
+                    max={customEndDate || undefined}
+                    className="form-input"
+                    style={{
+                      padding: '2px 6px',
+                      fontSize: '12px',
+                      height: '28px',
+                      width: '130px',
+                      backgroundColor: '#FFFFFF',
+                      borderColor: '#BFDBFE',
+                      color: '#0F172A',
+                    }}
+                  />
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                  <span style={{ fontSize: '11px', color: '#1E40AF', fontWeight: 600 }}>To:</span>
+                  <input
+                    type="date"
+                    value={customEndDate}
+                    onChange={(e) => setCustomEndDate(e.target.value)}
+                    min={customStartDate || undefined}
+                    className="form-input"
+                    style={{
+                      padding: '2px 6px',
+                      fontSize: '12px',
+                      height: '28px',
+                      width: '130px',
+                      backgroundColor: '#FFFFFF',
+                      borderColor: '#BFDBFE',
+                      color: '#0F172A',
+                    }}
+                  />
+                </div>
+                {(customStartDate || customEndDate) && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setCustomStartDate('')
+                      setCustomEndDate('')
+                    }}
+                    title="Clear date range"
+                    style={{
+                      border: 'none',
+                      background: 'none',
+                      color: '#64748B',
+                      cursor: 'pointer',
+                      padding: '2px',
+                      display: 'flex',
+                      alignItems: 'center',
+                    }}
+                  >
+                    <X size={13} />
+                  </button>
+                )}
+              </div>
+            )}
           </div>
 
           {/* Stage Filter */}
@@ -572,6 +684,7 @@ export default function LeadsClient({
             style={{ width: 'auto', fontSize: 12.5 }}
           >
             <option value="ALL">All sources</option>
+            <option value="AI_AGENT">✨ AI Property Advisor</option>
             <option value="MANUAL">Manual Entry</option>
             <option value="WHATSAPP">WhatsApp</option>
             <option value="META_ADS">Meta Ads</option>
@@ -582,6 +695,25 @@ export default function LeadsClient({
             <option value="BROCHURE_DOWNLOAD">Brochure Download</option>
             <option value="XLSX_IMPORT">Excel Import</option>
           </select>
+
+          {/* Sort By */}
+          <select
+            value={sortBy}
+            onChange={(e) => setSortBy(e.target.value as any)}
+            className="form-select"
+            style={{
+              width: 'auto',
+              fontSize: 12.5,
+              fontWeight: sortBy !== 'NEWEST' ? 600 : 400,
+              color: sortBy !== 'NEWEST' ? '#7C3AED' : '#334155',
+              borderColor: sortBy !== 'NEWEST' ? '#C4B5FD' : 'var(--border)',
+              backgroundColor: sortBy !== 'NEWEST' ? '#F5F3FF' : '#FFFFFF',
+            }}
+          >
+            <option value="NEWEST">Sort: Newest First</option>
+            <option value="AI_SCORE">🔥 Sort: AI Score (Highest First)</option>
+            <option value="VALUE">💰 Sort: Deal Value (High to Low)</option>
+          </select>
         </div>
 
         {/* Board or Table or Loading */}
@@ -589,7 +721,7 @@ export default function LeadsClient({
           <LogoLoader size={44} text="Loading leads pipeline..." />
         ) : view === 'kanban' ? (
           <KanbanBoard
-            leads={filteredLeads}
+            leads={sortedLeads}
             stages={stages}
             profile={profile}
             onLeadMoved={fetchLeads}
@@ -599,7 +731,7 @@ export default function LeadsClient({
           />
         ) : (
           <LeadsTable
-            leads={filteredLeads}
+            leads={sortedLeads}
             stages={stages}
             agents={agents}
             isAdmin={isAdmin}

@@ -115,7 +115,7 @@ export default function StageChangeModal({
   const [activeTargetStageId, setActiveTargetStageId] = useState(toStage.id)
   const isSiteVisitTransition = fromStage?.key === 'site_visit_scheduled'
   const postVisitStages = stages.filter((s) =>
-    ['proposal', 'negotiation', 'followup', 'won', 'lost'].includes(s.key)
+    ['proposal', 'negotiation', 'token_paid', 'followup', 'won', 'lost'].includes(s.key)
   )
 
   const currentTargetStage = stages.find((s) => s.id === activeTargetStageId) || toStage
@@ -268,6 +268,10 @@ export default function StageChangeModal({
       setFollowupDate(getFutureDate(1))
       setFollowupTime('14:00')
       setFollowupNote(fromStage?.key === 'site_visit_scheduled' ? 'Negotiate price and payment terms after site visit' : 'Check in on contract terms & payment plan')
+    } else if (key === 'token_paid') {
+      setFollowupDate(getFutureDate(2))
+      setFollowupTime('11:00')
+      setFollowupNote('Confirm receipt of token / booking deposit & prepare SPA contract')
     } else if (key === 'lost') {
       setLostReason(LOST_REASONS[0])
     }
@@ -283,6 +287,7 @@ export default function StageChangeModal({
     'proposal',
     'meeting_done',
     'negotiation',
+    'token_paid',
   ].includes(stageKey)
 
   async function handleSubmit(e: React.FormEvent) {
@@ -541,6 +546,10 @@ export default function StageChangeModal({
                             setFollowupDate(getFutureDate(1))
                             setFollowupTime('14:00')
                             setFollowupNote('Negotiate price & payment plan terms')
+                          } else if (stg.key === 'token_paid') {
+                            setFollowupDate(getFutureDate(2))
+                            setFollowupTime('11:00')
+                            setFollowupNote('Confirm receipt of token / booking deposit & prepare SPA contract')
                           } else if (stg.key === 'followup') {
                             setFollowupDate(getFutureDate(2))
                             setFollowupTime('11:00')

@@ -35,6 +35,11 @@ export async function POST(request: NextRequest) {
     property_id,
     campaign_id,
     notes,
+    ai_qualification_score,
+    ai_buyer_intent,
+    ai_preferred_unit,
+    ai_chat_summary,
+    ai_session_id,
   } = body
 
   if (!name || !name.trim()) {
@@ -84,6 +89,11 @@ export async function POST(request: NextRequest) {
     assigned_agent_id: targetAgentId,
     property_id: property_id || null,
     campaign_id: campaign_id || null,
+    ai_qualification_score: typeof ai_qualification_score === 'number' ? ai_qualification_score : null,
+    ai_buyer_intent: ai_buyer_intent?.trim() || null,
+    ai_preferred_unit: ai_preferred_unit?.trim() || null,
+    ai_chat_summary: ai_chat_summary?.trim() || null,
+    ai_session_id: ai_session_id?.trim() || null,
     form_data: {},
   }
 
