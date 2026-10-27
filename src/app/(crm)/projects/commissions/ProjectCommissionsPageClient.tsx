@@ -27,6 +27,8 @@ import {
   Download,
   Lock,
   KeyRound,
+  BarChart3,
+  X,
 } from 'lucide-react'
 import SecurityPinGuard from '@/components/SecurityPinGuard'
 import { SaudiRiyalIcon } from '@/components/SaudiRiyalIcon'
@@ -96,15 +98,77 @@ export default function ProjectCommissionsPageClient({ profile }: Props) {
     fetchData()
   }, [fetchData])
 
+  // Time Horizon Filter States
+  const [commissionPeriod, setCommissionPeriod] = useState<'ALL' | 'MONTH' | 'WEEK' | 'DAY' | 'CUSTOM'>('ALL')
+  const [customStartDate, setCustomStartDate] = useState<string>('')
+  const [customEndDate, setCustomEndDate] = useState<string>('')
+
+  // Filtered commissions based on selected time horizon (Day, Week, Month, Custom, All Time)
+  const filteredCommissions = useMemo(() => {
+    if (commissionPeriod === 'ALL') return commissions
+
+    const now = new Date()
+    const todayStr = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Asia/Riyadh',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).format(now) // 'YYYY-MM-DD'
+
+    // Week start (Sunday in Saudi Arabia)
+    const dayOfWeek = now.getDay()
+    const weekStart = new Date(now)
+    weekStart.setDate(now.getDate() - dayOfWeek)
+    weekStart.setHours(0, 0, 0, 0)
+    const weekStartIso = weekStart.toISOString().split('T')[0]
+
+    // Current month start 'YYYY-MM'
+    const monthStartIso = todayStr.slice(0, 7)
+
+    return commissions.filter((c) => {
+      const dateStr = (c.sale_date || c.created_at || '').split('T')[0]
+      if (!dateStr) return false
+
+      if (commissionPeriod === 'DAY') {
+        return dateStr === todayStr || dateStr === now.toISOString().split('T')[0]
+      }
+      if (commissionPeriod === 'WEEK') {
+        return dateStr >= weekStartIso
+      }
+      if (commissionPeriod === 'MONTH') {
+        return dateStr.startsWith(monthStartIso)
+      }
+      if (commissionPeriod === 'CUSTOM') {
+        if (customStartDate && dateStr < customStartDate) return false
+        if (customEndDate && dateStr > customEndDate) return false
+        return true
+      }
+      return true
+    })
+  }, [commissions, commissionPeriod, customStartDate, customEndDate])
+
+  const periodLabel = useMemo(() => {
+    if (commissionPeriod === 'DAY') return 'Today'
+    if (commissionPeriod === 'WEEK') return 'This Week'
+    if (commissionPeriod === 'MONTH') return 'This Month'
+    if (commissionPeriod === 'CUSTOM') {
+      if (customStartDate && customEndDate) return `${customStartDate} to ${customEndDate}`
+      if (customStartDate) return `From ${customStartDate}`
+      if (customEndDate) return `Until ${customEndDate}`
+      return 'Custom Range'
+    }
+    return 'All Time'
+  }, [commissionPeriod, customStartDate, customEndDate])
+
   // Project Aggregates
   const projectAggregates = useMemo(() => {
     const commsByProject: Record<string, ProjectCommission[]> = {}
-    commissions.forEach((c) => {
+    filteredCommissions.forEach((c) => {
       if (!commsByProject[c.project_id]) commsByProject[c.project_id] = []
       commsByProject[c.project_id].push(c)
     })
 
-    const totalPortfolioEarned = commissions.reduce((sum, c) => sum + Number(c.commission_amount || 0), 0)
+    const totalPortfolioEarned = filteredCommissions.reduce((sum, c) => sum + Number(c.commission_amount || 0), 0)
 
     return projects.map((project) => {
       const projectComms = commsByProject[project.id] || []
@@ -124,13 +188,13 @@ export default function ProjectCommissionsPageClient({ profile }: Props) {
         lastSaleDate,
       }
     })
-  }, [projects, commissions])
+  }, [projects, filteredCommissions])
 
   // Summary Metrics
   const summaryMetrics = useMemo(() => {
-    const totalEarned = commissions.reduce((sum, c) => sum + Number(c.commission_amount || 0), 0)
-    const totalUnitsSold = commissions.length
-    const totalAreaSold = commissions.reduce((sum, c) => sum + Number(c.area_sqm || 0), 0)
+    const totalEarned = filteredCommissions.reduce((sum, c) => sum + Number(c.commission_amount || 0), 0)
+    const totalUnitsSold = filteredCommissions.length
+    const totalAreaSold = filteredCommissions.reduce((sum, c) => sum + Number(c.area_sqm || 0), 0)
     const projectsWithSales = projectAggregates.filter((p) => p.unitsSold > 0)
     
     // Top revenue project
@@ -146,7 +210,7 @@ export default function ProjectCommissionsPageClient({ profile }: Props) {
       topProject,
       avgPerDeal,
     }
-  }, [commissions, projectAggregates])
+  }, [filteredCommissions, projectAggregates])
 
   // Unique cities for filter
   const uniqueCities = useMemo(() => {
@@ -202,7 +266,7 @@ export default function ProjectCommissionsPageClient({ profile }: Props) {
 
   // Filtered & Paginated Transactions
   const filteredTransactions = useMemo(() => {
-    return commissions
+    return filteredCommissions
       .filter((c) => {
         const matchedProject = projects.find((p) => p.id === c.project_id)
 
@@ -228,7 +292,7 @@ export default function ProjectCommissionsPageClient({ profile }: Props) {
         return true
       })
       .sort((a, b) => new Date(b.sale_date || 0).getTime() - new Date(a.sale_date || 0).getTime())
-  }, [commissions, projects, transactionProjectFilter, searchTransaction])
+  }, [filteredCommissions, projects, transactionProjectFilter, searchTransaction])
 
   const paginatedTransactions = useMemo(() => {
     const start = (transactionPage - 1) * transactionPageSize
@@ -379,6 +443,165 @@ export default function ProjectCommissionsPageClient({ profile }: Props) {
       </div>
 
       <div className="page-body" style={{ padding: '24px', maxWidth: '1440px', margin: '0 auto' }}>
+        {/* Time Horizon Filter Toolbar */}
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            flexWrap: 'wrap',
+            gap: '12px',
+            marginBottom: '18px',
+            backgroundColor: '#FFFFFF',
+            padding: '12px 18px',
+            borderRadius: '10px',
+            border: '1px solid #E2E8F0',
+            boxShadow: '0 1px 3px rgba(0,0,0,0.03)',
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <span
+              style={{
+                fontSize: '12px',
+                fontWeight: 800,
+                textTransform: 'uppercase',
+                letterSpacing: '0.05em',
+                color: '#065F46',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+              }}
+            >
+              <BarChart3 size={15} /> Commission Performance
+            </span>
+            <span style={{ fontSize: '12px', color: '#64748B', fontWeight: 600 }}>
+              • {periodLabel}
+            </span>
+          </div>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+            <div
+              style={{
+                display: 'inline-flex',
+                backgroundColor: '#F1F5F9',
+                padding: '3px',
+                borderRadius: '8px',
+                border: '1px solid #E2E8F0',
+                gap: '2px',
+              }}
+            >
+              {(
+                [
+                  { key: 'ALL', label: 'All Time' },
+                  { key: 'MONTH', label: 'This Month' },
+                  { key: 'WEEK', label: 'This Week' },
+                  { key: 'DAY', label: 'Today' },
+                  { key: 'CUSTOM', label: 'Custom Range' },
+                ] as const
+              ).map((t) => (
+                <button
+                  key={t.key}
+                  type="button"
+                  onClick={() => {
+                    setCommissionPeriod(t.key)
+                    setLeaderboardPage(1)
+                    setTransactionPage(1)
+                  }}
+                  style={{
+                    padding: '5px 14px',
+                    borderRadius: '6px',
+                    fontSize: '12px',
+                    fontWeight: commissionPeriod === t.key ? 700 : 500,
+                    border: 'none',
+                    cursor: 'pointer',
+                    transition: 'all 0.15s ease',
+                    backgroundColor: commissionPeriod === t.key ? '#FFFFFF' : 'transparent',
+                    color: commissionPeriod === t.key ? '#065F46' : '#64748B',
+                    boxShadow: commissionPeriod === t.key ? '0 1px 3px rgba(0,0,0,0.08)' : 'none',
+                  }}
+                >
+                  {t.label}
+                </button>
+              ))}
+            </div>
+
+            {/* Custom Date Range Inputs */}
+            {commissionPeriod === 'CUSTOM' && (
+              <div
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '8px',
+                  backgroundColor: '#FFFFFF',
+                  padding: '4px 10px',
+                  borderRadius: '8px',
+                  border: '1px solid #CBD5E1',
+                  fontSize: '12px',
+                }}
+              >
+                <Calendar size={13} color="#059669" />
+                <span style={{ color: '#475569', fontWeight: 600, fontSize: '11px' }}>From:</span>
+                <input
+                  type="date"
+                  value={customStartDate}
+                  onChange={(e) => {
+                    setCustomStartDate(e.target.value)
+                    setLeaderboardPage(1)
+                    setTransactionPage(1)
+                  }}
+                  style={{
+                    border: '1px solid #CBD5E1',
+                    borderRadius: '6px',
+                    padding: '3px 6px',
+                    fontSize: '11.5px',
+                    color: '#0F172A',
+                    outline: 'none',
+                  }}
+                />
+                <span style={{ color: '#475569', fontWeight: 600, fontSize: '11px' }}>To:</span>
+                <input
+                  type="date"
+                  value={customEndDate}
+                  onChange={(e) => {
+                    setCustomEndDate(e.target.value)
+                    setLeaderboardPage(1)
+                    setTransactionPage(1)
+                  }}
+                  style={{
+                    border: '1px solid #CBD5E1',
+                    borderRadius: '6px',
+                    padding: '3px 6px',
+                    fontSize: '11.5px',
+                    color: '#0F172A',
+                    outline: 'none',
+                  }}
+                />
+                {(customStartDate || customEndDate) && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setCustomStartDate('')
+                      setCustomEndDate('')
+                    }}
+                    style={{
+                      border: 'none',
+                      background: 'none',
+                      color: '#94A3B8',
+                      cursor: 'pointer',
+                      padding: '2px',
+                      display: 'flex',
+                      alignItems: 'center',
+                    }}
+                    title="Clear custom dates"
+                  >
+                    <X size={13} />
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+
         {/* KPI Summary Cards */}
         <div
           style={{
@@ -578,7 +801,7 @@ export default function ProjectCommissionsPageClient({ profile }: Props) {
             }}
           >
             <FileText size={16} />
-            <span>All Sales Transactions Log ({commissions.length})</span>
+            <span>All Sales Transactions Log ({filteredCommissions.length})</span>
           </button>
         </div>
 

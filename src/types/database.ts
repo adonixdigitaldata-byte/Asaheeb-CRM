@@ -318,6 +318,8 @@ export interface BlogStatBox {
   labelAr: string
 }
 
+export type SeoReviewStatus = 'NEEDS_REVIEW' | 'IN_PROGRESS' | 'OPTIMIZED' | 'NEEDS_UPDATE'
+
 export interface Blog {
   id: string
   category: string
@@ -342,6 +344,20 @@ export interface Blog {
   quote_en?: string | null
   quote_ar?: string | null
   cover_image_url?: string | null
+  // SEO & Accessibility Fields
+  cover_image_alt_en?: string | null
+  cover_image_alt_ar?: string | null
+  seo_title_en?: string | null
+  seo_title_ar?: string | null
+  meta_description_en?: string | null
+  meta_description_ar?: string | null
+  focus_keyword_en?: string | null
+  focus_keyword_ar?: string | null
+  secondary_keywords_en?: string[] | null
+  secondary_keywords_ar?: string[] | null
+  seo_review_status?: SeoReviewStatus | null
+  seo_reviewed_at?: string | null
+
   featured: boolean
   is_published: boolean
   sort_order: number

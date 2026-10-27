@@ -2,13 +2,15 @@
 
 import React, { useEffect, useRef, useState, useCallback } from 'react'
 import {
-  Bell,
   Sparkles,
   Volume2,
   VolumeX,
   X,
   Trophy,
   PartyPopper,
+  RotateCcw,
+  Award,
+  TrendingUp,
 } from 'lucide-react'
 import { SaudiRiyalIcon } from '@/components/SaudiRiyalIcon'
 
@@ -29,185 +31,16 @@ interface Props {
   onClose: () => void
 }
 
-export type BellSoundStyle = 'SHIP_BELL' | 'BRONZE_GONG' | 'VICTORY_FANFARE'
-
 /**
- * Pre-unlocks AudioContext synchronously during a direct user click/touch event.
- * Eliminates browser audio autoplay policy delays and starts sounds on millisecond 0.
+ * Pre-warms the GTA audio track synchronously on user click/touch.
  */
-export function unlockCelebrationAudio(): AudioContext | null {
-  if (typeof window === 'undefined') return null
+export function unlockCelebrationAudio(): void {
+  if (typeof window === 'undefined') return
   try {
-    const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext
-    if (!AudioContextClass) return null
-    if (!(window as any)._sharedCelebrationCtx || (window as any)._sharedCelebrationCtx.state === 'closed') {
-      (window as any)._sharedCelebrationCtx = new AudioContextClass()
-    }
-    const ctx = (window as any)._sharedCelebrationCtx as AudioContext
-    if (ctx && ctx.state === 'suspended') {
-      ctx.resume().catch(() => {})
-    }
-    return ctx
-  } catch {
-    return null
-  }
-}
-
-/**
- * Physical Mallet Impact Transient (Metallic strike crack)
- */
-function scheduleMalletImpact(ctx: AudioContext, time: number, outputNode: AudioNode, intensity = 1.0) {
-  try {
-    const bufferSize = Math.floor(ctx.sampleRate * 0.05) // 50ms burst
-    const noiseBuffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate)
-    const output = noiseBuffer.getChannelData(0)
-    for (let i = 0; i < bufferSize; i++) {
-      output[i] = (Math.random() * 2 - 1) * Math.exp(-i / (ctx.sampleRate * 0.008))
-    }
-    const whiteNoise = ctx.createBufferSource()
-    whiteNoise.buffer = noiseBuffer
-
-    const filter = ctx.createBiquadFilter()
-    filter.type = 'bandpass'
-    filter.frequency.setValueAtTime(3200, time)
-    filter.Q.setValueAtTime(3.0, time)
-
-    const noiseGain = ctx.createGain()
-    noiseGain.gain.setValueAtTime(0.6 * intensity, time)
-    noiseGain.gain.exponentialRampToValueAtTime(0.001, time + 0.04)
-
-    whiteNoise.connect(filter)
-    filter.connect(noiseGain)
-    noiseGain.connect(outputNode)
-
-    whiteNoise.start(time)
-    whiteNoise.stop(time + 0.05)
+    const audio = new Audio('/sounds/gta-sound.mp3')
+    audio.preload = 'auto'
+    audio.load()
   } catch {}
-}
-
-/**
- * High-Definition FM Synthesized Brass Ship Bell Strike (DX7 Chowning Bell Model)
- */
-function scheduleShipBellStrike(
-  ctx: AudioContext,
-  time: number,
-  outputNode: AudioNode,
-  intensity = 1.0,
-  pitchMultiplier = 1.0
-) {
-  scheduleMalletImpact(ctx, time, outputNode, intensity)
-
-  const carrierFreq = 440 * pitchMultiplier
-  const modFreq = carrierFreq * 1.414
-
-  const modOsc = ctx.createOscillator()
-  const modGain = ctx.createGain()
-  modOsc.frequency.setValueAtTime(modFreq, time)
-  modGain.gain.setValueAtTime(carrierFreq * 3.5 * intensity, time)
-  modGain.gain.exponentialRampToValueAtTime(1.0, time + 2.0)
-
-  const carrierOsc = ctx.createOscillator()
-  const carrierGain = ctx.createGain()
-  carrierOsc.frequency.setValueAtTime(carrierFreq, time)
-  carrierGain.gain.setValueAtTime(0.001, time)
-  carrierGain.gain.linearRampToValueAtTime(0.85 * intensity, time + 0.004)
-  carrierGain.gain.exponentialRampToValueAtTime(0.0001, time + 3.2)
-
-  modOsc.connect(modGain)
-  modGain.connect(carrierOsc.frequency)
-  carrierOsc.connect(carrierGain)
-  carrierGain.connect(outputNode)
-
-  modOsc.start(time)
-  carrierOsc.start(time)
-  modOsc.stop(time + 3.3)
-  carrierOsc.stop(time + 3.3)
-
-  const partials = [
-    { freq: 220 * pitchMultiplier, vol: 0.7, decay: 2.8 },
-    { freq: 659 * pitchMultiplier, vol: 0.5, decay: 2.4 },
-    { freq: 880 * pitchMultiplier, vol: 0.6, decay: 2.9 },
-    { freq: 1320 * pitchMultiplier, vol: 0.45, decay: 2.0 },
-    { freq: 1760 * pitchMultiplier, vol: 0.35, decay: 1.8 },
-    { freq: 2640 * pitchMultiplier, vol: 0.25, decay: 1.4 },
-  ]
-
-  partials.forEach((p) => {
-    const osc = ctx.createOscillator()
-    const gain = ctx.createGain()
-    osc.type = 'sine'
-    osc.frequency.setValueAtTime(p.freq, time)
-
-    gain.gain.setValueAtTime(0.001, time)
-    gain.gain.linearRampToValueAtTime(p.vol * intensity, time + 0.006)
-    gain.gain.exponentialRampToValueAtTime(0.0001, time + p.decay)
-
-    osc.connect(gain)
-    gain.connect(outputNode)
-    osc.start(time)
-    osc.stop(time + p.decay + 0.1)
-  })
-}
-
-/**
- * Deep Imperial Bronze Gong (Massive room-shaking bronze boom)
- */
-function scheduleBronzeGong(ctx: AudioContext, time: number, outputNode: AudioNode, intensity = 1.0) {
-  scheduleMalletImpact(ctx, time, outputNode, intensity * 0.8)
-
-  const gongFrequencies = [
-    { freq: 98, vol: 0.9, decay: 4.5 },
-    { freq: 147, vol: 0.8, decay: 4.2 },
-    { freq: 220, vol: 0.75, decay: 3.8 },
-    { freq: 330, vol: 0.6, decay: 3.2 },
-    { freq: 440, vol: 0.5, decay: 2.8 },
-    { freq: 698, vol: 0.35, decay: 2.2 },
-  ]
-
-  gongFrequencies.forEach((g) => {
-    const osc = ctx.createOscillator()
-    const gain = ctx.createGain()
-    osc.type = 'triangle'
-    osc.frequency.setValueAtTime(g.freq, time)
-    osc.frequency.exponentialRampToValueAtTime(g.freq * 0.98, time + g.decay)
-
-    gain.gain.setValueAtTime(0.001, time)
-    gain.gain.linearRampToValueAtTime(g.vol * intensity, time + 0.01)
-    gain.gain.exponentialRampToValueAtTime(0.0001, time + g.decay)
-
-    osc.connect(gain)
-    gain.connect(outputNode)
-    osc.start(time)
-    osc.stop(time + g.decay + 0.2)
-  })
-}
-
-/**
- * Victory Stadium Fanfare Chords
- */
-function scheduleFanfareChord(ctx: AudioContext, time: number, outputNode: AudioNode, notes: number[]) {
-  notes.forEach((freq, idx) => {
-    const osc = ctx.createOscillator()
-    const gain = ctx.createGain()
-    const noteTime = time + idx * 0.08
-
-    osc.type = 'sawtooth'
-    osc.frequency.setValueAtTime(freq, noteTime)
-
-    const filter = ctx.createBiquadFilter()
-    filter.type = 'lowpass'
-    filter.frequency.setValueAtTime(2400, noteTime)
-
-    gain.gain.setValueAtTime(0.001, noteTime)
-    gain.gain.linearRampToValueAtTime(0.35, noteTime + 0.03)
-    gain.gain.exponentialRampToValueAtTime(0.0001, noteTime + 1.4)
-
-    osc.connect(filter)
-    filter.connect(gain)
-    gain.connect(outputNode)
-    osc.start(noteTime)
-    osc.stop(noteTime + 1.5)
-  })
 }
 
 /* -------------------------------------------------------------
@@ -256,16 +89,13 @@ const LUXURY_PALETTE = [
 ]
 
 export default function DealCelebrationModal({ deal, onClose }: Props) {
-  const [soundStyle, setSoundStyle] = useState<BellSoundStyle>('SHIP_BELL')
-  const [ringsCount, setRingsCount] = useState(1)
   const [isMuted, setIsMuted] = useState(false)
-  const [bellPulsing, setBellPulsing] = useState(false)
-  const [secondsRemaining, setSecondsRemaining] = useState(16)
-  const [shockwaves, setShockwaves] = useState<number[]>([])
+  const [secondsRemaining, setSecondsRemaining] = useState(18)
+  const [totalDuration, setTotalDuration] = useState(18)
+  const [replayCount, setReplayCount] = useState(1)
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
-  const audioCtxRef = useRef<AudioContext | null>(null)
-  const masterGainRef = useRef<GainNode | null>(null)
+  const audioRef = useRef<HTMLAudioElement | null>(null)
   const ribbonsRef = useRef<RibbonSegment[]>([])
   const confettiRef = useRef<ConfettiPiece[]>([])
   const animFrameRef = useRef<number | null>(null)
@@ -330,7 +160,7 @@ export default function DealCelebrationModal({ deal, onClose }: Props) {
     }
   }, [])
 
-  // Setup Canvas and Animation Loop
+  // Canvas loop
   useEffect(() => {
     const canvas = canvasRef.current
     if (!canvas) return
@@ -348,128 +178,74 @@ export default function DealCelebrationModal({ deal, onClose }: Props) {
 
     let t = 0
     const render = () => {
-      t += 0.02
       ctx.clearRect(0, 0, canvas.width, canvas.height)
+      t += 0.02
 
-      if (ribbonsRef.current.length < 6 && Math.random() < 0.07) {
-        const palette = LUXURY_PALETTE[Math.floor(Math.random() * LUXURY_PALETTE.length)]
-        const startX = Math.random() * canvas.width
-        const segments: { x: number; y: number; width: number }[] = []
-        for (let s = 0; s < 20; s++) {
-          segments.push({
-            x: startX,
-            y: -s * 15 - 40,
-            width: 10 + Math.sin((s / 20) * Math.PI) * 8,
-          })
-        }
-        ribbonsRef.current.push({
-          x: startX,
-          y: -70,
-          vx: (Math.random() - 0.5) * 1.4,
-          vy: 2.0 + Math.random() * 1.6,
-          width: 10,
-          color1: palette.c1,
-          color2: palette.c2,
-          angle: Math.random() * Math.PI * 2,
-          angleSpeed: 0.03,
-          waviness: 24,
-          waveSpeed: 0.04,
-          waveOffset: Math.random() * 10,
-          points: segments,
-        })
-      }
-
-      // Render Ribbons
+      // Draw ribbons
       for (let i = ribbonsRef.current.length - 1; i >= 0; i--) {
         const r = ribbonsRef.current[i]
-        r.y += r.vy
         r.x += r.vx
+        r.y += r.vy
         r.angle += r.angleSpeed
 
-        const headX = r.x + Math.sin(t * r.waveSpeed * 10 + r.waveOffset) * r.waviness
-        const headY = r.y
-        r.points.unshift({
-          x: headX,
-          y: headY,
-          width: r.width * Math.abs(Math.cos(r.angle)),
-        })
-        if (r.points.length > 22) {
-          r.points.pop()
-        }
-
-        if (r.points.length >= 2) {
-          for (let p = 0; p < r.points.length - 1; p++) {
-            const p1 = r.points[p]
-            const p2 = r.points[p + 1]
-            const w1 = Math.max(2, p1.width)
-            const w2 = Math.max(2, p2.width)
-
-            const grad = ctx.createLinearGradient(p1.x - w1, p1.y, p1.x + w1, p1.y)
-            grad.addColorStop(0, r.color1)
-            grad.addColorStop(0.5, '#FFFFFF')
-            grad.addColorStop(1, r.color2)
-
-            ctx.fillStyle = grad
-            ctx.beginPath()
-            ctx.moveTo(p1.x - w1, p1.y)
-            ctx.lineTo(p1.x + w1, p1.y)
-            ctx.lineTo(p2.x + w2, p2.y)
-            ctx.lineTo(p2.x - w2, p2.y)
-            ctx.closePath()
-            ctx.fill()
-          }
-        }
-
-        if (r.points[r.points.length - 1]?.y > canvas.height + 120) {
+        if (r.y > canvas.height + 200) {
           ribbonsRef.current.splice(i, 1)
+          continue
         }
+
+        ctx.save()
+        ctx.beginPath()
+        for (let p = 0; p < r.points.length; p++) {
+          const pt = r.points[p]
+          const curX = r.x + Math.sin(t * r.waveSpeed + p * 0.3 + r.waveOffset) * r.waviness
+          const curY = r.y + p * 12
+          if (p === 0) ctx.moveTo(curX, curY)
+          else ctx.lineTo(curX, curY)
+        }
+        ctx.lineWidth = r.width
+        const grad = ctx.createLinearGradient(r.x, r.y, r.x + 30, r.y + 120)
+        grad.addColorStop(0, r.color1)
+        grad.addColorStop(1, r.color2)
+        ctx.strokeStyle = grad
+        ctx.lineCap = 'round'
+        ctx.stroke()
+        ctx.restore()
       }
 
-      // Render Confetti
+      // Draw confetti
       for (let i = confettiRef.current.length - 1; i >= 0; i--) {
         const c = confettiRef.current[i]
         c.x += c.vx
         c.y += c.vy
-        c.vy += 0.15
-        c.vx *= 0.985
+        c.vy += 0.12 // gravity
+        c.vx *= 0.99
         c.rotationX += c.speedRotX
         c.rotationY += c.speedRotY
 
+        if (c.y > canvas.height + 30) {
+          confettiRef.current.splice(i, 1)
+          continue
+        }
+
         ctx.save()
         ctx.translate(c.x, c.y)
-        ctx.rotate(c.rotationZ)
-        ctx.scale(Math.cos(c.rotationX), Math.sin(c.rotationY))
-
+        ctx.rotate(c.rotationX)
+        ctx.scale(Math.cos(c.rotationY), 1)
         ctx.fillStyle = c.color
-        ctx.shadowColor = c.color
-        ctx.shadowBlur = 4
+        ctx.globalAlpha = c.opacity
 
         if (c.shape === 'rect') {
-          ctx.fillRect(-c.size / 2, -c.size / 3, c.size, c.size * 0.7)
+          ctx.fillRect(-c.size / 2, -c.size / 2, c.size, c.size * 0.6)
         } else if (c.shape === 'circle') {
           ctx.beginPath()
-          ctx.arc(0, 0, c.size / 2.5, 0, Math.PI * 2)
+          ctx.arc(0, 0, c.size / 2, 0, Math.PI * 2)
           ctx.fill()
         } else {
-          const s = c.size * 0.6
           ctx.beginPath()
-          ctx.moveTo(0, -s)
-          ctx.lineTo(s * 0.3, -s * 0.3)
-          ctx.lineTo(s, 0)
-          ctx.lineTo(s * 0.3, s * 0.3)
-          ctx.lineTo(0, s)
-          ctx.lineTo(-s * 0.3, s * 0.3)
-          ctx.lineTo(-s, 0)
-          ctx.lineTo(-s * 0.3, -s * 0.3)
-          ctx.closePath()
+          ctx.arc(0, 0, c.size / 2, 0, Math.PI * 2)
           ctx.fill()
         }
-
         ctx.restore()
-
-        if (c.y > canvas.height + 40) {
-          confettiRef.current.splice(i, 1)
-        }
       }
 
       animFrameRef.current = requestAnimationFrame(render)
@@ -483,146 +259,32 @@ export default function DealCelebrationModal({ deal, onClose }: Props) {
     }
   }, [spawnCelebrationBurst])
 
-  // Shockwave trigger for visual bell ripple
-  const triggerShockwave = useCallback(() => {
-    const id = Date.now()
-    setShockwaves((prev) => [...prev.slice(-2), id])
-    setTimeout(() => {
-      setShockwaves((prev) => prev.filter((sw) => sw !== id))
-    }, 1000)
-  }, [])
-
-  // Start 15+ Second Continuous Dubai Sales Celebration Audio
-  const startFullCelebrationAudio = useCallback(
-    (style: BellSoundStyle = soundStyle) => {
-      try {
-        let ctx = unlockCelebrationAudio()
-        if (!ctx) return
-        audioCtxRef.current = ctx
-
-        const compressor = ctx.createDynamicsCompressor()
-        compressor.threshold.setValueAtTime(-14, ctx.currentTime)
-        compressor.knee.setValueAtTime(8, ctx.currentTime)
-        compressor.ratio.setValueAtTime(12, ctx.currentTime)
-        compressor.attack.setValueAtTime(0.002, ctx.currentTime)
-        compressor.release.setValueAtTime(0.2, ctx.currentTime)
-
-        const master = ctx.createGain()
-        master.gain.setValueAtTime(1.0, ctx.currentTime)
-        masterGainRef.current = master
-
-        compressor.connect(master)
-        master.connect(ctx.destination)
-
-        const now = ctx.currentTime
-
-        if (style === 'SHIP_BELL') {
-          const pairsCount = 10
-          for (let p = 0; p < pairsCount; p++) {
-            const pairStart = now + p * 1.5
-
-            scheduleShipBellStrike(ctx, pairStart, compressor, 1.15, 1.0)
-            scheduleShipBellStrike(ctx, pairStart + 0.16, compressor, 0.95, 1.05)
-
-            setTimeout(() => {
-              setBellPulsing(true)
-              triggerShockwave()
-              setTimeout(() => setBellPulsing(false), 450)
-            }, p * 1500)
-          }
-
-          scheduleFanfareChord(ctx, now + 0.4, compressor, [523.25, 659.25, 783.99])
-          scheduleFanfareChord(ctx, now + 6.0, compressor, [587.33, 739.99, 880.0])
-          scheduleFanfareChord(ctx, now + 12.0, compressor, [783.99, 987.77, 1318.51])
-        } else if (style === 'BRONZE_GONG') {
-          const gongCount = 8
-          for (let g = 0; g < gongCount; g++) {
-            const gongTime = now + g * 2.0
-            scheduleBronzeGong(ctx, gongTime, compressor, 1.3)
-
-            setTimeout(() => {
-              setBellPulsing(true)
-              triggerShockwave()
-              setTimeout(() => setBellPulsing(false), 550)
-            }, g * 2000)
-          }
-        } else {
-          scheduleFanfareChord(ctx, now + 0.1, compressor, [523.25, 659.25, 783.99, 1046.5])
-          scheduleFanfareChord(ctx, now + 2.5, compressor, [587.33, 739.99, 880.0, 1174.66])
-          scheduleFanfareChord(ctx, now + 5.0, compressor, [659.25, 830.61, 987.77, 1318.51])
-          scheduleFanfareChord(ctx, now + 8.0, compressor, [783.99, 987.77, 1174.66, 1567.98])
-          scheduleFanfareChord(ctx, now + 12.0, compressor, [1046.5, 1318.51, 1567.98, 2093.0])
-
-          for (let b = 0; b < 10; b++) {
-            scheduleShipBellStrike(ctx, now + b * 1.5, compressor, 0.95)
-            setTimeout(() => {
-              setBellPulsing(true)
-              triggerShockwave()
-              setTimeout(() => setBellPulsing(false), 450)
-            }, b * 1500)
-          }
-        }
-      } catch (err) {
-        console.warn('Audio synthesis error:', err)
-      }
-    },
-    [soundStyle, triggerShockwave]
-  )
-
-  // Instant Manual Strike / Gong Ring
-  const triggerManualRing = useCallback(
-    (e?: React.MouseEvent | React.TouchEvent) => {
-      if (e) {
-        e.stopPropagation()
-      }
-      setBellPulsing(true)
-      triggerShockwave()
-      spawnCelebrationBurst(35)
-      setTimeout(() => setBellPulsing(false), 500)
-      setRingsCount((c) => c + 1)
-
-      if (isMuted) return
-
-      try {
-        let ctx = unlockCelebrationAudio()
-        if (!ctx) return
-        audioCtxRef.current = ctx
-
-        if (masterGainRef.current) {
-          if (soundStyle === 'BRONZE_GONG') {
-            scheduleBronzeGong(ctx, ctx.currentTime, masterGainRef.current, 1.4)
-          } else {
-            scheduleShipBellStrike(ctx, ctx.currentTime, masterGainRef.current, 1.35, 1.0)
-            scheduleShipBellStrike(ctx, ctx.currentTime + 0.16, masterGainRef.current, 1.15, 1.05)
-          }
-        } else {
-          startFullCelebrationAudio()
-        }
-      } catch (err) {
-        console.warn('Manual ring error:', err)
-      }
-    },
-    [isMuted, soundStyle, startFullCelebrationAudio, triggerShockwave, spawnCelebrationBurst]
-  )
-
-  const handleSwitchSound = (newStyle: BellSoundStyle) => {
-    setSoundStyle(newStyle)
-    startFullCelebrationAudio(newStyle)
-  }
-
-  const toggleMute = useCallback((e: React.MouseEvent) => {
-    e.stopPropagation()
-    setIsMuted((prev) => {
-      const next = !prev
-      if (masterGainRef.current && audioCtxRef.current) {
-        masterGainRef.current.gain.setValueAtTime(next ? 0 : 1.0, audioCtxRef.current.currentTime)
-      }
-      return next
-    })
-  }, [])
-
+  // Play GTA Audio Soundtrack on Mount (Per CEO Directive)
   useEffect(() => {
-    startFullCelebrationAudio()
+    let audio: HTMLAudioElement | null = null
+    try {
+      audio = new Audio('/sounds/gta-sound.mp3')
+      audio.preload = 'auto'
+      audio.volume = 1.0
+      audioRef.current = audio
+
+      audio.onloadedmetadata = () => {
+        if (audio && audio.duration && !isNaN(audio.duration)) {
+          const dur = Math.ceil(audio.duration)
+          setTotalDuration(dur)
+          setSecondsRemaining(dur)
+        }
+      }
+
+      const playPromise = audio.play()
+      if (playPromise !== undefined) {
+        playPromise.catch((err) => {
+          console.warn('GTA celebration soundtrack autoplay deferred by browser policy:', err)
+        })
+      }
+    } catch (err) {
+      console.warn('Audio initialization error:', err)
+    }
 
     const countdown = setInterval(() => {
       setSecondsRemaining((s) => (s > 0 ? s - 1 : 0))
@@ -630,11 +292,48 @@ export default function DealCelebrationModal({ deal, onClose }: Props) {
 
     return () => {
       clearInterval(countdown)
-      if (audioCtxRef.current && audioCtxRef.current.state !== 'closed') {
-        audioCtxRef.current.close().catch(() => {})
+      if (audioRef.current) {
+        audioRef.current.pause()
+        audioRef.current.currentTime = 0
+        audioRef.current = null
       }
     }
-  }, [startFullCelebrationAudio])
+  }, [])
+
+  // Replay GTA Track
+  const replayGtaTrack = useCallback(
+    (e?: React.MouseEvent) => {
+      if (e) e.stopPropagation()
+      spawnCelebrationBurst(50)
+      setReplayCount((c) => c + 1)
+      setSecondsRemaining(totalDuration)
+
+      if (audioRef.current) {
+        audioRef.current.currentTime = 0
+        audioRef.current.play().catch(() => {})
+      } else {
+        const audio = new Audio('/sounds/gta-sound.mp3')
+        audio.preload = 'auto'
+        audio.volume = 1.0
+        audio.muted = isMuted
+        audioRef.current = audio
+        audio.play().catch(() => {})
+      }
+    },
+    [isMuted, spawnCelebrationBurst, totalDuration]
+  )
+
+  // Mute / Unmute
+  const toggleMute = useCallback((e: React.MouseEvent) => {
+    e.stopPropagation()
+    setIsMuted((prev) => {
+      const next = !prev
+      if (audioRef.current) {
+        audioRef.current.muted = next
+      }
+      return next
+    })
+  }, [])
 
   return (
     <div
@@ -664,34 +363,13 @@ export default function DealCelebrationModal({ deal, onClose }: Props) {
         }}
       />
 
-      {/* Acoustic Radial Shockwaves Emitter Behind Card */}
-      {shockwaves.map((swId) => (
-        <div
-          key={swId}
-          style={{
-            position: 'fixed',
-            top: '50%',
-            left: '50%',
-            transform: 'translate(-50%, -50%)',
-            width: '180px',
-            height: '180px',
-            borderRadius: '50%',
-            border: '3px solid rgba(245, 158, 11, 0.85)',
-            boxShadow: '0 0 50px rgba(245, 158, 11, 0.6), inset 0 0 30px rgba(245, 158, 11, 0.4)',
-            pointerEvents: 'none',
-            zIndex: 2,
-            animation: 'acousticShockwave 1.1s cubic-bezier(0.1, 0.8, 0.3, 1) forwards',
-          }}
-        />
-      ))}
-
-      {/* Main Floor TV Celebration Shell (Centered layout with zero overflow on mobile screens) */}
+      {/* Main Floor TV Celebration Shell */}
       <div
         style={{
           width: '100%',
-          maxWidth: '520px',
-          maxHeight: 'min(94dvh, 720px)',
-          background: 'radial-gradient(ellipse at top, #1E293B 0%, #0F172A 45%, #020617 100%)',
+          maxWidth: '540px',
+          maxHeight: 'min(94dvh, 760px)',
+          background: 'radial-gradient(ellipse at top, #1E293B 0%, #0F172A 50%, #020617 100%)',
           border: '2px solid rgba(245, 158, 11, 0.65)',
           borderRadius: '24px',
           boxShadow: '0 30px 80px -10px rgba(245, 158, 11, 0.45), 0 0 120px rgba(16, 185, 129, 0.25)',
@@ -705,24 +383,24 @@ export default function DealCelebrationModal({ deal, onClose }: Props) {
         }}
         onClick={(e) => e.stopPropagation()}
       >
-        {/* Top 15-Second Active Broadcast Celebration Neon Progress Bar */}
+        {/* Top Celebration Neon Progress Bar */}
         <div style={{ height: '4px', backgroundColor: 'rgba(255, 255, 255, 0.1)', width: '100%', flexShrink: 0 }}>
           <div
             style={{
               height: '100%',
               background: 'linear-gradient(90deg, #F59E0B, #10B981, #38BDF8, #F59E0B)',
               backgroundSize: '200% 100%',
-              width: `${(secondsRemaining / 16) * 100}%`,
+              width: `${(secondsRemaining / Math.max(totalDuration, 1)) * 100}%`,
               transition: 'width 1s linear',
               animation: 'shimmerBar 2s linear infinite',
             }}
           />
         </div>
 
-        {/* TOP HEADER: Centered & Clean */}
+        {/* TOP HEADER: Clean Mission / Victory Bar */}
         <div
           style={{
-            padding: '10px 16px 8px 16px',
+            padding: '12px 18px',
             borderBottom: '1px solid rgba(255, 255, 255, 0.08)',
             backgroundColor: 'rgba(15, 23, 42, 0.9)',
             backdropFilter: 'blur(8px)',
@@ -730,27 +408,26 @@ export default function DealCelebrationModal({ deal, onClose }: Props) {
             zIndex: 5,
           }}
         >
-          {/* Top Row: Luxury Brand Badge + Countdown + Sound/Close */}
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
               <div
                 style={{
                   display: 'inline-flex',
                   alignItems: 'center',
-                  gap: '4px',
-                  padding: '3px 8px',
+                  gap: '5px',
+                  padding: '4px 10px',
                   borderRadius: '12px',
-                  background: 'linear-gradient(135deg, rgba(245, 158, 11, 0.25) 0%, rgba(217, 119, 6, 0.15) 100%)',
-                  border: '1px solid rgba(245, 158, 11, 0.5)',
+                  background: 'linear-gradient(135deg, rgba(245, 158, 11, 0.3) 0%, rgba(217, 119, 6, 0.2) 100%)',
+                  border: '1px solid rgba(245, 158, 11, 0.55)',
                   color: '#FDE68A',
                   fontSize: '11px',
-                  fontWeight: 800,
-                  letterSpacing: '0.04em',
+                  fontWeight: 900,
+                  letterSpacing: '0.06em',
                   textTransform: 'uppercase',
                 }}
               >
-                <Sparkles size={11} color="#F59E0B" />
-                <span>CLOSING BELL</span>
+                <Sparkles size={12} color="#F59E0B" />
+                <span>MISSION PASSED</span>
               </div>
 
               <div
@@ -758,7 +435,7 @@ export default function DealCelebrationModal({ deal, onClose }: Props) {
                   display: 'inline-flex',
                   alignItems: 'center',
                   gap: '4px',
-                  padding: '2px 7px',
+                  padding: '2px 8px',
                   borderRadius: '10px',
                   backgroundColor: secondsRemaining > 0 ? 'rgba(16, 185, 129, 0.2)' : 'rgba(148, 163, 184, 0.15)',
                   border: `1px solid ${secondsRemaining > 0 ? 'rgba(16, 185, 129, 0.4)' : 'rgba(148, 163, 184, 0.3)'}`,
@@ -769,14 +446,14 @@ export default function DealCelebrationModal({ deal, onClose }: Props) {
               >
                 <span
                   style={{
-                    width: '5px',
-                    height: '5px',
+                    width: '6px',
+                    height: '6px',
                     borderRadius: '50%',
                     backgroundColor: secondsRemaining > 0 ? '#10B981' : '#94A3B8',
                     animation: secondsRemaining > 0 ? 'pulseDot 1s ease-in-out infinite' : 'none',
                   }}
                 />
-                <span>{secondsRemaining > 0 ? `${secondsRemaining}s` : 'Done'}</span>
+                <span>{secondsRemaining > 0 ? `${secondsRemaining}s` : 'Victory'}</span>
               </div>
             </div>
 
@@ -826,62 +503,14 @@ export default function DealCelebrationModal({ deal, onClose }: Props) {
               </button>
             </div>
           </div>
-
-          {/* Sound Preset Selector Bar - Centered */}
-          <div
-            style={{
-              marginTop: '6px',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              backgroundColor: 'rgba(15, 23, 42, 0.7)',
-              border: '1px solid rgba(255, 255, 255, 0.08)',
-              borderRadius: '8px',
-              padding: '2px 4px',
-              gap: '4px',
-            }}
-          >
-            <span style={{ fontSize: '10px', color: '#94A3B8', fontWeight: 600, paddingRight: '4px' }}>
-              Style:
-            </span>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '3px' }}>
-              {(
-                [
-                  { id: 'SHIP_BELL', label: '🔔 Bell' },
-                  { id: 'BRONZE_GONG', label: '🪙 Gong' },
-                  { id: 'VICTORY_FANFARE', label: '🎺 Fanfare' },
-                ] as const
-              ).map((s) => (
-                <button
-                  key={s.id}
-                  type="button"
-                  onClick={() => handleSwitchSound(s.id)}
-                  style={{
-                    padding: '3px 8px',
-                    borderRadius: '5px',
-                    fontSize: '10px',
-                    fontWeight: soundStyle === s.id ? 800 : 500,
-                    border: soundStyle === s.id ? '1px solid rgba(245, 158, 11, 0.6)' : '1px solid transparent',
-                    cursor: 'pointer',
-                    backgroundColor: soundStyle === s.id ? '#F59E0B' : 'transparent',
-                    color: soundStyle === s.id ? '#000000' : '#CBD5E1',
-                    boxShadow: soundStyle === s.id ? '0 1px 4px rgba(245, 158, 11, 0.3)' : 'none',
-                    transition: 'all 0.15s ease',
-                  }}
-                >
-                  {s.label}
-                </button>
-              ))}
-            </div>
-          </div>
         </div>
 
-        {/* CENTERPIECE SHOWCASE: Perfectly Centered Bell & Balanced Text */}
+        {/* CENTERPIECE SHOWCASE: Heavily Focused Agent, Amount Closed & Commission */}
         <div
           style={{
             flex: 1,
             overflowY: 'auto',
-            padding: '12px 16px',
+            padding: '16px 20px',
             textAlign: 'center',
             display: 'flex',
             flexDirection: 'column',
@@ -890,207 +519,298 @@ export default function DealCelebrationModal({ deal, onClose }: Props) {
             WebkitOverflowScrolling: 'touch',
           }}
         >
-          {/* Centered Golden Sales Bell */}
+          {/* Glowing Trophy Medal / Respect Shield */}
           <div
             style={{
               position: 'relative',
               display: 'inline-flex',
-              flexDirection: 'column',
               alignItems: 'center',
               justifyContent: 'center',
-              margin: '2px auto 8px auto',
-              cursor: 'pointer',
+              marginBottom: '10px',
             }}
-            onClick={triggerManualRing}
           >
             {/* Ambient Gold Halo */}
             <div
               style={{
                 position: 'absolute',
-                inset: '-18px',
+                inset: '-20px',
                 borderRadius: '50%',
-                background: 'radial-gradient(circle, rgba(245, 158, 11, 0.5) 0%, rgba(217, 119, 6, 0.15) 50%, transparent 75%)',
-                animation: 'ringPulse 1.4s ease-out infinite',
+                background: 'radial-gradient(circle, rgba(245, 158, 11, 0.45) 0%, rgba(16, 185, 129, 0.15) 50%, transparent 75%)',
+                animation: 'ringPulse 1.8s ease-out infinite',
                 pointerEvents: 'none',
               }}
             />
 
-            {/* Glowing Golden 3D Bell Strike Button */}
             <div
               style={{
-                width: '84px',
-                height: '84px',
+                width: '74px',
+                height: '74px',
                 borderRadius: '50%',
                 background: 'radial-gradient(circle at 35% 30%, #FEF08A 0%, #F59E0B 50%, #B45309 85%, #78350F 100%)',
-                border: '4px solid #FDE68A',
+                border: '3.5px solid #FDE68A',
                 boxShadow:
-                  '0 0 35px rgba(245, 158, 11, 0.75), 0 8px 18px rgba(0, 0, 0, 0.5), inset 0 2px 4px rgba(255, 255, 255, 0.8)',
+                  '0 0 40px rgba(245, 158, 11, 0.8), 0 8px 24px rgba(0, 0, 0, 0.6), inset 0 2px 5px rgba(255, 255, 255, 0.9)',
                 color: '#FFFFFF',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
-                transform: bellPulsing ? 'scale(1.15) rotate(-15deg)' : 'scale(1) rotate(0deg)',
-                transition: 'transform 0.15s cubic-bezier(0.175, 0.885, 0.32, 1.275)',
                 position: 'relative',
                 zIndex: 3,
-                userSelect: 'none',
               }}
             >
-              <Bell
-                size={40}
+              <Trophy
+                size={38}
                 style={{
-                  filter: 'drop-shadow(0 3px 5px rgba(0,0,0,0.5))',
+                  filter: 'drop-shadow(0 3px 6px rgba(0,0,0,0.6))',
                   color: '#FFFFFF',
                 }}
               />
             </div>
-
-            {/* Interactive Cue */}
-            <div
-              style={{
-                marginTop: '5px',
-                fontSize: '10px',
-                fontWeight: 800,
-                color: '#FCD34D',
-                letterSpacing: '0.06em',
-                textTransform: 'uppercase',
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: '3px',
-              }}
-            >
-              <span>⚡ TAP BELL TO STRIKE</span>
-            </div>
           </div>
 
-          {/* Centered Headline */}
-          <div style={{ marginBottom: '10px' }}>
+          {/* GTA Respect / Deal Title Banner */}
+          <div style={{ marginBottom: '14px' }}>
             <h2
               style={{
-                fontSize: '20px',
+                fontSize: '22px',
                 fontWeight: 900,
-                margin: '0 0 2px 0',
-                background: 'linear-gradient(135deg, #FFFBEB 0%, #FDE68A 50%, #F59E0B 100%)',
+                margin: '0 0 3px 0',
+                background: 'linear-gradient(135deg, #FFFBEB 0%, #FDE68A 45%, #F59E0B 100%)',
                 WebkitBackgroundClip: 'text',
                 WebkitTextFillColor: 'transparent',
                 letterSpacing: '-0.02em',
-                textShadow: '0 0 18px rgba(245, 158, 11, 0.4)',
+                textShadow: '0 0 22px rgba(245, 158, 11, 0.5)',
               }}
             >
-              🎉 NEW SALE CLOSED!
+              ★ DEAL CLOSED &amp; CERTIFIED ★
             </h2>
-            <p style={{ fontSize: '11px', color: '#94A3B8', margin: 0, fontWeight: 500 }}>
-              Live broadcast across the Asaheeb Sales Floor Screen
+            <p style={{ fontSize: '11px', color: '#94A3B8', margin: 0, fontWeight: 600, letterSpacing: '0.04em', textTransform: 'uppercase' }}>
+              Live broadcast across the Asaheeb Executive Floor
             </p>
           </div>
 
-          {/* Luxury Deal Highlights Card (100% Balanced & Centered) */}
+          {/* MAIN SPOTLIGHT 1: SALES AGENT NAME (HEAVILY FOCUSED) */}
           <div
             style={{
               width: '100%',
-              backgroundColor: 'rgba(15, 23, 42, 0.85)',
-              border: '1px solid rgba(245, 158, 11, 0.3)',
+              backgroundColor: 'rgba(15, 23, 42, 0.92)',
+              border: '2px solid rgba(56, 189, 248, 0.5)',
               borderRadius: '16px',
-              padding: '12px 14px',
+              padding: '14px 16px',
               textAlign: 'center',
               marginBottom: '12px',
-              boxShadow: 'inset 0 1px 0 rgba(255, 255, 255, 0.1)',
+              boxShadow: '0 0 30px rgba(56, 189, 248, 0.15), inset 0 1px 0 rgba(255, 255, 255, 0.12)',
             }}
           >
-            {/* Champion & Layout Centered Banner */}
-            <div style={{ paddingBottom: '8px', borderBottom: '1px solid rgba(255, 255, 255, 0.08)', marginBottom: '8px' }}>
-              <div style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', fontSize: '10px', color: '#FCD34D', textTransform: 'uppercase', letterSpacing: '0.04em', fontWeight: 700 }}>
-                <Trophy size={12} color="#F59E0B" />
-                <span>CLOSING CHAMPION</span>
-              </div>
-              <div style={{ fontSize: '17px', fontWeight: 900, color: '#38BDF8', marginTop: '1px' }}>
-                {deal.agentName}
-              </div>
-              <div style={{ fontSize: '13px', fontWeight: 700, color: '#E2E8F0', marginTop: '2px' }}>
-                {deal.projectName} · <span style={{ color: '#FFFFFF', fontWeight: 800 }}>{deal.unitName}</span>
-              </div>
-            </div>
-
-            {/* Balanced 2-Column Row: Sold Area & Transaction Value */}
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', marginBottom: '8px' }}>
-              <div
-                style={{
-                  backgroundColor: 'rgba(245, 158, 11, 0.08)',
-                  padding: '8px 10px',
-                  borderRadius: '8px',
-                  border: '1px solid rgba(245, 158, 11, 0.25)',
-                }}
-              >
-                <div style={{ fontSize: '9.5px', color: '#FCD34D', fontWeight: 700, textTransform: 'uppercase' }}>
-                  Sold Area
-                </div>
-                <div style={{ fontSize: '14px', fontWeight: 900, color: '#FDE68A', marginTop: '2px' }}>
-                  {deal.areaSqm ? `${deal.areaSqm.toLocaleString()} m²` : '—'}
-                </div>
-              </div>
-
-              <div
-                style={{
-                  backgroundColor: 'rgba(255, 255, 255, 0.04)',
-                  padding: '8px 10px',
-                  borderRadius: '8px',
-                  border: '1px solid rgba(255, 255, 255, 0.08)',
-                }}
-              >
-                <div style={{ fontSize: '9.5px', color: '#94A3B8', fontWeight: 700, textTransform: 'uppercase' }}>
-                  Sale Date
-                </div>
-                <div style={{ fontSize: '13px', fontWeight: 800, color: '#F1F5F9', marginTop: '2px' }}>
-                  {deal.saleDate || 'Today'}
-                </div>
-              </div>
-            </div>
-
-            {/* Full-Width Centered Deal Commission Hero Box */}
             <div
               style={{
-                backgroundColor: 'rgba(16, 185, 129, 0.1)',
-                border: '1.5px solid rgba(16, 185, 129, 0.4)',
-                borderRadius: '10px',
-                padding: '9px 12px',
-                display: 'flex',
+                display: 'inline-flex',
                 alignItems: 'center',
-                justifyContent: 'space-between',
+                gap: '5px',
+                fontSize: '10.5px',
+                color: '#38BDF8',
+                textTransform: 'uppercase',
+                letterSpacing: '0.08em',
+                fontWeight: 800,
+                marginBottom: '4px',
               }}
             >
-              <div style={{ textAlign: 'left' }}>
-                <div style={{ fontSize: '10px', color: '#6EE7B7', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-                  Deal Commission
-                </div>
-                {deal.dealValueSar && deal.dealValueSar > 0 && (
-                  <div style={{ fontSize: '10px', color: '#94A3B8' }}>
-                    Val: SAR {deal.dealValueSar.toLocaleString('en-US')}
-                  </div>
-                )}
+              <Award size={13} color="#38BDF8" />
+              <span>CLOSING CHAMPION &amp; LEAD AGENT</span>
+            </div>
+
+            {/* Massive Agent Name */}
+            <div
+              style={{
+                fontSize: '25px',
+                fontWeight: 900,
+                color: '#FFFFFF',
+                letterSpacing: '-0.01em',
+                lineHeight: 1.2,
+                textShadow: '0 0 24px rgba(56, 189, 248, 0.7)',
+                background: 'linear-gradient(135deg, #FFFFFF 0%, #BAE6FD 50%, #38BDF8 100%)',
+                WebkitBackgroundClip: 'text',
+                WebkitTextFillColor: 'transparent',
+              }}
+            >
+              {deal.agentName}
+            </div>
+
+            {deal.agentRole && (
+              <div
+                style={{
+                  display: 'inline-block',
+                  marginTop: '4px',
+                  fontSize: '10.5px',
+                  fontWeight: 700,
+                  color: '#93C5FD',
+                  backgroundColor: 'rgba(37, 99, 235, 0.2)',
+                  border: '1px solid rgba(96, 165, 250, 0.35)',
+                  padding: '2px 8px',
+                  borderRadius: '12px',
+                }}
+              >
+                {deal.agentRole.replace(/_/g, ' ')}
+              </div>
+            )}
+
+            <div style={{ fontSize: '13px', fontWeight: 700, color: '#CBD5E1', marginTop: '6px' }}>
+              {deal.projectName} · <span style={{ color: '#FDE68A', fontWeight: 800 }}>Unit {deal.unitName}</span>
+            </div>
+          </div>
+
+          {/* MAIN SPOTLIGHT 2 & 3: AMOUNT CLOSED & DEAL COMMISSION (HERO DUAL BOXES) */}
+          <div
+            style={{
+              width: '100%',
+              display: 'grid',
+              gridTemplateColumns: '1fr 1fr',
+              gap: '10px',
+              marginBottom: '12px',
+            }}
+          >
+            {/* Box A: Amount Closed in Deal (Total Deal Value) */}
+            <div
+              style={{
+                background: 'linear-gradient(145deg, rgba(245, 158, 11, 0.16) 0%, rgba(217, 119, 6, 0.08) 100%)',
+                border: '2px solid rgba(245, 158, 11, 0.6)',
+                borderRadius: '14px',
+                padding: '12px 10px',
+                boxShadow: '0 6px 20px rgba(245, 158, 11, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.15)',
+                display: 'flex',
+                flexDirection: 'column',
+                justifyContent: 'center',
+                alignItems: 'center',
+              }}
+            >
+              <div
+                style={{
+                  fontSize: '10px',
+                  color: '#FDE68A',
+                  fontWeight: 900,
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.06em',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '4px',
+                  marginBottom: '4px',
+                }}
+              >
+                <TrendingUp size={12} color="#F59E0B" />
+                <span>AMOUNT CLOSED</span>
               </div>
 
               <div
                 style={{
-                  fontSize: '17px',
+                  fontSize: '19px',
+                  fontWeight: 900,
+                  color: '#FEF08A',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '4px',
+                  letterSpacing: '-0.02em',
+                }}
+              >
+                <SaudiRiyalIcon size={16} color="#FEF08A" />
+                <span>
+                  {deal.dealValueSar && deal.dealValueSar > 0
+                    ? deal.dealValueSar.toLocaleString('en-US', { maximumFractionDigits: 0 })
+                    : '—'}
+                </span>
+              </div>
+              <div style={{ fontSize: '9.5px', color: '#FCD34D', fontWeight: 600, marginTop: '2px' }}>
+                Total Transaction Value
+              </div>
+            </div>
+
+            {/* Box B: Deal Commission Earned */}
+            <div
+              style={{
+                background: 'linear-gradient(145deg, rgba(16, 185, 129, 0.18) 0%, rgba(4, 120, 87, 0.09) 100%)',
+                border: '2px solid rgba(16, 185, 129, 0.65)',
+                borderRadius: '14px',
+                padding: '12px 10px',
+                boxShadow: '0 6px 20px rgba(16, 185, 129, 0.25), inset 0 1px 0 rgba(255, 255, 255, 0.15)',
+                display: 'flex',
+                flexDirection: 'column',
+                justifyContent: 'center',
+                alignItems: 'center',
+              }}
+            >
+              <div
+                style={{
+                  fontSize: '10px',
+                  color: '#6EE7B7',
+                  fontWeight: 900,
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.06em',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '4px',
+                  marginBottom: '4px',
+                }}
+              >
+                <Sparkles size={12} color="#10B981" />
+                <span>DEAL COMMISSION</span>
+              </div>
+
+              <div
+                style={{
+                  fontSize: '19px',
                   fontWeight: 900,
                   color: '#34D399',
                   display: 'flex',
                   alignItems: 'center',
                   gap: '4px',
+                  letterSpacing: '-0.02em',
                 }}
               >
-                <SaudiRiyalIcon size={14} color="#34D399" />
-                <span>SAR {deal.commissionAmount.toLocaleString('en-US', { minimumFractionDigits: 2 })}</span>
+                <SaudiRiyalIcon size={16} color="#34D399" />
+                <span>
+                  {deal.commissionAmount.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 2 })}
+                </span>
+              </div>
+              <div style={{ fontSize: '9.5px', color: '#A7F3D0', fontWeight: 600, marginTop: '2px' }}>
+                Agent Commission
               </div>
             </div>
           </div>
 
-          {/* Action Buttons: 100% Symmetrical, Balanced Row */}
+          {/* Secondary Details Bar: Area & Date */}
+          <div
+            style={{
+              width: '100%',
+              backgroundColor: 'rgba(255, 255, 255, 0.04)',
+              border: '1px solid rgba(255, 255, 255, 0.08)',
+              borderRadius: '10px',
+              padding: '6px 14px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-around',
+              marginBottom: '14px',
+              fontSize: '11px',
+              color: '#94A3B8',
+            }}
+          >
+            <div>
+              <span style={{ fontWeight: 600, color: '#64748B' }}>Area: </span>
+              <span style={{ fontWeight: 800, color: '#F1F5F9' }}>
+                {deal.areaSqm ? `${deal.areaSqm.toLocaleString()} m²` : '—'}
+              </span>
+            </div>
+            <div style={{ width: '1px', height: '14px', backgroundColor: 'rgba(255, 255, 255, 0.1)' }} />
+            <div>
+              <span style={{ fontWeight: 600, color: '#64748B' }}>Closed On: </span>
+              <span style={{ fontWeight: 800, color: '#F1F5F9' }}>{deal.saleDate || 'Today'}</span>
+            </div>
+          </div>
+
+          {/* ACTION BUTTONS: Replay GTA Sound, Confetti, Dismiss */}
           <div style={{ width: '100%', display: 'flex', gap: '8px' }}>
-            {/* Primary Ring Button */}
+            {/* Replay GTA Sound Button */}
             <button
               type="button"
-              onClick={triggerManualRing}
+              onClick={replayGtaTrack}
               style={{
                 flex: 2,
                 padding: '11px 14px',
@@ -1105,11 +825,11 @@ export default function DealCelebrationModal({ deal, onClose }: Props) {
                 alignItems: 'center',
                 justifyContent: 'center',
                 gap: '6px',
-                boxShadow: '0 3px 12px rgba(245, 158, 11, 0.4)',
+                boxShadow: '0 4px 14px rgba(245, 158, 11, 0.4)',
               }}
             >
-              <Bell size={16} />
-              <span>Ring Bell ({ringsCount})</span>
+              <RotateCcw size={15} />
+              <span>Replay Track ({replayCount})</span>
             </button>
 
             {/* Confetti Button */}
@@ -1126,7 +846,7 @@ export default function DealCelebrationModal({ deal, onClose }: Props) {
                 backgroundColor: 'rgba(255, 255, 255, 0.08)',
                 color: '#FCD34D',
                 fontWeight: 800,
-                fontSize: '12.5px',
+                fontSize: '12px',
                 border: '1px solid rgba(245, 158, 11, 0.4)',
                 cursor: 'pointer',
                 display: 'flex',
@@ -1150,7 +870,7 @@ export default function DealCelebrationModal({ deal, onClose }: Props) {
                 backgroundColor: 'rgba(255, 255, 255, 0.06)',
                 color: '#94A3B8',
                 fontWeight: 700,
-                fontSize: '12.5px',
+                fontSize: '12px',
                 border: '1px solid rgba(255, 255, 255, 0.12)',
                 cursor: 'pointer',
               }}
@@ -1161,18 +881,8 @@ export default function DealCelebrationModal({ deal, onClose }: Props) {
         </div>
       </div>
 
-      {/* Global Embedded Animations */}
+      {/* Embedded Animations */}
       <style jsx global>{`
-        @keyframes acousticShockwave {
-          0% {
-            transform: translate(-50%, -50%) scale(0.6);
-            opacity: 1;
-          }
-          100% {
-            transform: translate(-50%, -50%) scale(4.5);
-            opacity: 0;
-          }
-        }
         @keyframes celebrationEntrance {
           0% {
             opacity: 0;

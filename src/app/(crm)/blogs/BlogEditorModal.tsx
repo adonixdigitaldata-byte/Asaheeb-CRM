@@ -1,6 +1,6 @@
 'use client'
 
-import React, { useState } from 'react'
+import React, { useState, useRef } from 'react'
 import {
   X,
   FileText,
@@ -14,8 +14,14 @@ import {
   UploadCloud,
   Check,
   ShieldCheck,
+  Search,
+  Image as ImageIcon,
+  Lock,
+  CheckCircle2,
+  AlertCircle,
+  Link2,
 } from 'lucide-react'
-import type { Blog, BlogSection, BlogStatBox } from '@/types/database'
+import type { Blog, BlogSection, BlogStatBox, SeoReviewStatus } from '@/types/database'
 import CmsActivityTimeline from '@/components/CmsActivityTimeline'
 
 interface Props {
@@ -25,7 +31,7 @@ interface Props {
   onSuccess: () => void
 }
 
-type TabType = 'meta' | 'summary' | 'sections' | 'stats' | 'activity'
+type TabType = 'meta' | 'seo' | 'summary' | 'sections' | 'stats' | 'activity'
 
 function slugify(text: string): string {
   return text
@@ -48,6 +54,12 @@ export default function BlogEditorModal({
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [slugManuallyEdited, setSlugManuallyEdited] = useState(isEdit)
+
+  const coverFileRef = useRef<HTMLInputElement>(null)
+  const [uploadingCover, setUploadingCover] = useState(false)
+  const [newKeywordEn, setNewKeywordEn] = useState('')
+  const [newKeywordAr, setNewKeywordAr] = useState('')
+  const [previewLang, setPreviewLang] = useState<'en' | 'ar'>('en')
 
   const [form, setForm] = useState<Partial<Blog>>({
     id: blog?.id || '',
@@ -73,10 +85,54 @@ export default function BlogEditorModal({
     quote_en: blog?.quote_en || '',
     quote_ar: blog?.quote_ar || '',
     cover_image_url: blog?.cover_image_url || '',
+    // SEO & Media fields
+    cover_image_alt_en: blog?.cover_image_alt_en || '',
+    cover_image_alt_ar: blog?.cover_image_alt_ar || '',
+    seo_title_en: blog?.seo_title_en || '',
+    seo_title_ar: blog?.seo_title_ar || '',
+    meta_description_en: blog?.meta_description_en || '',
+    meta_description_ar: blog?.meta_description_ar || '',
+    focus_keyword_en: blog?.focus_keyword_en || '',
+    focus_keyword_ar: blog?.focus_keyword_ar || '',
+    secondary_keywords_en: blog?.secondary_keywords_en || [],
+    secondary_keywords_ar: blog?.secondary_keywords_ar || [],
+    seo_review_status: blog?.seo_review_status || 'NEEDS_REVIEW',
+    seo_reviewed_at: blog?.seo_reviewed_at || null,
     featured: blog ? blog.featured : false,
     is_published: blog ? blog.is_published : true,
     sort_order: blog?.sort_order || 0,
   })
+
+  // Cover image upload via Cloudinary
+  async function handleCoverUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (!file) return
+
+    setUploadingCover(true)
+    setError(null)
+    try {
+      const formData = new FormData()
+      formData.append('file', file)
+      formData.append('folder', 'asaheeb/blogs')
+
+      const res = await fetch('/api/upload/cloudinary', {
+        method: 'POST',
+        body: formData,
+      })
+      const data = await res.json()
+      if (!res.ok || data.error) {
+        throw new Error(data.error || 'Failed to upload cover image')
+      }
+      if (data.url) {
+        setForm((prev) => ({ ...prev, cover_image_url: data.url }))
+      }
+    } catch (err: any) {
+      setError(err.message || 'Cover image upload failed. You can also paste an image URL directly.')
+    } finally {
+      setUploadingCover(false)
+      if (coverFileRef.current) coverFileRef.current.value = ''
+    }
+  }
 
   // Summary bullets temp input
   const [newSummaryEn, setNewSummaryEn] = useState('')
@@ -334,7 +390,48 @@ export default function BlogEditorModal({
             style={{ fontSize: '12.5px', padding: '5px 12px' }}
           >
             <FileText size={14} />
-            <span>1. Identity &amp; Titles</span>
+            <span>1. Identity &amp; Media</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setActiveTab('seo')}
+            className={`btn btn-sm ${activeTab === 'seo' ? 'btn-primary' : 'btn-ghost'}`}
+            style={{
+              fontSize: '12.5px',
+              padding: '5px 12px',
+              position: 'relative',
+              fontWeight: 700,
+            }}
+          >
+            <Search size={14} style={{ color: activeTab === 'seo' ? '#FFFFFF' : '#D97706' }} />
+            <span>2. SEO &amp; Google Preview</span>
+            <span
+              style={{
+                fontSize: '9.5px',
+                padding: '1px 6px',
+                borderRadius: '10px',
+                backgroundColor:
+                  form.seo_review_status === 'OPTIMIZED'
+                    ? '#DCFCE7'
+                    : form.seo_review_status === 'IN_PROGRESS'
+                    ? '#DBEAFE'
+                    : form.seo_review_status === 'NEEDS_UPDATE'
+                    ? '#F3E8FF'
+                    : '#FEF3C7',
+                color:
+                  form.seo_review_status === 'OPTIMIZED'
+                    ? '#15803D'
+                    : form.seo_review_status === 'IN_PROGRESS'
+                    ? '#1D4ED8'
+                    : form.seo_review_status === 'NEEDS_UPDATE'
+                    ? '#7E22CE'
+                    : '#B45309',
+                fontWeight: 700,
+              }}
+            >
+              {form.seo_review_status === 'OPTIMIZED' ? 'OPTIMIZED' : 'SEO'}
+            </span>
           </button>
 
           <button
@@ -344,7 +441,7 @@ export default function BlogEditorModal({
             style={{ fontSize: '12.5px', padding: '5px 12px' }}
           >
             <Sparkles size={14} />
-            <span>2. Excerpt &amp; Summary</span>
+            <span>3. Excerpt &amp; Summary</span>
           </button>
 
           <button
@@ -354,7 +451,7 @@ export default function BlogEditorModal({
             style={{ fontSize: '12.5px', padding: '5px 12px' }}
           >
             <BookOpen size={14} />
-            <span>3. Article Sections ({(form.sections_en || []).length})</span>
+            <span>4. Article Sections ({(form.sections_en || []).length})</span>
           </button>
 
           <button
@@ -364,7 +461,7 @@ export default function BlogEditorModal({
             style={{ fontSize: '12.5px', padding: '5px 12px' }}
           >
             <TrendingUp size={14} />
-            <span>4. Stat Boxes &amp; Quotes</span>
+            <span>5. Stat Boxes &amp; Quotes</span>
           </button>
 
           {isEdit && (
@@ -380,7 +477,7 @@ export default function BlogEditorModal({
               }}
             >
               <ShieldCheck size={14} />
-              <span>5. Activity Log</span>
+              <span>6. Activity Log</span>
             </button>
           )}
         </div>
@@ -404,22 +501,27 @@ export default function BlogEditorModal({
               </div>
             )}
 
-            {/* TAB 1: IDENTITY & TITLES */}
+            {/* TAB 1: IDENTITY & MEDIA */}
             {activeTab === 'meta' && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: '14px' }}>
                   <div className="form-group">
                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                      <label className="form-label">Article Slug / ID *</label>
-                      {isEdit && (
-                        <span style={{ fontSize: '10.5px', color: '#6366F1', fontWeight: 600 }}>
-                          ✏️ Editable Slug
+                      <label className="form-label">Article Slug / URL Path *</label>
+                      {isEdit ? (
+                        <span style={{ fontSize: '11px', color: '#B45309', fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                          <Lock size={12} /> Slug Locked
+                        </span>
+                      ) : (
+                        <span style={{ fontSize: '10.5px', color: '#16A34A', fontWeight: 600 }}>
+                          Auto-generated
                         </span>
                       )}
                     </div>
                     <input
                       type="text"
                       required
+                      disabled={isEdit}
                       value={form.id}
                       onChange={(e) => {
                         setSlugManuallyEdited(true)
@@ -427,10 +529,17 @@ export default function BlogEditorModal({
                       }}
                       placeholder="e.g. capital-appreciation-vs-rental-yield"
                       className="form-input"
+                      style={isEdit ? { backgroundColor: '#F1F5F9', color: '#64748B', cursor: 'not-allowed' } : {}}
                     />
-                    <span style={{ fontSize: '11px', color: '#94A3B8', marginTop: '2px' }}>
-                      Unique URL identifier (auto-generated from English title).
-                    </span>
+                    {isEdit ? (
+                      <span style={{ fontSize: '11px', color: '#B45309', marginTop: '3px', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                        🔒 Slug is locked for existing articles to protect Google search rankings and avoid 404 broken links.
+                      </span>
+                    ) : (
+                      <span style={{ fontSize: '11px', color: '#94A3B8', marginTop: '2px' }}>
+                        Unique URL identifier (auto-generated from English title).
+                      </span>
+                    )}
                   </div>
 
                   <div className="form-group">
@@ -491,6 +600,108 @@ export default function BlogEditorModal({
                       placeholder="مثال: نمو رأس المال مقابل عائد الإيجار..."
                       className="form-input"
                     />
+                  </div>
+                </div>
+
+                {/* Cover Image & Alt Text Accessibility Section */}
+                <div style={{ padding: '16px', backgroundColor: '#F8FAFC', borderRadius: '8px', border: '1px solid #CBD5E1', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <ImageIcon size={16} style={{ color: form.accent || '#B8873B' }} />
+                      <span style={{ fontSize: '13px', fontWeight: 700, color: '#0F172A' }}>Cover Image &amp; Alt Text (Google Image SEO)</span>
+                    </div>
+                    {form.cover_image_url && (
+                      <button
+                        type="button"
+                        onClick={() => setForm({ ...form, cover_image_url: '' })}
+                        className="btn btn-ghost btn-sm"
+                        style={{ color: '#EF4444', fontSize: '11.5px', padding: '2px 8px' }}
+                      >
+                        <Trash2 size={12} />
+                        <span>Remove Image</span>
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Image Preview if available */}
+                  {form.cover_image_url ? (
+                    <div style={{ position: 'relative', width: '100%', height: '170px', borderRadius: '6px', overflow: 'hidden', border: '1px solid #CBD5E1', backgroundColor: '#0F172A' }}>
+                      <img
+                        src={form.cover_image_url}
+                        alt={form.cover_image_alt_en || form.title_en || 'Article cover'}
+                        style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                      />
+                      <div style={{ position: 'absolute', bottom: '8px', left: '8px', backgroundColor: 'rgba(0,0,0,0.75)', color: '#FFFFFF', padding: '3px 8px', borderRadius: '4px', fontSize: '11px', maxWidth: '90%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        Alt: {form.cover_image_alt_en || 'Default fallback to title'}
+                      </div>
+                    </div>
+                  ) : (
+                    <div style={{ padding: '18px', border: '2px dashed #CBD5E1', borderRadius: '6px', textAlign: 'center', backgroundColor: '#FFFFFF' }}>
+                      <UploadCloud size={24} style={{ color: '#94A3B8', margin: '0 auto 6px' }} />
+                      <div style={{ fontSize: '12px', color: '#64748B' }}>No cover image set yet. Upload a high-resolution banner image or paste an image URL.</div>
+                    </div>
+                  )}
+
+                  {/* Upload controls */}
+                  <div style={{ display: 'grid', gridTemplateColumns: 'auto 1fr', gap: '10px', alignItems: 'center' }}>
+                    <input
+                      type="file"
+                      ref={coverFileRef}
+                      accept="image/*"
+                      style={{ display: 'none' }}
+                      onChange={handleCoverUpload}
+                    />
+                    <button
+                      type="button"
+                      disabled={uploadingCover}
+                      onClick={() => coverFileRef.current?.click()}
+                      className="btn btn-outline btn-sm"
+                      style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', height: '36px', whiteSpace: 'nowrap' }}
+                    >
+                      {uploadingCover ? <Loader2 size={14} className="animate-spin" /> : <UploadCloud size={14} />}
+                      <span>{uploadingCover ? 'Uploading...' : 'Upload Image'}</span>
+                    </button>
+
+                    <input
+                      type="url"
+                      value={form.cover_image_url || ''}
+                      onChange={(e) => setForm({ ...form, cover_image_url: e.target.value })}
+                      placeholder="Or paste direct image URL (Cloudinary, CDN)..."
+                      className="form-input"
+                      style={{ fontSize: '12px', height: '36px' }}
+                    />
+                  </div>
+
+                  {/* Alt Text Inputs */}
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', paddingTop: '8px', borderTop: '1px solid #E2E8F0' }}>
+                    <div className="form-group" style={{ margin: 0 }}>
+                      <label className="form-label" style={{ fontSize: '11.5px', color: '#475569' }}>
+                        Image Alt Text (English) <span style={{ color: '#94A3B8', fontWeight: 400 }}>— Screen readers &amp; Google Images</span>
+                      </label>
+                      <input
+                        type="text"
+                        value={form.cover_image_alt_en || ''}
+                        onChange={(e) => setForm({ ...form, cover_image_alt_en: e.target.value })}
+                        placeholder={form.title_en || "Descriptive caption for Google Images"}
+                        className="form-input"
+                        style={{ fontSize: '12px' }}
+                      />
+                    </div>
+
+                    <div className="form-group" style={{ margin: 0 }}>
+                      <label className="form-label" style={{ fontSize: '11.5px', textAlign: 'right', color: '#475569' }}>
+                        النص البديل للصورة (بالعربية) <span style={{ color: '#94A3B8', fontWeight: 400 }}>— لمحركات البحث وقارئات الشاشة</span>
+                      </label>
+                      <input
+                        type="text"
+                        dir="rtl"
+                        value={form.cover_image_alt_ar || ''}
+                        onChange={(e) => setForm({ ...form, cover_image_alt_ar: e.target.value })}
+                        placeholder={form.title_ar || "وصف مختصر للصورة لمحركات البحث"}
+                        className="form-input"
+                        style={{ fontSize: '12px' }}
+                      />
+                    </div>
                   </div>
                 </div>
 
@@ -573,6 +784,481 @@ export default function BlogEditorModal({
                       Featured Article (Top Hero Placement)
                     </span>
                   </label>
+                </div>
+              </div>
+            )}
+
+            {/* TAB 2: SEO & GOOGLE PREVIEW */}
+            {activeTab === 'seo' && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '18px' }}>
+                {/* SEO Review Status Bar */}
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    padding: '12px 16px',
+                    backgroundColor: '#0F172A',
+                    color: '#FFFFFF',
+                    borderRadius: '8px',
+                    flexWrap: 'wrap',
+                    gap: '10px',
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <Search size={18} style={{ color: '#F59E0B' }} />
+                    <div>
+                      <div style={{ fontSize: '13px', fontWeight: 700 }}>Search Engine Optimization (SEO) Center</div>
+                      <div style={{ fontSize: '11px', color: '#94A3B8' }}>
+                        {form.seo_reviewed_at
+                          ? `Last certified SEO audit: ${new Date(form.seo_reviewed_at).toLocaleDateString()}`
+                          : 'Configure search engine metadata, focus keywords, and preview snippets'}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                    <label style={{ fontSize: '12px', color: '#CBD5E1', fontWeight: 600 }}>SEO Review Status:</label>
+                    <select
+                      value={form.seo_review_status || 'NEEDS_REVIEW'}
+                      onChange={(e) => {
+                        const nextStatus = e.target.value as SeoReviewStatus
+                        setForm({
+                          ...form,
+                          seo_review_status: nextStatus,
+                          seo_reviewed_at: nextStatus === 'OPTIMIZED' ? new Date().toISOString() : form.seo_reviewed_at,
+                        })
+                      }}
+                      className="form-select"
+                      style={{
+                        fontSize: '12px',
+                        padding: '5px 10px',
+                        height: '32px',
+                        backgroundColor: '#1E293B',
+                        borderColor: '#334155',
+                        color:
+                          form.seo_review_status === 'OPTIMIZED'
+                            ? '#34D399'
+                            : form.seo_review_status === 'IN_PROGRESS'
+                            ? '#60A5FA'
+                            : form.seo_review_status === 'NEEDS_UPDATE'
+                            ? '#C084FC'
+                            : '#FBBF24',
+                        fontWeight: 700,
+                      }}
+                    >
+                      <option value="NEEDS_REVIEW">Needs Review (يحتاج مراجعة)</option>
+                      <option value="IN_PROGRESS">In Progress (قيد العمل)</option>
+                      <option value="OPTIMIZED">Optimized (معتمد ومُحسن)</option>
+                      <option value="NEEDS_UPDATE">Needs Update (بحاجة لتحديث)</option>
+                    </select>
+                  </div>
+                </div>
+
+                {/* Google Search Live Snippet Preview */}
+                <div style={{ border: '1px solid #CBD5E1', borderRadius: '8px', padding: '16px', backgroundColor: '#FFFFFF' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '10px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <span style={{ fontSize: '11px', fontWeight: 800, color: '#475569', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                        Google Search Snippet Simulator
+                      </span>
+                      <span style={{ fontSize: '10px', backgroundColor: '#EFF6FF', color: '#1D4ED8', padding: '1px 6px', borderRadius: '4px', fontWeight: 700 }}>
+                        Live
+                      </span>
+                    </div>
+
+                    {/* Language Preview Switcher */}
+                    <div style={{ display: 'flex', gap: '4px' }}>
+                      <button
+                        type="button"
+                        onClick={() => setPreviewLang('en')}
+                        className={`btn btn-sm ${previewLang === 'en' ? 'btn-primary' : 'btn-ghost'}`}
+                        style={{ fontSize: '11px', padding: '2px 8px', height: '24px' }}
+                      >
+                        English Snippet
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setPreviewLang('ar')}
+                        className={`btn btn-sm ${previewLang === 'ar' ? 'btn-primary' : 'btn-ghost'}`}
+                        style={{ fontSize: '11px', padding: '2px 8px', height: '24px' }}
+                      >
+                        معاينة بالعربية
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* The Google Card */}
+                  <div
+                    dir={previewLang === 'ar' ? 'rtl' : 'ltr'}
+                    style={{
+                      padding: '14px 16px',
+                      backgroundColor: '#FFFFFF',
+                      borderRadius: '8px',
+                      border: '1px solid #CBD5E1',
+                      boxShadow: '0 1px 3px rgba(0,0,0,0.06)',
+                      fontFamily: 'arial, sans-serif',
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px', color: '#202124' }}>
+                      <div style={{ width: '24px', height: '24px', borderRadius: '50%', backgroundColor: '#B8873B', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#FFFFFF', fontWeight: 700, fontSize: '11px' }}>
+                        A
+                      </div>
+                      <div>
+                        <div style={{ fontSize: '12px', color: '#202124', fontWeight: 500 }}>
+                          {previewLang === 'ar' ? 'أساهيب العقارية' : 'Asaheeb Real Estate'}
+                        </div>
+                        <div style={{ fontSize: '11px', color: '#4d5156', lineHeight: 1.2 }}>
+                          https://www.asaheebrealestate.com › blog › {form.id || 'article-slug'}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div style={{ marginTop: '6px' }}>
+                      <div style={{ fontSize: '18px', color: '#1a0dab', fontWeight: 400, textDecoration: 'none', lineHeight: 1.3, cursor: 'pointer' }}>
+                        {previewLang === 'ar'
+                          ? `${form.seo_title_ar || form.title_ar || 'عنوان المقال'} | أساهيب العقارية`
+                          : `${form.seo_title_en || form.title_en || 'Article Title'} | Asaheeb Real Estate`}
+                      </div>
+                      <div style={{ fontSize: '13px', color: '#4d5156', marginTop: '4px', lineHeight: 1.4, wordBreak: 'break-word' }}>
+                        {previewLang === 'ar'
+                          ? (form.meta_description_ar || form.excerpt_ar || 'ملخص المقال سيظهر هنا في محرك بحث جوجل للإجابة المباشرة عن استفسار الباحث...')
+                          : (form.meta_description_en || form.excerpt_en || 'Article meta description will appear here as the Google snippet description answering the search query directly...')}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Real-time SEO Readiness Checklist */}
+                <div style={{ padding: '14px 16px', backgroundColor: '#F8FAFC', borderRadius: '8px', border: '1px solid #E2E8F0' }}>
+                  <div style={{ fontSize: '12px', fontWeight: 700, color: '#334155', marginBottom: '8px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <CheckCircle2 size={15} style={{ color: '#10B981' }} />
+                    <span>Editorial SEO Readiness Checklist</span>
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '8px', fontSize: '11.5px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: (form.seo_title_en?.length || 0) > 0 && (form.seo_title_en?.length || 0) <= 65 ? '#15803D' : '#D97706' }}>
+                      <span>{(form.seo_title_en?.length || 0) > 0 && (form.seo_title_en?.length || 0) <= 65 ? '✓' : '○'}</span>
+                      <span>SEO Title Tag ({form.seo_title_en?.length || 0}/60 chars)</span>
+                    </div>
+
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: (form.meta_description_en?.length || 0) >= 80 && (form.meta_description_en?.length || 0) <= 165 ? '#15803D' : '#D97706' }}>
+                      <span>{(form.meta_description_en?.length || 0) >= 80 && (form.meta_description_en?.length || 0) <= 165 ? '✓' : '○'}</span>
+                      <span>Meta Description ({form.meta_description_en?.length || 0}/160 chars)</span>
+                    </div>
+
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: form.focus_keyword_en?.trim() ? '#15803D' : '#94A3B8' }}>
+                      <span>{form.focus_keyword_en?.trim() ? '✓' : '○'}</span>
+                      <span>Focus Keyword Defined</span>
+                    </div>
+
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: form.cover_image_url ? '#15803D' : '#94A3B8' }}>
+                      <span>{form.cover_image_url ? '✓' : '○'}</span>
+                      <span>Cover Image Provided</span>
+                    </div>
+
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: form.cover_image_alt_en?.trim() ? '#15803D' : '#94A3B8' }}>
+                      <span>{form.cover_image_alt_en?.trim() ? '✓' : '○'}</span>
+                      <span>Image Alt Text Provided</span>
+                    </div>
+
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: JSON.stringify(form.sections_en || []).includes('[') ? '#15803D' : '#94A3B8' }}>
+                      <span>{JSON.stringify(form.sections_en || []).includes('[') ? '✓' : '○'}</span>
+                      <span>Internal Links in Content</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Bilingual Controls Grid */}
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(360px, 1fr))', gap: '16px' }}>
+                  {/* English SEO Controls */}
+                  <div style={{ padding: '16px', backgroundColor: '#FFFFFF', border: '1px solid #CBD5E1', borderRadius: '8px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid #F1F5F9', paddingBottom: '8px' }}>
+                      <h4 style={{ fontSize: '13px', fontWeight: 700, color: '#0F172A', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        <span>🇬🇧</span>
+                        <span>English Search Settings</span>
+                      </h4>
+                      <span style={{ fontSize: '10px', backgroundColor: '#EFF6FF', color: '#1D4ED8', padding: '2px 6px', borderRadius: '4px', fontWeight: 600 }}>
+                        Google EN
+                      </span>
+                    </div>
+
+                    {/* SEO Title EN */}
+                    <div className="form-group" style={{ margin: 0 }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '3px' }}>
+                        <label className="form-label" style={{ fontSize: '11.5px', margin: 0 }}>SEO Title Tag</label>
+                        <span style={{ fontSize: '11px', fontWeight: 600, color: (form.seo_title_en?.length || 0) > 60 ? '#D97706' : '#64748B' }}>
+                          {form.seo_title_en?.length || 0} / 60 chars
+                        </span>
+                      </div>
+                      <input
+                        type="text"
+                        value={form.seo_title_en || ''}
+                        onChange={(e) => setForm({ ...form, seo_title_en: e.target.value })}
+                        placeholder={form.title_en || "Custom title displayed on Google search results"}
+                        className="form-input"
+                        style={{ fontSize: '12.5px' }}
+                      />
+                      <span style={{ fontSize: '10.5px', color: '#94A3B8', marginTop: '2px' }}>
+                        Overrides H1 title in Google snippet. Recommended: 50–60 characters.
+                      </span>
+                    </div>
+
+                    {/* Meta Description EN */}
+                    <div className="form-group" style={{ margin: 0 }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '3px' }}>
+                        <label className="form-label" style={{ fontSize: '11.5px', margin: 0 }}>Meta Description</label>
+                        <span style={{ fontSize: '11px', fontWeight: 600, color: (form.meta_description_en?.length || 0) > 160 ? '#D97706' : '#64748B' }}>
+                          {form.meta_description_en?.length || 0} / 160 chars
+                        </span>
+                      </div>
+                      <textarea
+                        rows={3}
+                        value={form.meta_description_en || ''}
+                        onChange={(e) => setForm({ ...form, meta_description_en: e.target.value })}
+                        placeholder={form.excerpt_en || "Concise answer answering searcher intent..."}
+                        className="form-textarea"
+                        style={{ fontSize: '12.5px', lineHeight: 1.4 }}
+                      />
+                      <span style={{ fontSize: '10.5px', color: '#94A3B8', marginTop: '2px' }}>
+                        Snippet description on Google results. Recommended: 120–160 characters.
+                      </span>
+                    </div>
+
+                    {/* Focus Keyword EN */}
+                    <div className="form-group" style={{ margin: 0 }}>
+                      <label className="form-label" style={{ fontSize: '11.5px' }}>Primary Focus Keyword</label>
+                      <input
+                        type="text"
+                        value={form.focus_keyword_en || ''}
+                        onChange={(e) => setForm({ ...form, focus_keyword_en: e.target.value })}
+                        placeholder="e.g. Can a non-Saudi without an Iqama buy property in Saudi Arabia"
+                        className="form-input"
+                        style={{ fontSize: '12.5px' }}
+                      />
+                    </div>
+
+                    {/* Secondary Keywords EN */}
+                    <div className="form-group" style={{ margin: 0 }}>
+                      <label className="form-label" style={{ fontSize: '11.5px' }}>
+                        Secondary Supporting Keywords ({(form.secondary_keywords_en || []).length})
+                      </label>
+                      <div style={{ display: 'flex', gap: '6px', marginBottom: '6px' }}>
+                        <input
+                          type="text"
+                          value={newKeywordEn}
+                          onChange={(e) => setNewKeywordEn(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') {
+                              e.preventDefault()
+                              if (newKeywordEn.trim()) {
+                                setForm({
+                                  ...form,
+                                  secondary_keywords_en: [...(form.secondary_keywords_en || []), newKeywordEn.trim()]
+                                })
+                                setNewKeywordEn('')
+                              }
+                            }
+                          }}
+                          placeholder="Type keyword and click Add..."
+                          className="form-input"
+                          style={{ fontSize: '12px', height: '32px' }}
+                        />
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (newKeywordEn.trim()) {
+                              setForm({
+                                ...form,
+                                secondary_keywords_en: [...(form.secondary_keywords_en || []), newKeywordEn.trim()]
+                              })
+                              setNewKeywordEn('')
+                            }
+                          }}
+                          className="btn btn-outline btn-sm"
+                          style={{ height: '32px' }}
+                        >
+                          Add
+                        </button>
+                      </div>
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
+                        {(form.secondary_keywords_en || []).map((kw, i) => (
+                          <span
+                            key={i}
+                            style={{
+                              fontSize: '11px',
+                              backgroundColor: '#EFF6FF',
+                              color: '#1D4ED8',
+                              padding: '2px 8px',
+                              borderRadius: '12px',
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '4px',
+                              border: '1px solid #BFDBFE'
+                            }}
+                          >
+                            <span>{kw}</span>
+                            <X
+                              size={11}
+                              style={{ cursor: 'pointer' }}
+                              onClick={() =>
+                                setForm({
+                                  ...form,
+                                  secondary_keywords_en: (form.secondary_keywords_en || []).filter((_, idx) => idx !== i)
+                                })
+                              }
+                            />
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Arabic SEO Controls */}
+                  <div dir="rtl" style={{ padding: '16px', backgroundColor: '#FFFFFF', border: '1px solid #CBD5E1', borderRadius: '8px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid #F1F5F9', paddingBottom: '8px' }}>
+                      <h4 style={{ fontSize: '13px', fontWeight: 700, color: '#0F172A', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        <span>🇸🇦</span>
+                        <span>إعدادات البحث لمحرك جوجل (بالعربية)</span>
+                      </h4>
+                      <span style={{ fontSize: '10px', backgroundColor: '#FEF3C7', color: '#B45309', padding: '2px 6px', borderRadius: '4px', fontWeight: 600 }}>
+                        Google AR
+                      </span>
+                    </div>
+
+                    {/* SEO Title AR */}
+                    <div className="form-group" style={{ margin: 0 }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '3px' }}>
+                        <label className="form-label" style={{ fontSize: '11.5px', margin: 0, textAlign: 'right' }}>عنوان السيو (SEO Title)</label>
+                        <span style={{ fontSize: '11px', fontWeight: 600, color: (form.seo_title_ar?.length || 0) > 60 ? '#D97706' : '#64748B' }}>
+                          {form.seo_title_ar?.length || 0} / 60 حرف
+                        </span>
+                      </div>
+                      <input
+                        type="text"
+                        dir="rtl"
+                        value={form.seo_title_ar || ''}
+                        onChange={(e) => setForm({ ...form, seo_title_ar: e.target.value })}
+                        placeholder={form.title_ar || "عنوان المقال المخصص للظهور في نتائج البحث"}
+                        className="form-input"
+                        style={{ fontSize: '12.5px' }}
+                      />
+                      <span style={{ fontSize: '10.5px', color: '#94A3B8', marginTop: '2px', textAlign: 'right', display: 'block' }}>
+                        يستبدل العنوان الرئيسي في نتائج جوجل. المثالي: 50–60 حرف.
+                      </span>
+                    </div>
+
+                    {/* Meta Description AR */}
+                    <div className="form-group" style={{ margin: 0 }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '3px' }}>
+                        <label className="form-label" style={{ fontSize: '11.5px', margin: 0, textAlign: 'right' }}>وصف الميتا (Meta Description)</label>
+                        <span style={{ fontSize: '11px', fontWeight: 600, color: (form.meta_description_ar?.length || 0) > 160 ? '#D97706' : '#64748B' }}>
+                          {form.meta_description_ar?.length || 0} / 160 حرف
+                        </span>
+                      </div>
+                      <textarea
+                        rows={3}
+                        dir="rtl"
+                        value={form.meta_description_ar || ''}
+                        onChange={(e) => setForm({ ...form, meta_description_ar: e.target.value })}
+                        placeholder={form.excerpt_ar || "وصف مختصر يجيب عن تساؤل الباحث في جوجل..."}
+                        className="form-textarea"
+                        style={{ fontSize: '12.5px', lineHeight: 1.4 }}
+                      />
+                      <span style={{ fontSize: '10.5px', color: '#94A3B8', marginTop: '2px', textAlign: 'right', display: 'block' }}>
+                        الوصف المعروض تحت الرابط في جوجل. المثالي: 120–160 حرف.
+                      </span>
+                    </div>
+
+                    {/* Focus Keyword AR */}
+                    <div className="form-group" style={{ margin: 0 }}>
+                      <label className="form-label" style={{ fontSize: '11.5px', textAlign: 'right' }}>الكلمة المفتاحية المستهدفة</label>
+                      <input
+                        type="text"
+                        dir="rtl"
+                        value={form.focus_keyword_ar || ''}
+                        onChange={(e) => setForm({ ...form, focus_keyword_ar: e.target.value })}
+                        placeholder="مثال: شروط تملك غير السعوديين للعقار بدون إقامة"
+                        className="form-input"
+                        style={{ fontSize: '12.5px' }}
+                      />
+                    </div>
+
+                    {/* Secondary Keywords AR */}
+                    <div className="form-group" style={{ margin: 0 }}>
+                      <label className="form-label" style={{ fontSize: '11.5px', textAlign: 'right' }}>
+                        الكلمات المفتاحية الثانوية ({(form.secondary_keywords_ar || []).length})
+                      </label>
+                      <div style={{ display: 'flex', gap: '6px', marginBottom: '6px' }}>
+                        <input
+                          type="text"
+                          dir="rtl"
+                          value={newKeywordAr}
+                          onChange={(e) => setNewKeywordAr(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') {
+                              e.preventDefault()
+                              if (newKeywordAr.trim()) {
+                                setForm({
+                                  ...form,
+                                  secondary_keywords_ar: [...(form.secondary_keywords_ar || []), newKeywordAr.trim()]
+                                })
+                                setNewKeywordAr('')
+                              }
+                            }
+                          }}
+                          placeholder="اكتب الكلمة واضغط إضافة..."
+                          className="form-input"
+                          style={{ fontSize: '12px', height: '32px' }}
+                        />
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (newKeywordAr.trim()) {
+                              setForm({
+                                ...form,
+                                secondary_keywords_ar: [...(form.secondary_keywords_ar || []), newKeywordAr.trim()]
+                              })
+                              setNewKeywordAr('')
+                            }
+                          }}
+                          className="btn btn-outline btn-sm"
+                          style={{ height: '32px' }}
+                        >
+                          إضافة
+                        </button>
+                      </div>
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
+                        {(form.secondary_keywords_ar || []).map((kw, i) => (
+                          <span
+                            key={i}
+                            style={{
+                              fontSize: '11px',
+                              backgroundColor: '#FEF3C7',
+                              color: '#92400E',
+                              padding: '2px 8px',
+                              borderRadius: '12px',
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '4px',
+                              border: '1px solid #FDE68A'
+                            }}
+                          >
+                            <span>{kw}</span>
+                            <X
+                              size={11}
+                              style={{ cursor: 'pointer' }}
+                              onClick={() =>
+                                setForm({
+                                  ...form,
+                                  secondary_keywords_ar: (form.secondary_keywords_ar || []).filter((_, idx) => idx !== i)
+                                })
+                              }
+                            />
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
                 </div>
               </div>
             )}
@@ -784,6 +1470,64 @@ export default function BlogEditorModal({
                                 style={{ fontSize: '12.5px', lineHeight: 1.5 }}
                                 placeholder="محتوى القسم (بالعربية)..."
                               />
+                            </div>
+                          </div>
+
+                          {/* Contextual Internal Link Helper Bar */}
+                          <div style={{ padding: '8px 12px', backgroundColor: '#EFF6FF', borderRadius: '6px', border: '1px solid #BFDBFE', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '6px' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '11px', color: '#1E40AF', fontWeight: 600 }}>
+                              <Link2 size={13} />
+                              <span>Internal Link Shortcuts (SEO):</span>
+                            </div>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const link = ` [Can foreigners buy property in Saudi Arabia without an Iqama?](/blog/can-foreigners-buy-property-in-saudi-arabia-2026)`
+                                  updateSection(idx, 'bodyEn', (secEn.body || '') + link)
+                                }}
+                                className="btn btn-ghost btn-sm"
+                                style={{ fontSize: '11px', padding: '2px 8px', height: '24px', backgroundColor: '#FFFFFF', border: '1px solid #93C5FD', color: '#1D4ED8' }}
+                                title="Insert link to Foreign Ownership Pillar Guide in English body"
+                              >
+                                + Foreign Ownership (EN)
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const link = ` [شروط تملك غير السعوديين للعقار بدون إقامة](/blog/can-foreigners-buy-property-in-saudi-arabia-2026)`
+                                  updateSection(idx, 'bodyAr', (secAr?.body || '') + link)
+                                }}
+                                className="btn btn-ghost btn-sm"
+                                style={{ fontSize: '11px', padding: '2px 8px', height: '24px', backgroundColor: '#FFFFFF', border: '1px solid #93C5FD', color: '#1D4ED8' }}
+                                title="Insert link to Foreign Ownership Pillar Guide in Arabic body"
+                              >
+                                + تملك الأجانب (AR)
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const link = ` [Explore Asaheeb Exclusive Properties](/properties)`
+                                  updateSection(idx, 'bodyEn', (secEn.body || '') + link)
+                                }}
+                                className="btn btn-ghost btn-sm"
+                                style={{ fontSize: '11px', padding: '2px 8px', height: '24px', backgroundColor: '#FFFFFF', border: '1px solid #93C5FD', color: '#1D4ED8' }}
+                                title="Insert link to Properties catalog"
+                              >
+                                + Properties
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const link = ` [Contact Asaheeb Advisory](/contact)`
+                                  updateSection(idx, 'bodyEn', (secEn.body || '') + link)
+                                }}
+                                className="btn btn-ghost btn-sm"
+                                style={{ fontSize: '11px', padding: '2px 8px', height: '24px', backgroundColor: '#FFFFFF', border: '1px solid #93C5FD', color: '#1D4ED8' }}
+                                title="Insert link to Contact Advisory"
+                              >
+                                + Contact
+                              </button>
                             </div>
                           </div>
 

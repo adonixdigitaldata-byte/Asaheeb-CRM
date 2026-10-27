@@ -50,6 +50,7 @@ export default function BlogsClient({ profile }: Props) {
   const [search, setSearch] = useState('')
   const [categoryFilter, setCategoryFilter] = useState('ALL')
   const [statusFilter, setStatusFilter] = useState('ALL')
+  const [seoFilter, setSeoFilter] = useState('ALL')
 
   // Modal States
   const [editingBlog, setEditingBlog] = useState<Blog | null>(null)
@@ -202,9 +203,11 @@ export default function BlogsClient({ profile }: Props) {
       if (statusFilter === 'DRAFT' && b.is_published) return false
       if (statusFilter === 'FEATURED' && !b.featured) return false
 
+      if (seoFilter !== 'ALL' && (b.seo_review_status || 'NEEDS_REVIEW') !== seoFilter) return false
+
       return true
     })
-  }, [blogs, search, categoryFilter, statusFilter])
+  }, [blogs, search, categoryFilter, statusFilter, seoFilter])
 
   const totalPages = Math.ceil(filteredBlogs.length / pageSize) || 1
   const effectivePage = Math.min(currentPage, totalPages)
@@ -212,12 +215,14 @@ export default function BlogsClient({ profile }: Props) {
 
   const publishedCount = blogs.filter((b) => b.is_published).length
   const featuredCount = blogs.filter((b) => b.featured).length
-  const hasActiveFilters = search.trim() !== '' || categoryFilter !== 'ALL' || statusFilter !== 'ALL'
+  const optimizedCount = blogs.filter((b) => b.seo_review_status === 'OPTIMIZED').length
+  const hasActiveFilters = search.trim() !== '' || categoryFilter !== 'ALL' || statusFilter !== 'ALL' || seoFilter !== 'ALL'
 
   function resetFilters() {
     setSearch('')
     setCategoryFilter('ALL')
     setStatusFilter('ALL')
+    setSeoFilter('ALL')
     setCurrentPage(1)
   }
 
@@ -239,7 +244,7 @@ export default function BlogsClient({ profile }: Props) {
                 border: '1px solid #BFDBFE',
               }}
             >
-              {blogs.length} Total ({publishedCount} Published)
+              {blogs.length} Total ({publishedCount} Published • {optimizedCount} SEO Certified)
             </span>
           </div>
           <p className="text-meta" style={{ marginTop: '2px' }}>
@@ -504,10 +509,26 @@ export default function BlogsClient({ profile }: Props) {
               className="form-select"
               style={{ fontSize: '12px', height: '36px', width: '100%' }}
             >
-              <option value="ALL">All Statuses</option>
+              <option value="ALL">All Visibility</option>
               <option value="PUBLISHED">Published Live Only</option>
               <option value="FEATURED">Featured Only</option>
               <option value="DRAFT">Drafts Only</option>
+            </select>
+          </div>
+
+          {/* SEO Review Status Filter */}
+          <div>
+            <select
+              value={seoFilter}
+              onChange={(e) => setSeoFilter(e.target.value)}
+              className="form-select"
+              style={{ fontSize: '12px', height: '36px', width: '100%' }}
+            >
+              <option value="ALL">All SEO Statuses</option>
+              <option value="OPTIMIZED">Optimized (معتمد ومُحسن)</option>
+              <option value="IN_PROGRESS">In Progress (قيد العمل)</option>
+              <option value="NEEDS_REVIEW">Needs Review (يحتاج مراجعة)</option>
+              <option value="NEEDS_UPDATE">Needs Update (بحاجة لتحديث)</option>
             </select>
           </div>
 
@@ -616,22 +637,69 @@ export default function BlogsClient({ profile }: Props) {
                             <BookOpen size={15} />
                           </div>
 
-                          <div style={{ minWidth: 0, flex: 1 }}>
-                            <div
-                              style={{
-                                fontWeight: 700,
-                                color: '#0F172A',
-                                fontSize: '13px',
-                                cursor: 'pointer',
-                                overflow: 'hidden',
-                                textOverflow: 'ellipsis',
-                                whiteSpace: 'nowrap',
-                              }}
-                              onClick={() => setEditingBlog(blog)}
-                              title="Click to edit article"
-                            >
-                              {blog.title_en}
+                          <div style={{ minWidth: 0, flex: 1, display: 'flex', flexDirection: 'column', gap: '3px' }}>
+                            {/* Row 1: Title + Cover Badge (flex-shrink: 0 ensures warning is never clipped) */}
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0 }}>
+                              <span
+                                style={{
+                                  fontWeight: 700,
+                                  color: '#0F172A',
+                                  fontSize: '13px',
+                                  cursor: 'pointer',
+                                  overflow: 'hidden',
+                                  textOverflow: 'ellipsis',
+                                  whiteSpace: 'nowrap',
+                                  flex: 1,
+                                  minWidth: 0,
+                                }}
+                                onClick={() => setEditingBlog(blog)}
+                                title="Click to edit article"
+                              >
+                                {blog.title_en}
+                              </span>
+
+                              {blog.cover_image_url ? (
+                                <span
+                                  style={{
+                                    flexShrink: 0,
+                                    fontSize: '9.5px',
+                                    color: '#059669',
+                                    backgroundColor: '#ECFDF5',
+                                    border: '1px solid #A7F3D0',
+                                    padding: '1px 6px',
+                                    borderRadius: '4px',
+                                    fontWeight: 700,
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: '3px',
+                                  }}
+                                  title="Cover image attached for Google Image SEO"
+                                >
+                                  📷 Cover
+                                </span>
+                              ) : (
+                                <span
+                                  style={{
+                                    flexShrink: 0,
+                                    fontSize: '9.5px',
+                                    color: '#B45309',
+                                    backgroundColor: '#FEF3C7',
+                                    border: '1px solid #FDE68A',
+                                    padding: '1px 6px',
+                                    borderRadius: '4px',
+                                    fontWeight: 700,
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: '3px',
+                                  }}
+                                  title="Missing cover image — needed for Google Images & rich snippets"
+                                >
+                                  ⚠️ No Cover
+                                </span>
+                              )}
                             </div>
+
+                            {/* Row 2: Category & Arabic Title */}
                             <div
                               style={{
                                 fontSize: '11px',
@@ -650,12 +718,15 @@ export default function BlogsClient({ profile }: Props) {
                                   fontWeight: 700,
                                   color: blog.accent || '#B8873B',
                                   textTransform: 'uppercase',
+                                  flexShrink: 0,
                                 }}
                               >
                                 {blog.category_en || blog.category}
                               </span>
-                              <span>•</span>
-                              <span dir="rtl">{blog.title_ar}</span>
+                              <span style={{ flexShrink: 0 }}>•</span>
+                              <span dir="rtl" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                {blog.title_ar}
+                              </span>
                             </div>
                           </div>
                         </div>
@@ -671,7 +742,7 @@ export default function BlogsClient({ profile }: Props) {
                         </div>
                       </td>
 
-                      {/* Status & Featured */}
+                      {/* Status, Featured & SEO Review */}
                       <td style={{ padding: '12px 14px', verticalAlign: 'middle' }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
                           <span
@@ -685,6 +756,37 @@ export default function BlogsClient({ profile }: Props) {
                             }}
                           >
                             {blog.is_published ? 'LIVE' : 'DRAFT'}
+                          </span>
+
+                          <span
+                            style={{
+                              fontSize: '9.5px',
+                              fontWeight: 700,
+                              padding: '1px 5px',
+                              borderRadius: '4px',
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '3px',
+                              backgroundColor:
+                                blog.seo_review_status === 'OPTIMIZED'
+                                  ? '#DCFCE7'
+                                  : blog.seo_review_status === 'IN_PROGRESS'
+                                  ? '#DBEAFE'
+                                  : blog.seo_review_status === 'NEEDS_UPDATE'
+                                  ? '#F3E8FF'
+                                  : '#FEF3C7',
+                              color:
+                                blog.seo_review_status === 'OPTIMIZED'
+                                  ? '#15803D'
+                                  : blog.seo_review_status === 'IN_PROGRESS'
+                                  ? '#1D4ED8'
+                                  : blog.seo_review_status === 'NEEDS_UPDATE'
+                                  ? '#7E22CE'
+                                  : '#B45309',
+                            }}
+                            title={blog.seo_reviewed_at ? `Certified SEO Audit: ${new Date(blog.seo_reviewed_at).toLocaleDateString()}` : 'SEO audit status'}
+                          >
+                            <span>SEO: {blog.seo_review_status || 'NEEDS_REVIEW'}</span>
                           </span>
 
                           {blog.featured && (

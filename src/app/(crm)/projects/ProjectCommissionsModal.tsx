@@ -209,7 +209,7 @@ export default function ProjectCommissionsModal({ project, profile, onClose }: P
         if (!res.ok) throw new Error(data.error || 'Failed to save commission record')
         setSuccessMsg('Commission record added successfully!')
 
-        // Trigger Dubai Sales Bell Celebration on new closed sale!
+        // Trigger Deal Closed Celebration on new closed sale!
         setCelebrationDeal({
           agentName: finalAgentName || 'Asaheeb Sales Team',
           agentRole: profile.role,
@@ -1169,7 +1169,7 @@ export default function ProjectCommissionsModal({ project, profile, onClose }: P
         </div>
       </div>
 
-      {/* Dubai Sales Bell Deal Closed Celebration Modal */}
+      {/* Deal Closed Celebration Modal */}
       {celebrationDeal && (
         <DealCelebrationModal
           deal={celebrationDeal}

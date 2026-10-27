@@ -48,6 +48,19 @@ export async function POST(request: NextRequest) {
       quote_en,
       quote_ar,
       cover_image_url,
+      // SEO & Media fields
+      cover_image_alt_en,
+      cover_image_alt_ar,
+      seo_title_en,
+      seo_title_ar,
+      meta_description_en,
+      meta_description_ar,
+      focus_keyword_en,
+      focus_keyword_ar,
+      secondary_keywords_en,
+      secondary_keywords_ar,
+      seo_review_status,
+      seo_reviewed_at,
       featured,
       is_published,
       sort_order,
@@ -100,6 +113,19 @@ export async function POST(request: NextRequest) {
       quote_en: quote_en?.trim() || null,
       quote_ar: quote_ar?.trim() || null,
       cover_image_url: cover_image_url?.trim() || null,
+      // SEO & Alt fields
+      cover_image_alt_en: cover_image_alt_en?.trim() || null,
+      cover_image_alt_ar: cover_image_alt_ar?.trim() || null,
+      seo_title_en: seo_title_en?.trim() || null,
+      seo_title_ar: seo_title_ar?.trim() || null,
+      meta_description_en: meta_description_en?.trim() || null,
+      meta_description_ar: meta_description_ar?.trim() || null,
+      focus_keyword_en: focus_keyword_en?.trim() || null,
+      focus_keyword_ar: focus_keyword_ar?.trim() || null,
+      secondary_keywords_en: Array.isArray(secondary_keywords_en) ? secondary_keywords_en.filter(Boolean) : [],
+      secondary_keywords_ar: Array.isArray(secondary_keywords_ar) ? secondary_keywords_ar.filter(Boolean) : [],
+      seo_review_status: seo_review_status?.trim() || 'NEEDS_REVIEW',
+      seo_reviewed_at: seo_review_status === 'OPTIMIZED' ? (seo_reviewed_at || new Date().toISOString()) : (seo_reviewed_at || null),
       featured: typeof featured === 'boolean' ? featured : false,
       is_published: typeof is_published === 'boolean' ? is_published : true,
       sort_order: typeof sort_order === 'number' ? sort_order : 0,
@@ -153,6 +179,21 @@ export async function POST(request: NextRequest) {
       }
       if ((cover_image_url?.trim() || '') !== (existingBlog.cover_image_url || '').trim()) {
         changes.push(`Cover Image`)
+      }
+      if ((cover_image_alt_en?.trim() || '') !== (existingBlog.cover_image_alt_en || '').trim()) {
+        changes.push(`Cover Image Alt Text (EN)`)
+      }
+      if ((seo_title_en?.trim() || '') !== (existingBlog.seo_title_en || '').trim()) {
+        changes.push(`SEO Title Tag (EN)`)
+      }
+      if ((meta_description_en?.trim() || '') !== (existingBlog.meta_description_en || '').trim()) {
+        changes.push(`SEO Meta Description (EN)`)
+      }
+      if ((focus_keyword_en?.trim() || '') !== (existingBlog.focus_keyword_en || '').trim()) {
+        changes.push(`Focus Keyword ("${focus_keyword_en}")`)
+      }
+      if ((seo_review_status?.trim() || 'NEEDS_REVIEW') !== (existingBlog.seo_review_status || 'NEEDS_REVIEW')) {
+        changes.push(`SEO Status (${existingBlog.seo_review_status || 'NEEDS_REVIEW'} -> ${seo_review_status})`)
       }
       const prevSections = Array.isArray(existingBlog.sections_en) ? existingBlog.sections_en : []
       const currSections = Array.isArray(sections_en) ? sections_en : []
