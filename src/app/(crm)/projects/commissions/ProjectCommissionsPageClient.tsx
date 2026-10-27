@@ -73,7 +73,7 @@ export default function ProjectCommissionsPageClient({ profile }: Props) {
 
   // Fetch all projects and commissions
   const fetchData = useCallback(async () => {
-    if (profile?.role !== 'ADMIN' && profile?.role !== 'SALES_MANAGER') return
+    if (profile?.role !== 'ADMIN') return
     setLoading(true)
     try {
       const [projectsRes, commsRes] = await Promise.all([
@@ -299,16 +299,16 @@ export default function ProjectCommissionsPageClient({ profile }: Props) {
     return filteredTransactions.slice(start, start + transactionPageSize)
   }, [filteredTransactions, transactionPage, transactionPageSize])
 
-  if (profile?.role !== 'ADMIN' && profile?.role !== 'SALES_MANAGER') {
+  if (profile?.role !== 'ADMIN') {
     return (
       <div className="page-container" style={{ minHeight: '80vh', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '24px' }}>
         <div className="card" style={{ maxWidth: '480px', width: '100%', padding: '36px 24px', textAlign: 'center', border: '1px solid #FECACA', backgroundColor: '#FEF2F2' }}>
           <ShieldCheck size={48} style={{ color: '#DC2626', margin: '0 auto 12px' }} />
           <h2 style={{ fontSize: '18px', fontWeight: 800, color: '#991B1B', margin: '0 0 6px 0' }}>
-            Executive Access Required
+            Administrator Access Required
           </h2>
           <p style={{ fontSize: '13px', color: '#7F1D1D', margin: '0 0 18px 0', lineHeight: '1.5' }}>
-            The Project Commissions Performance Hub and brokerage payout data are restricted to System Administrators and Sales Managers.
+            The Project Commissions Performance Hub and company-wide brokerage payout data are strictly restricted to System Administrators.
           </p>
           <Link
             href="/projects"

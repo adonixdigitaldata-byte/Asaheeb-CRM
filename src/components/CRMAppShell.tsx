@@ -5,6 +5,7 @@ import Image from 'next/image'
 import { Menu } from 'lucide-react'
 import Sidebar from '@/components/Sidebar'
 import ActivityTracker from '@/components/ActivityTracker'
+import AdminRealtimeCelebration from '@/components/AdminRealtimeCelebration'
 import type { Profile } from '@/types/database'
 
 interface Props {
@@ -76,6 +77,7 @@ export default function CRMAppShell({ profile, userId, overdueCount = 0, newMort
       />
 
       <ActivityTracker userId={userId} />
+      <AdminRealtimeCelebration profile={profile} />
 
       <main className="main-content">
         {children}

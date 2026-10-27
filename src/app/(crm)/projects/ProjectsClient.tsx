@@ -326,7 +326,7 @@ export default function ProjectsClient({ profile }: Props) {
           </button>
 
           {/* Commission Hub / Performance CTA */}
-          {(profile?.role === 'ADMIN' || profile?.role === 'SALES_MANAGER') && (
+          {profile?.role === 'ADMIN' && (
             <button
               type="button"
               onClick={() => router.push('/projects/commissions')}
@@ -1093,7 +1093,7 @@ export default function ProjectsClient({ profile }: Props) {
                             <ShieldCheck size={14} />
                           </button>
 
-                          {(profile?.role === 'ADMIN' || profile?.role === 'SALES_MANAGER') && (
+                          {Boolean(profile) && (
                             <button
                               type="button"
                               onClick={() => setCommissioningProject(project)}

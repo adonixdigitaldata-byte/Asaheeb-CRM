@@ -1,10 +1,25 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createServiceClient } from '@/lib/supabase/server'
+import { createClient, createServiceClient } from '@/lib/supabase/server'
 
 // GET /api/projects/commissions?projectId=...&agentId=...
 export async function GET(request: NextRequest) {
   try {
     const supabase = await createServiceClient()
+    const userClient = await createClient()
+    const {
+      data: { user },
+    } = await userClient.auth.getUser()
+
+    if (!user) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    }
+
+    const { data: callerProfile } = await supabase
+      .from('profiles')
+      .select('id, role')
+      .eq('id', user.id)
+      .single()
+
     const { searchParams } = new URL(request.url)
     const projectId = searchParams.get('projectId')
     const agentId = searchParams.get('agentId')
@@ -14,7 +29,13 @@ export async function GET(request: NextRequest) {
     if (projectId) {
       query = query.eq('project_id', projectId)
     }
-    if (agentId) {
+
+    // Role-based visibility isolation:
+    // Non-admin roles (Sales Managers, Sales Agents, Employees) can ONLY see their own sales
+    if (callerProfile?.role !== 'ADMIN') {
+      query = query.or(`agent_id.eq.${user.id},created_by.eq.${user.id}`)
+    } else if (agentId) {
+      // Admin can filter by agentId if specified, or view company-wide
       query = query.eq('agent_id', agentId)
     }
 
@@ -34,6 +55,21 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   try {
     const supabase = await createServiceClient()
+    const userClient = await createClient()
+    const {
+      data: { user },
+    } = await userClient.auth.getUser()
+
+    if (!user) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    }
+
+    const { data: callerProfile } = await supabase
+      .from('profiles')
+      .select('id, name, role')
+      .eq('id', user.id)
+      .single()
+
     const body = await request.json()
     const {
       project_id,
@@ -46,25 +82,33 @@ export async function POST(request: NextRequest) {
       deal_value_sar,
       sale_date,
       notes,
-      created_by,
     } = body
 
     if (!project_id || !unit_name || !buyer_name) {
       return NextResponse.json({ error: 'Project ID, unit name, and buyer name are required' }, { status: 400 })
     }
 
+    let finalAgentId = agent_id || null
+    let finalAgentName = agent_name ? String(agent_name).trim() : null
+
+    // If the caller is not an Admin, strictly attribute the sale to themselves
+    if (callerProfile?.role !== 'ADMIN') {
+      finalAgentId = user.id
+      finalAgentName = callerProfile?.name || 'Sales Team'
+    }
+
     const newRecord = {
       project_id,
       unit_name: String(unit_name).trim(),
       buyer_name: String(buyer_name).trim(),
-      agent_id: agent_id || null,
-      agent_name: agent_name ? String(agent_name).trim() : null,
+      agent_id: finalAgentId,
+      agent_name: finalAgentName,
       commission_amount: Number(commission_amount) || 0,
       area_sqm: Number(area_sqm) || 0,
       deal_value_sar: Number(deal_value_sar) || 0,
       sale_date: sale_date || new Date().toISOString().split('T')[0],
       notes: notes ? String(notes).trim() : null,
-      created_by: created_by || null,
+      created_by: user.id,
     }
 
     const { data, error } = await supabase
@@ -87,6 +131,21 @@ export async function POST(request: NextRequest) {
 export async function PUT(request: NextRequest) {
   try {
     const supabase = await createServiceClient()
+    const userClient = await createClient()
+    const {
+      data: { user },
+    } = await userClient.auth.getUser()
+
+    if (!user) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    }
+
+    const { data: callerProfile } = await supabase
+      .from('profiles')
+      .select('id, role')
+      .eq('id', user.id)
+      .single()
+
     const body = await request.json()
     const {
       id,
@@ -105,13 +164,31 @@ export async function PUT(request: NextRequest) {
       return NextResponse.json({ error: 'Commission ID is required' }, { status: 400 })
     }
 
+    // Role check: non-admins can only edit their own sales
+    if (callerProfile?.role !== 'ADMIN') {
+      const { data: existing } = await supabase
+        .from('project_commissions')
+        .select('id, agent_id, created_by')
+        .eq('id', id)
+        .single()
+
+      if (!existing || (existing.agent_id !== user.id && existing.created_by !== user.id)) {
+        return NextResponse.json(
+          { error: 'You are only authorized to edit your own sales records' },
+          { status: 403 }
+        )
+      }
+    }
+
     const updates: Record<string, any> = {
       updated_at: new Date().toISOString(),
     }
     if (unit_name !== undefined) updates.unit_name = String(unit_name).trim()
     if (buyer_name !== undefined) updates.buyer_name = String(buyer_name).trim()
-    if (agent_id !== undefined) updates.agent_id = agent_id || null
-    if (agent_name !== undefined) updates.agent_name = agent_name ? String(agent_name).trim() : null
+    if (callerProfile?.role === 'ADMIN') {
+      if (agent_id !== undefined) updates.agent_id = agent_id || null
+      if (agent_name !== undefined) updates.agent_name = agent_name ? String(agent_name).trim() : null
+    }
     if (commission_amount !== undefined) updates.commission_amount = Number(commission_amount) || 0
     if (area_sqm !== undefined) updates.area_sqm = Number(area_sqm) || 0
     if (deal_value_sar !== undefined) updates.deal_value_sar = Number(deal_value_sar) || 0
@@ -139,11 +216,42 @@ export async function PUT(request: NextRequest) {
 export async function DELETE(request: NextRequest) {
   try {
     const supabase = await createServiceClient()
+    const userClient = await createClient()
+    const {
+      data: { user },
+    } = await userClient.auth.getUser()
+
+    if (!user) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    }
+
+    const { data: callerProfile } = await supabase
+      .from('profiles')
+      .select('id, role')
+      .eq('id', user.id)
+      .single()
+
     const { searchParams } = new URL(request.url)
     const id = searchParams.get('id')
 
     if (!id) {
       return NextResponse.json({ error: 'Commission ID is required' }, { status: 400 })
+    }
+
+    // Role check: non-admins can only delete their own sales
+    if (callerProfile?.role !== 'ADMIN') {
+      const { data: existing } = await supabase
+        .from('project_commissions')
+        .select('id, agent_id, created_by')
+        .eq('id', id)
+        .single()
+
+      if (!existing || (existing.agent_id !== user.id && existing.created_by !== user.id)) {
+        return NextResponse.json(
+          { error: 'You are only authorized to delete your own sales records' },
+          { status: 403 }
+        )
+      }
     }
 
     const { error } = await supabase

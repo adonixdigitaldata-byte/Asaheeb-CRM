@@ -90,14 +90,22 @@ export default function ProjectCommissionsModal({ project, profile, onClose }: P
     fetchTeam()
   }, [fetchCommissions, fetchTeam])
 
+  // Role-based visibility isolation:
+  // Admin sees all company sales for this project.
+  // Non-admin roles (Sales Managers, Agents, Employees) see ONLY their own recorded sales!
+  const displayedCommissions = useMemo(() => {
+    if (profile.role === 'ADMIN') return commissions
+    return commissions.filter((c) => c.agent_id === profile.id || c.created_by === profile.id)
+  }, [commissions, profile.id, profile.role])
+
   // Total summary calculations
   const totalCommission = useMemo(() => {
-    return commissions.reduce((sum, item) => sum + Number(item.commission_amount || 0), 0)
-  }, [commissions])
+    return displayedCommissions.reduce((sum, item) => sum + Number(item.commission_amount || 0), 0)
+  }, [displayedCommissions])
 
   const totalAreaSqm = useMemo(() => {
-    return commissions.reduce((sum, item) => sum + Number(item.area_sqm || 0), 0)
-  }, [commissions])
+    return displayedCommissions.reduce((sum, item) => sum + Number(item.area_sqm || 0), 0)
+  }, [displayedCommissions])
 
   function resetForm() {
     setEditingId(null)
@@ -155,11 +163,18 @@ export default function ProjectCommissionsModal({ project, profile, onClose }: P
     // Resolve final agent attribution
     let finalAgentName = agentName.trim()
     let finalAgentId = agentId || null
-    if (agentId && !isCustomAgent) {
-      const selected = teamProfiles.find((p) => p.id === agentId)
-      if (selected) finalAgentName = selected.name
-    } else if (isCustomAgent) {
-      finalAgentId = null
+
+    if (profile.role !== 'ADMIN') {
+      // Non-admins can only attribute sales to THEMSELVES
+      finalAgentId = profile.id
+      finalAgentName = profile.name || 'Sales Agent'
+    } else {
+      if (agentId && !isCustomAgent) {
+        const selected = teamProfiles.find((p) => p.id === agentId)
+        if (selected) finalAgentName = selected.name
+      } else if (isCustomAgent) {
+        finalAgentId = null
+      }
     }
 
     try {
@@ -209,9 +224,8 @@ export default function ProjectCommissionsModal({ project, profile, onClose }: P
         if (!res.ok) throw new Error(data.error || 'Failed to save commission record')
         setSuccessMsg('Commission record added successfully!')
 
-        // Trigger Deal Closed Celebration on new closed sale!
-        setCelebrationDeal({
-          agentName: finalAgentName || 'Asaheeb Sales Team',
+        const celebrationData: DealCelebrationData = {
+          agentName: finalAgentName || profile.name || 'Asaheeb Sales Team',
           agentRole: profile.role,
           projectName: project.name_en,
           unitName: unitName.trim(),
@@ -219,7 +233,31 @@ export default function ProjectCommissionsModal({ project, profile, onClose }: P
           dealValueSar: numDealValue > 0 ? numDealValue : null,
           commissionAmount: numAmount,
           saleDate: saleDate,
-        })
+        }
+
+        // Trigger Deal Closed Celebration on new closed sale for the recorder!
+        setCelebrationDeal(celebrationData)
+
+        // Realtime broadcast to Admin's open tabs
+        try {
+          const celebrationChannel = supabase.channel('crm-sales-celebration')
+          celebrationChannel.subscribe((status) => {
+            if (status === 'SUBSCRIBED') {
+              celebrationChannel.send({
+                type: 'broadcast',
+                event: 'deal-celebration',
+                payload: {
+                  deal: celebrationData,
+                  recorderId: profile.id,
+                  saleId: data.commission?.id || Date.now().toString(),
+                  timestamp: Date.now(),
+                },
+              })
+            }
+          })
+        } catch (bErr) {
+          console.error('Failed to broadcast celebration:', bErr)
+        }
       }
 
       await fetchCommissions()
@@ -336,16 +374,18 @@ export default function ProjectCommissionsModal({ project, profile, onClose }: P
                     fontWeight: 700,
                     padding: '2px 8px',
                     borderRadius: '12px',
-                    backgroundColor: 'rgba(16, 185, 129, 0.2)',
-                    color: '#34D399',
-                    border: '1px solid rgba(16, 185, 129, 0.4)',
+                    backgroundColor: profile.role === 'ADMIN' ? 'rgba(16, 185, 129, 0.2)' : 'rgba(59, 130, 246, 0.2)',
+                    color: profile.role === 'ADMIN' ? '#34D399' : '#93C5FD',
+                    border: profile.role === 'ADMIN' ? '1px solid rgba(16, 185, 129, 0.4)' : '1px solid rgba(59, 130, 246, 0.4)',
                   }}
                 >
-                  Admin Vault
+                  {profile.role === 'ADMIN' ? 'Admin Vault' : 'My Sales Ledger'}
                 </span>
               </div>
               <p style={{ margin: '2px 0 0', fontSize: '12px', color: '#94A3B8' }}>
-                Project Sales &amp; Layout Commissions Configurator · {project.city_en}
+                {profile.role === 'ADMIN'
+                  ? `Project Sales & Layout Commissions Configurator · ${project.city_en}`
+                  : `Record & view your personal sales transactions · ${project.city_en}`}
               </p>
             </div>
           </div>
@@ -398,13 +438,13 @@ export default function ProjectCommissionsModal({ project, profile, onClose }: P
               }}
             >
               <div style={{ fontSize: '11px', fontWeight: 700, color: '#047857', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-                Total Commission Earned
+                {profile.role === 'ADMIN' ? 'Total Commission Earned' : 'My Commission Earned'}
               </div>
               <div style={{ fontSize: '20px', fontWeight: 800, color: '#065F46', marginTop: '2px' }}>
                 SAR {totalCommission.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
               </div>
               <div style={{ fontSize: '11px', color: '#059669', marginTop: '1px' }}>
-                Across {commissions.length} unit / layout sale{commissions.length === 1 ? '' : 's'}
+                Across {displayedCommissions.length} unit / layout sale{displayedCommissions.length === 1 ? '' : 's'}
               </div>
             </div>
 
@@ -417,10 +457,10 @@ export default function ProjectCommissionsModal({ project, profile, onClose }: P
               }}
             >
               <div style={{ fontSize: '11px', fontWeight: 700, color: '#1D4ED8', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-                Units / Layouts Sold
+                {profile.role === 'ADMIN' ? 'Units / Layouts Sold' : 'My Units Sold'}
               </div>
               <div style={{ fontSize: '20px', fontWeight: 800, color: '#1E40AF', marginTop: '2px' }}>
-                {commissions.length} Sold
+                {displayedCommissions.length} Sold
               </div>
               <div style={{ fontSize: '11px', color: '#2563EB', marginTop: '1px' }}>
                 {project.developer_en || 'Asaheeb Developments'}
@@ -436,13 +476,13 @@ export default function ProjectCommissionsModal({ project, profile, onClose }: P
               }}
             >
               <div style={{ fontSize: '11px', fontWeight: 700, color: '#B45309', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-                Total Area Sold (m²)
+                {profile.role === 'ADMIN' ? 'Total Area Sold (m²)' : 'My Area Sold (m²)'}
               </div>
               <div style={{ fontSize: '20px', fontWeight: 800, color: '#92400E', marginTop: '2px' }}>
                 {totalAreaSqm.toLocaleString('en-US', { minimumFractionDigits: 1, maximumFractionDigits: 1 })} m²
               </div>
               <div style={{ fontSize: '11px', color: '#B45309', marginTop: '1px' }}>
-                Across {commissions.filter(c => Number(c.area_sqm || 0) > 0).length} recorded units
+                Across {displayedCommissions.filter(c => Number(c.area_sqm || 0) > 0).length} recorded units
               </div>
             </div>
 
@@ -565,21 +605,42 @@ export default function ProjectCommissionsModal({ project, profile, onClose }: P
                 <div>
                   <label className="form-label" style={{ fontSize: '12px', fontWeight: 700, color: '#334155', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                     <span>Sold By (Sales Agent)</span>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setIsCustomAgent(!isCustomAgent)
-                        setAgentId('')
-                        setAgentName('')
-                      }}
-                      className="btn btn-ghost btn-xs"
-                      style={{ fontSize: '10.5px', color: '#2563EB', padding: '0 4px', height: 'auto' }}
-                    >
-                      {isCustomAgent ? 'Choose Team Member' : 'Custom / External'}
-                    </button>
+                    {profile.role === 'ADMIN' && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setIsCustomAgent(!isCustomAgent)
+                          setAgentId('')
+                          setAgentName('')
+                        }}
+                        className="btn btn-ghost btn-xs"
+                        style={{ fontSize: '10.5px', color: '#2563EB', padding: '0 4px', height: 'auto' }}
+                      >
+                        {isCustomAgent ? 'Choose Team Member' : 'Custom / External'}
+                      </button>
+                    )}
                   </label>
 
-                  {isCustomAgent ? (
+                  {profile.role !== 'ADMIN' ? (
+                    <div
+                      style={{
+                        height: '38px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '8px',
+                        padding: '0 12px',
+                        backgroundColor: '#F1F5F9',
+                        borderRadius: '6px',
+                        border: '1px solid #CBD5E1',
+                        fontSize: '13px',
+                        fontWeight: 600,
+                        color: '#1E293B',
+                      }}
+                    >
+                      <User size={15} color="#059669" />
+                      <span>{profile.name} (You)</span>
+                    </div>
+                  ) : isCustomAgent ? (
                     <input
                       type="text"
                       placeholder="e.g. External Partner / Direct Broker"
@@ -610,7 +671,9 @@ export default function ProjectCommissionsModal({ project, profile, onClose }: P
                     </select>
                   )}
                   <div style={{ fontSize: '10.5px', color: '#94A3B8', marginTop: '2px' }}>
-                    Assign credit to the sales agent who closed this deal.
+                    {profile.role === 'ADMIN'
+                      ? 'Assign credit to the sales agent who closed this deal.'
+                      : 'This sale will be automatically credited to your sales profile.'}
                   </div>
                 </div>
 
@@ -803,7 +866,7 @@ export default function ProjectCommissionsModal({ project, profile, onClose }: P
           {/* List of Commissions */}
           <div style={{ marginBottom: '8px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
             <div style={{ fontSize: '13px', fontWeight: 700, color: '#1E293B', textTransform: 'uppercase', letterSpacing: '0.03em' }}>
-              Sales &amp; Commission Breakdown ({commissions.length})
+              Sales &amp; Commission Breakdown ({displayedCommissions.length})
             </div>
           </div>
 
@@ -812,7 +875,7 @@ export default function ProjectCommissionsModal({ project, profile, onClose }: P
               <Clock size={24} style={{ margin: '0 auto 8px', animation: 'spin 1.5s linear infinite' }} />
               <div>Loading commissions ledger...</div>
             </div>
-          ) : commissions.length === 0 ? (
+          ) : displayedCommissions.length === 0 ? (
             <div
               style={{
                 textAlign: 'center',
@@ -825,10 +888,14 @@ export default function ProjectCommissionsModal({ project, profile, onClose }: P
             >
               <SaudiRiyalIcon size={36} style={{ color: '#94A3B8', margin: '0 auto 10px' }} />
               <div style={{ fontWeight: 700, fontSize: '14px', color: '#334155' }}>
-                No commission entries recorded yet
+                {profile.role === 'ADMIN'
+                  ? 'No commission entries recorded yet'
+                  : `You haven't recorded any sales for this project yet`}
               </div>
               <p style={{ fontSize: '12px', color: '#64748B', maxWidth: '400px', margin: '4px auto 14px' }}>
-                Record sales made across different apartment layouts, hotel units, or villa plots to track total project commission.
+                {profile.role === 'ADMIN'
+                  ? 'Record sales made across different apartment layouts, hotel units, or villa plots to track total project commission.'
+                  : 'Record your closed sales deals to track your commissions and celebrate milestones.'}
               </p>
               {!isFormOpen && (
                 <button
@@ -838,7 +905,7 @@ export default function ProjectCommissionsModal({ project, profile, onClose }: P
                   style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', fontWeight: 600 }}
                 >
                   <Plus size={14} />
-                  <span>Add First Sale</span>
+                  <span>{profile.role === 'ADMIN' ? 'Add First Sale' : 'Record My Sale'}</span>
                 </button>
               )}
             </div>
@@ -876,7 +943,7 @@ export default function ProjectCommissionsModal({ project, profile, onClose }: P
                     </tr>
                   </thead>
                   <tbody>
-                    {commissions.map((c, idx) => {
+                    {displayedCommissions.map((c, idx) => {
                       const agentDisplay = c.agent_name || 'Asaheeb Direct'
                       const initial = agentDisplay.charAt(0).toUpperCase()
 
@@ -884,7 +951,7 @@ export default function ProjectCommissionsModal({ project, profile, onClose }: P
                         <tr
                           key={c.id}
                           style={{
-                            borderBottom: idx === commissions.length - 1 ? 'none' : '1px solid #F1F5F9',
+                            borderBottom: idx === displayedCommissions.length - 1 ? 'none' : '1px solid #F1F5F9',
                             transition: 'background-color 0.15s ease',
                           }}
                           onMouseEnter={(e) => ((e.currentTarget as HTMLElement).style.backgroundColor = '#F8FAFC')}
@@ -1011,7 +1078,7 @@ export default function ProjectCommissionsModal({ project, profile, onClose }: P
                   <tfoot>
                     <tr style={{ backgroundColor: '#F0FDF4', borderTop: '2px solid #A7F3D0', fontWeight: 800 }}>
                       <td colSpan={4} style={{ padding: '12px 14px', color: '#065F46', fontSize: '13px' }}>
-                        TOTAL COMMISSION ({commissions.length} Units Sold {totalAreaSqm > 0 ? `· ${totalAreaSqm.toLocaleString()} m²` : ''})
+                        {profile.role === 'ADMIN' ? 'TOTAL COMMISSION' : 'MY TOTAL COMMISSION'} ({displayedCommissions.length} Units Sold {totalAreaSqm > 0 ? `· ${totalAreaSqm.toLocaleString()} m²` : ''})
                       </td>
                       <td style={{ padding: '12px 12px', textAlign: 'right', color: '#047857', fontSize: '13.5px', whiteSpace: 'nowrap' }}>
                         SAR {totalCommission.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
@@ -1024,7 +1091,7 @@ export default function ProjectCommissionsModal({ project, profile, onClose }: P
 
               {/* MOBILE CARDS VIEW (Visible strictly on mobile screens, zero cutting or overlapping text!) */}
               <div className="commissions-mobile-view" style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                {commissions.map((c) => {
+                {displayedCommissions.map((c) => {
                   const agentDisplay = c.agent_name || 'Asaheeb Direct'
                   return (
                     <div
@@ -1113,10 +1180,10 @@ export default function ProjectCommissionsModal({ project, profile, onClose }: P
                 >
                   <div>
                     <div style={{ fontSize: '11px', fontWeight: 800, color: '#047857', textTransform: 'uppercase' }}>
-                      Total Commission
+                      {profile.role === 'ADMIN' ? 'Total Commission' : 'My Total Commission'}
                     </div>
                     <div style={{ fontSize: '11px', color: '#059669', marginTop: '2px' }}>
-                      {commissions.length} Sold {totalAreaSqm > 0 ? `· ${totalAreaSqm.toLocaleString()} m²` : ''}
+                      {displayedCommissions.length} Sold {totalAreaSqm > 0 ? `· ${totalAreaSqm.toLocaleString()} m²` : ''}
                     </div>
                   </div>
                   <div style={{ fontSize: '16px', fontWeight: 900, color: '#065F46' }}>
@@ -1161,7 +1228,9 @@ export default function ProjectCommissionsModal({ project, profile, onClose }: P
           }}
         >
           <div style={{ fontSize: '11px', color: '#64748B' }}>
-            All commission entries are restricted to Executive &amp; Sales Management access.
+            {profile.role === 'ADMIN'
+              ? 'All project sales and commissions ledger · Executive Vault'
+              : 'Personal sales ledger · Asaheeb Sales Network'}
           </div>
           <button type="button" onClick={onClose} className="btn btn-outline btn-sm">
             Close
