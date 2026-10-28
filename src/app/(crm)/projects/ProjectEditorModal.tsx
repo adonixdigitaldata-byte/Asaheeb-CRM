@@ -2982,10 +2982,23 @@ export default function ProjectEditorModal({
                     <label className="form-label">Foreign Buyer Ownership Status</label>
                     <select
                       value={form.foreign_eligibility || 'ELIGIBLE'}
-                      onChange={(e) => setForm({ ...form, foreign_eligibility: e.target.value as any })}
+                      onChange={(e) => {
+                        const val = e.target.value as any
+                        let enNote = form.foreign_eligibility_en
+                        let arNote = form.foreign_eligibility_ar
+                        if (val === 'LEASEHOLD' && (!enNote || enNote.includes('100% Freehold'))) {
+                          enNote = 'Long-term Leasehold / Usufruct ownership rights available for non-Saudis and foreign investors.'
+                          arNote = 'حق انتفاع / عقد إيجار طويل الأجل متاح لغير السعوديين والمستثمرين الأجانب وفق اللوائح التنظيمية.'
+                        } else if (val === 'ELIGIBLE' && (!enNote || enNote.includes('Leasehold'))) {
+                          enNote = '100% Freehold eligible for foreign nationals, GCC citizens, and expatriates via the Absher Real Estate Ownership portal.'
+                          arNote = 'تملك حر بنسبة 100% متاح لغير السعوديين والخليجيين والمقيمين عبر بوابة أبشر لتملك العقار.'
+                        }
+                        setForm({ ...form, foreign_eligibility: val, foreign_eligibility_en: enNote, foreign_eligibility_ar: arNote })
+                      }}
                       className="form-select"
                     >
                       <option value="ELIGIBLE">✓ 100% Freehold Eligible (Non-Saudis, GCC &amp; Expats via Absher)</option>
+                      <option value="LEASEHOLD">📑 Leasehold / Usufruct Rights (حق انتفاع / إيجار طويل الأجل)</option>
                       <option value="ELIGIBLE_MUSLIMS_ONLY">🕋 Holy Sanctuary Boundaries (Muslim Freehold / Usufruct Rights)</option>
                       <option value="REQUIRES_PREMIUM_RESIDENCY">👑 Requires Saudi Premium Residency (الإقامة المميزة)</option>
                       <option value="NOT_ELIGIBLE">🚫 Restricted to Saudi Nationals</option>

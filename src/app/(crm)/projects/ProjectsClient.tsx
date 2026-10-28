@@ -72,6 +72,7 @@ export default function ProjectsClient({ profile }: Props) {
   const [search, setSearch] = useState('')
   const [cityFilter, setCityFilter] = useState('ALL')
   const [typeFilter, setTypeFilter] = useState('ALL')
+  const [ownershipFilter, setOwnershipFilter] = useState('ALL')
   const [statusFilter, setStatusFilter] = useState('ALL')
   const [stageFilter, setStageFilter] = useState('ALL')
   const [offerFilter, setOfferFilter] = useState<'ALL' | 'ACTIVE_OFFER'>('ALL')
@@ -210,6 +211,11 @@ export default function ProjectsClient({ profile }: Props) {
 
       if (stageFilter !== 'ALL' && p.status_en !== stageFilter) return false
 
+      if (ownershipFilter !== 'ALL') {
+        const pOwnership = p.foreign_eligibility || 'ELIGIBLE'
+        if (pOwnership !== ownershipFilter) return false
+      }
+
       if (aiFilter === 'AI_ENABLED' && !p.ai_agent_enabled) return false
       if (aiFilter === 'AI_DISABLED' && p.ai_agent_enabled) return false
 
@@ -233,7 +239,7 @@ export default function ProjectsClient({ profile }: Props) {
     }
 
     return result
-  }, [projects, search, cityFilter, typeFilter, statusFilter, stageFilter, offerFilter, sortBy])
+  }, [projects, search, cityFilter, typeFilter, ownershipFilter, statusFilter, stageFilter, offerFilter, sortBy])
 
   const totalPages = Math.ceil(filteredProjects.length / pageSize) || 1
   const effectivePage = Math.min(currentPage, totalPages)
@@ -253,6 +259,7 @@ export default function ProjectsClient({ profile }: Props) {
     search.trim() !== '' ||
     cityFilter !== 'ALL' ||
     typeFilter !== 'ALL' ||
+    ownershipFilter !== 'ALL' ||
     statusFilter !== 'ALL' ||
     stageFilter !== 'ALL' ||
     offerFilter !== 'ALL' ||
@@ -262,6 +269,7 @@ export default function ProjectsClient({ profile }: Props) {
     setSearch('')
     setCityFilter('ALL')
     setTypeFilter('ALL')
+    setOwnershipFilter('ALL')
     setStatusFilter('ALL')
     setStageFilter('ALL')
     setOfferFilter('ALL')
@@ -578,6 +586,26 @@ export default function ProjectsClient({ profile }: Props) {
             </select>
           </div>
 
+          {/* Ownership Filter (Freehold, Leasehold, etc.) */}
+          <div>
+            <select
+              value={ownershipFilter}
+              onChange={(e) => {
+                setOwnershipFilter(e.target.value)
+                setCurrentPage(1)
+              }}
+              className="form-select"
+              style={{ fontSize: '12px', height: '36px', width: '100%' }}
+            >
+              <option value="ALL">All Ownership Types</option>
+              <option value="ELIGIBLE">🌍 Freehold (تملك حر 100%)</option>
+              <option value="LEASEHOLD">📑 Leasehold (حق انتفاع)</option>
+              <option value="ELIGIBLE_MUSLIMS_ONLY">🕋 Muslims Only (Holy Cities)</option>
+              <option value="REQUIRES_PREMIUM_RESIDENCY">👑 Requires Premium Residency</option>
+              <option value="NOT_ELIGIBLE">🚫 Saudi Nationals Only</option>
+            </select>
+          </div>
+
           {/* Status Filter */}
           <div>
             <select
@@ -861,6 +889,40 @@ export default function ProjectsClient({ profile }: Props) {
                               title="100% Freehold Eligible for Foreigners & Expats"
                             >
                               🌍 Freehold
+                            </span>
+                          )}
+
+                          {project.foreign_eligibility === 'LEASEHOLD' && (
+                            <span
+                              style={{
+                                fontSize: '10px',
+                                fontWeight: 700,
+                                color: '#B45309',
+                                backgroundColor: '#FEF3C7',
+                                border: '1px solid #FDE68A',
+                                padding: '1px 5px',
+                                borderRadius: '4px',
+                              }}
+                              title="Leasehold / Usufruct Rights (حق انتفاع / إيجار طويل الأجل)"
+                            >
+                              📑 Leasehold
+                            </span>
+                          )}
+
+                          {project.foreign_eligibility === 'ELIGIBLE_MUSLIMS_ONLY' && (
+                            <span
+                              style={{
+                                fontSize: '10px',
+                                fontWeight: 700,
+                                color: '#0369A1',
+                                backgroundColor: '#E0F2FE',
+                                border: '1px solid #BAE6FD',
+                                padding: '1px 5px',
+                                borderRadius: '4px',
+                              }}
+                              title="Holy Sanctuary Boundaries (Muslim Freehold / Usufruct Rights)"
+                            >
+                              🕋 Muslims Only
                             </span>
                           )}
                         </div>

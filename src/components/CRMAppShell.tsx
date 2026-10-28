@@ -13,10 +13,18 @@ interface Props {
   userId: string
   overdueCount?: number
   newMortgageCount?: number
+  pendingConsultationsCount?: number
   children: React.ReactNode
 }
 
-export default function CRMAppShell({ profile, userId, overdueCount = 0, newMortgageCount = 0, children }: Props) {
+export default function CRMAppShell({
+  profile,
+  userId,
+  overdueCount = 0,
+  newMortgageCount = 0,
+  pendingConsultationsCount = 0,
+  children,
+}: Props) {
   const [sidebarOpen, setSidebarOpen] = useState(false)
 
   return (
@@ -74,6 +82,7 @@ export default function CRMAppShell({ profile, userId, overdueCount = 0, newMort
         onClose={() => setSidebarOpen(false)}
         overdueCount={overdueCount}
         newMortgageCount={newMortgageCount}
+        pendingConsultationsCount={pendingConsultationsCount}
       />
 
       <ActivityTracker userId={userId} />

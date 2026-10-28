@@ -1968,6 +1968,8 @@ export default function LeadDetailClient({
                     <span style={{ fontSize: '11px', fontWeight: 800, color: '#15803D', backgroundColor: '#DCFCE7', padding: '1px 6px', borderRadius: '4px' }}>
                       {lead.property?.foreign_eligibility === 'ELIGIBLE' || matchedProject?.foreign_eligibility === 'ELIGIBLE'
                         ? '✓ 100% Freehold Eligible'
+                        : lead.property?.foreign_eligibility === 'LEASEHOLD' || matchedProject?.foreign_eligibility === 'LEASEHOLD'
+                        ? '📑 Leasehold / Usufruct Rights'
                         : lead.property?.foreign_eligibility === 'ELIGIBLE_MUSLIMS_ONLY' || matchedProject?.foreign_eligibility === 'ELIGIBLE_MUSLIMS_ONLY'
                         ? '🕋 Holy Sanctuary Boundary'
                         : lead.property?.foreign_eligibility === 'REQUIRES_PREMIUM_RESIDENCY' || matchedProject?.foreign_eligibility === 'REQUIRES_PREMIUM_RESIDENCY'

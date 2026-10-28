@@ -21,6 +21,7 @@ import {
   Calculator,
   Award,
   FileCheck,
+  Sparkles,
 } from 'lucide-react'
 import { logout } from '@/app/login/actions'
 import type { Profile } from '@/types/database'
@@ -31,6 +32,7 @@ interface SidebarProps {
   onClose?: () => void
   overdueCount?: number
   newMortgageCount?: number
+  pendingConsultationsCount?: number
 }
 
 export default function Sidebar({
@@ -39,6 +41,7 @@ export default function Sidebar({
   onClose,
   overdueCount = 0,
   newMortgageCount = 0,
+  pendingConsultationsCount = 0,
 }: SidebarProps) {
   const pathname = usePathname()
   const role = profile?.role || 'AGENT'
@@ -63,6 +66,7 @@ export default function Sidebar({
       section: 'Pipeline & Leads',
       items: [
         { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
+        { href: '/consultations', label: 'VIP Consultations', icon: Sparkles },
         { href: '/leads', label: 'Leads Pipeline', icon: Users },
         { href: '/mortgage-leads', label: 'Mortgage Leads', icon: Calculator },
         { href: '/my-sales', label: 'Sales & Commissions', icon: Award },
@@ -96,6 +100,7 @@ export default function Sidebar({
       section: 'Pipeline & Leads',
       items: [
         { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
+        { href: '/consultations', label: 'VIP Consultations', icon: Sparkles },
         { href: '/leads', label: 'All Team Leads', icon: Users },
         { href: '/mortgage-leads', label: 'Mortgage Leads', icon: Calculator },
         { href: '/leads?my_leads=true', label: 'My Assigned Leads', icon: UserCheck },
@@ -128,6 +133,7 @@ export default function Sidebar({
       section: 'My Pipeline',
       items: [
         { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
+        { href: '/consultations', label: 'VIP Consultations', icon: Sparkles },
         { href: '/leads', label: 'My Leads', icon: Users },
         { href: '/mortgage-leads', label: 'Mortgage Leads', icon: Calculator },
         { href: '/my-sales', label: 'My Sales Ledger', icon: Award },
@@ -252,6 +258,15 @@ export default function Sidebar({
                         title={`${overdueCount} overdue follow-up${overdueCount > 1 ? 's' : ''}`}
                       >
                         {overdueCount}
+                      </span>
+                    )}
+                    {item.href === '/consultations' && pendingConsultationsCount > 0 && (
+                      <span
+                        className="sidebar-overdue-pill"
+                        style={{ backgroundColor: '#F59E0B', color: '#0F172A', fontWeight: 800 }}
+                        title={`${pendingConsultationsCount} VIP consultation${pendingConsultationsCount > 1 ? 's' : ''} awaiting scheduling`}
+                      >
+                        {pendingConsultationsCount}
                       </span>
                     )}
                     {item.href === '/mortgage-leads' && newMortgageCount > 0 && (

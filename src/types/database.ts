@@ -264,7 +264,7 @@ export interface Project {
   commission_notes_ar?: string | null
   discount_offer?: ProjectDiscountOffer | null
   // AI Advisor & Foreign Ownership
-  foreign_eligibility?: 'ELIGIBLE' | 'ELIGIBLE_MUSLIMS_ONLY' | 'NOT_ELIGIBLE' | 'REQUIRES_PREMIUM_RESIDENCY' | string | null
+  foreign_eligibility?: 'ELIGIBLE' | 'LEASEHOLD' | 'ELIGIBLE_MUSLIMS_ONLY' | 'NOT_ELIGIBLE' | 'REQUIRES_PREMIUM_RESIDENCY' | string | null
   foreign_eligibility_en?: string | null
   foreign_eligibility_ar?: string | null
   ai_agent_enabled?: boolean
@@ -295,7 +295,7 @@ export interface ProjectAIOptions {
   ai_agent_welcome_ar?: string | null
   ai_agent_tone?: 'EXECUTIVE_LUXURY' | 'CONSULTATIVE_ADVISOR' | 'INVESTMENT_ANALYST' | string | null
   ai_agent_custom_instructions?: string | null
-  foreign_eligibility?: 'ELIGIBLE' | 'ELIGIBLE_MUSLIMS_ONLY' | 'NOT_ELIGIBLE' | 'REQUIRES_PREMIUM_RESIDENCY' | string | null
+  foreign_eligibility?: 'ELIGIBLE' | 'LEASEHOLD' | 'ELIGIBLE_MUSLIMS_ONLY' | 'NOT_ELIGIBLE' | 'REQUIRES_PREMIUM_RESIDENCY' | string | null
   foreign_eligibility_en?: string | null
   foreign_eligibility_ar?: string | null
   ai_agent_quick_prompts?: Array<{
@@ -768,5 +768,66 @@ export interface MortgageLead {
   source?: string | null
   created_at: string
   updated_at?: string
+}
+
+export type ConsultationMeetingMode = 'ONLINE_VIDEO' | 'IN_PERSON_OFFICE' | 'ON_SITE_WALKTHROUGH'
+export type ConsultationStatus = 'PAID_UNSCHEDULED' | 'SCHEDULED' | 'COMPLETED' | 'CANCELLED_REFUNDED'
+export type VoucherStatus = 'ACTIVE' | 'REDEEMED' | 'EXPIRED'
+
+export interface ConsultationBooking {
+  id: string
+  booking_reference: string
+  full_name: string
+  phone_number: string
+  email: string
+  city_or_country: string
+  buyer_intent: string
+  budget_range: string
+  preferred_meeting_mode: ConsultationMeetingMode
+  notes_or_questions?: string | null
+  amount_paid: number
+  currency: string
+  payment_gateway: string
+  payment_transaction_id?: string | null
+  payment_status: string
+  paid_at: string
+  voucher_code: string
+  credit_value: number
+  voucher_status: VoucherStatus
+  redeemed_deal_id?: string | null
+  redeemed_at?: string | null
+  week_cycle: string
+  status: ConsultationStatus
+  scheduled_date?: string | null
+  confirmed_meeting_mode?: string | null
+  meeting_link_or_venue?: string | null
+  assigned_concierge_id?: string | null
+  concierge_notes?: string | null
+  client_email_sent_at?: string | null
+  owner_email_sent_at?: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface ConsultationSettings {
+  id: string
+  is_active: boolean
+  consultation_title_en?: string | null
+  consultation_title_ar?: string | null
+  fee_amount: number
+  currency: string
+  credit_multiplier: number
+  weekly_slot_capacity: number
+  slots_booked_this_week: number
+  operating_schedule?: string | null
+  holiday_days?: string | null
+  current_week_cycle: string
+  overflow_mode?: string | null
+  custom_urgency_banner_en?: string | null
+  custom_urgency_banner_ar?: string | null
+  owner_notification_email?: string | null
+  cc_notification_email?: string | null
+  updated_at?: string
+  updated_by?: string | null
 }
 

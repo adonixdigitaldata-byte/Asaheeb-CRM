@@ -18,7 +18,7 @@ export default async function CRMProtectedLayout({
   }
 
   const nowIso = new Date().toISOString()
-  const [profileRes, overdueRes, newMortgageRes] = await Promise.all([
+  const [profileRes, overdueRes, newMortgageRes, consultationRes] = await Promise.all([
     supabase.from('profiles').select('*').eq('id', user.id).single(),
     supabase
       .from('lead_followups')
@@ -30,11 +30,16 @@ export default async function CRMProtectedLayout({
       .from('mortgage_leads')
       .select('id', { count: 'exact', head: true })
       .eq('status', 'new'),
+    supabase
+      .from('consultation_bookings')
+      .select('id', { count: 'exact', head: true })
+      .eq('status', 'PAID_UNSCHEDULED'),
   ])
 
   const profile = profileRes.data
   const overdueCount = overdueRes.count ?? 0
   const newMortgageCount = newMortgageRes?.count ?? 0
+  const pendingConsultationsCount = consultationRes?.count ?? 0
 
   return (
     <CRMAppShell
@@ -42,6 +47,7 @@ export default async function CRMProtectedLayout({
       userId={user.id}
       overdueCount={overdueCount}
       newMortgageCount={newMortgageCount}
+      pendingConsultationsCount={pendingConsultationsCount}
     >
       {children}
     </CRMAppShell>
