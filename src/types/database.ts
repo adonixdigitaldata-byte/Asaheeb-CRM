@@ -771,7 +771,13 @@ export interface MortgageLead {
 }
 
 export type ConsultationMeetingMode = 'ONLINE_VIDEO' | 'IN_PERSON_OFFICE' | 'ON_SITE_WALKTHROUGH'
-export type ConsultationStatus = 'PAID_UNSCHEDULED' | 'SCHEDULED' | 'COMPLETED' | 'CANCELLED_REFUNDED'
+export type ConsultationStatus =
+  | 'PAYMENT_PENDING'
+  | 'PAID_UNSCHEDULED'
+  | 'SCHEDULED'
+  | 'COMPLETED'
+  | 'CANCELLED_REFUNDED'
+  | 'NO_SHOW'
 export type VoucherStatus = 'ACTIVE' | 'REDEEMED' | 'EXPIRED'
 
 export interface ConsultationBooking {
@@ -803,6 +809,7 @@ export interface ConsultationBooking {
   meeting_link_or_venue?: string | null
   assigned_concierge_id?: string | null
   concierge_notes?: string | null
+  meeting_notes?: string | null
   client_email_sent_at?: string | null
   owner_email_sent_at?: string | null
   created_at: string
