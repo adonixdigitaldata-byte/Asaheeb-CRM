@@ -41,7 +41,7 @@ interface Props {
 
 type AdminTab = 'LEADERBOARD' | 'TRANSACTIONS' | 'MY_SALES'
 type RoleFilter = 'ALL' | 'AGENT' | 'CHANNEL_PARTNER' | 'SALES_MANAGER'
-type SortField = 'volume' | 'units' | 'area' | 'commission' | 'name'
+type SortField = 'volume' | 'units' | 'area' | 'commission' | 'name' | 'deal_value'
 
 export default function MySalesClient({ profile }: Props) {
   const supabase = createClient()
@@ -226,6 +226,7 @@ export default function MySalesClient({ profile }: Props) {
       const totalUnits = memberDeals.length
       const totalArea = memberDeals.reduce((sum, c) => sum + Number(c.area_sqm || 0), 0)
       const grossVolume = memberDeals.reduce((sum, c) => sum + Number(c.commission_amount || 0), 0)
+      const totalDealValue = memberDeals.reduce((sum, c) => sum + Number(c.deal_value_sar || 0), 0)
 
       const thresholdX = Number(member.commission_threshold_sar || 0)
       const rateY = Number(member.commission_rate_pct || 0)
@@ -252,6 +253,7 @@ export default function MySalesClient({ profile }: Props) {
         totalUnits,
         totalArea,
         grossVolume,
+        totalDealValue,
         thresholdX,
         rateY,
         netCommission,
@@ -275,6 +277,7 @@ export default function MySalesClient({ profile }: Props) {
     return searchFiltered.sort((a, b) => {
       let diff = 0
       if (sortField === 'volume') diff = b.grossVolume - a.grossVolume
+      else if (sortField === 'deal_value') diff = b.totalDealValue - a.totalDealValue
       else if (sortField === 'units') diff = b.totalUnits - a.totalUnits
       else if (sortField === 'area') diff = b.totalArea - a.totalArea
       else if (sortField === 'commission') diff = b.netCommission - a.netCommission
@@ -286,6 +289,7 @@ export default function MySalesClient({ profile }: Props) {
   // Company-wide Executive Totals (For Admin & Manager Header)
   const executiveTotals = useMemo(() => {
     const totalVolume = timeFilteredCommissions.reduce((sum, c) => sum + Number(c.commission_amount || 0), 0)
+    const totalDealValue = timeFilteredCommissions.reduce((sum, c) => sum + Number(c.deal_value_sar || 0), 0)
     const totalArea = timeFilteredCommissions.reduce((sum, c) => sum + Number(c.area_sqm || 0), 0)
     const totalUnits = timeFilteredCommissions.length
     
@@ -299,6 +303,7 @@ export default function MySalesClient({ profile }: Props) {
 
     return {
       totalVolume,
+      totalDealValue,
       totalArea,
       totalUnits,
       totalCommissions,
@@ -372,6 +377,7 @@ export default function MySalesClient({ profile }: Props) {
     const totalUnitsSold = myPersonalDeals.length
     const totalAreaSqm = myPersonalDeals.reduce((sum, c) => sum + Number(c.area_sqm || 0), 0)
     const totalGrossRevenue = myPersonalDeals.reduce((sum, c) => sum + Number(c.commission_amount || 0), 0)
+    const totalDealValue = myPersonalDeals.reduce((sum, c) => sum + Number(c.deal_value_sar || 0), 0)
 
     let netCommissionPayout = 0
     let excessVolume = 0
@@ -394,6 +400,7 @@ export default function MySalesClient({ profile }: Props) {
       totalUnitsSold,
       totalAreaSqm,
       totalGrossRevenue,
+      totalDealValue,
       netCommissionPayout,
       excessVolume,
       progressPct,
@@ -676,7 +683,34 @@ export default function MySalesClient({ profile }: Props) {
                 marginBottom: '28px',
               }}
             >
-              {/* Card 1: Gross Sales Volume */}
+              {/* Card 0: Gross Property Sales Volume */}
+              <div
+                className="card"
+                style={{
+                  padding: '20px 22px',
+                  background: 'linear-gradient(135deg, #F5F3FF 0%, #EDE9FE 100%)',
+                  border: '1.5px solid #DDD6FE',
+                  borderRadius: '16px',
+                  boxShadow: '0 2px 8px rgba(109, 40, 217, 0.05)',
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <span style={{ fontSize: '11px', fontWeight: 800, color: '#6D28D9', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                    Gross Property Sales
+                  </span>
+                  <div style={{ width: '32px', height: '32px', borderRadius: '8px', backgroundColor: '#DDD6FE', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#5B21B6' }}>
+                    <SaudiRiyalIcon size={16} />
+                  </div>
+                </div>
+                <div style={{ fontSize: '24px', fontWeight: 900, color: '#5B21B6', marginTop: '6px' }}>
+                  SAR {executiveTotals.totalDealValue.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                </div>
+                <div style={{ fontSize: '12px', color: '#7C3AED', marginTop: '2px', fontWeight: 500 }}>
+                  Closed property transaction value
+                </div>
+              </div>
+
+              {/* Card 1: Gross Commission Volume */}
               <div
                 className="card"
                 style={{
@@ -689,7 +723,7 @@ export default function MySalesClient({ profile }: Props) {
               >
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                   <span style={{ fontSize: '11px', fontWeight: 800, color: '#15803D', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-                    Total Sales Generated
+                    Total Commission Generated
                   </span>
                   <div style={{ width: '32px', height: '32px', borderRadius: '8px', backgroundColor: '#BBF7D0', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#166534' }}>
                     <TrendingUp size={16} />
@@ -699,7 +733,7 @@ export default function MySalesClient({ profile }: Props) {
                   SAR {executiveTotals.totalVolume.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                 </div>
                 <div style={{ fontSize: '12px', color: '#15803D', marginTop: '2px', fontWeight: 500 }}>
-                  Combined closed deal volume
+                  Combined brokerage deal volume
                 </div>
               </div>
 
@@ -1023,8 +1057,9 @@ export default function MySalesClient({ profile }: Props) {
                         className="form-select"
                         style={{ height: '34px', fontSize: '12px', fontWeight: 600, paddingRight: '28px' }}
                       >
-                        <option value="volume">Highest Sales Volume</option>
-                        <option value="commission">Highest Commission</option>
+                        <option value="volume">Highest Commission Volume</option>
+                        <option value="deal_value">Highest Property Sales (SAR)</option>
+                        <option value="commission">Highest Net Commission</option>
                         <option value="units">Most Units Sold</option>
                         <option value="area">Most Area Sold (m²)</option>
                         <option value="name">Member Name</option>
@@ -1243,8 +1278,15 @@ export default function MySalesClient({ profile }: Props) {
                               </td>
 
                               {/* Gross Volume */}
-                              <td style={{ padding: '10px 8px', textAlign: 'right', fontWeight: 800, color: '#0F172A', fontSize: '12.5px', whiteSpace: 'nowrap' }}>
-                                SAR {row.grossVolume.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                              <td style={{ padding: '10px 8px', textAlign: 'right', whiteSpace: 'nowrap' }}>
+                                <div style={{ fontWeight: 800, color: '#0F172A', fontSize: '12.5px' }}>
+                                  SAR {row.grossVolume.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                </div>
+                                {row.totalDealValue > 0 && (
+                                  <div style={{ fontSize: '10.5px', color: '#6D28D9', fontWeight: 700, marginTop: '1px' }}>
+                                    Deals: SAR {row.totalDealValue.toLocaleString('en-US')}
+                                  </div>
+                                )}
                               </td>
 
                               {/* Base Target Threshold X */}
@@ -1562,6 +1604,7 @@ export default function MySalesClient({ profile }: Props) {
                           <th style={{ padding: '12px 18px', textAlign: 'left' }}>Unit / Layout</th>
                           <th style={{ padding: '12px 18px', textAlign: 'left' }}>Sold By (Agent)</th>
                           <th style={{ padding: '12px 18px', textAlign: 'left' }}>Purchasing Client</th>
+                          <th style={{ padding: '12px 18px', textAlign: 'right' }}>Deal Value</th>
                           <th style={{ padding: '12px 18px', textAlign: 'center' }}>Area (m²)</th>
                           <th style={{ padding: '12px 18px', textAlign: 'right' }}>Deal Commission</th>
                           <th style={{ padding: '12px 18px', textAlign: 'left' }}>Notes</th>
@@ -1626,6 +1669,17 @@ export default function MySalesClient({ profile }: Props) {
                                   <User size={13} color="#94A3B8" />
                                   <span>{deal.buyer_name || '—'}</span>
                                 </div>
+                              </td>
+
+                              {/* Deal Value */}
+                              <td style={{ padding: '12px 18px', textAlign: 'right', whiteSpace: 'nowrap' }}>
+                                {deal.deal_value_sar && Number(deal.deal_value_sar) > 0 ? (
+                                  <span style={{ fontWeight: 700, color: '#5B21B6', fontSize: '13px' }}>
+                                    SAR {Number(deal.deal_value_sar).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+                                  </span>
+                                ) : (
+                                  <span style={{ color: '#CBD5E1' }}>—</span>
+                                )}
                               </td>
 
                               <td style={{ padding: '12px 18px', textAlign: 'center' }}>
@@ -1767,11 +1821,38 @@ export default function MySalesClient({ profile }: Props) {
             <div
               style={{
                 display: 'grid',
-                gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))',
+                gridTemplateColumns: 'repeat(auto-fit, minmax(230px, 1fr))',
                 gap: '16px',
                 marginBottom: '24px',
               }}
             >
+              {/* Card 0: My Closed Deal Volume */}
+              <div
+                className="card"
+                style={{
+                  padding: '20px 22px',
+                  background: 'linear-gradient(135deg, #F5F3FF 0%, #EDE9FE 100%)',
+                  border: '1.5px solid #DDD6FE',
+                  borderRadius: '16px',
+                  boxShadow: '0 2px 8px rgba(109, 40, 217, 0.05)',
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <span style={{ fontSize: '11px', fontWeight: 700, color: '#6D28D9', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                    My Closed Deal Volume
+                  </span>
+                  <div style={{ width: '32px', height: '32px', borderRadius: '8px', backgroundColor: '#DDD6FE', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#5B21B6' }}>
+                    <SaudiRiyalIcon size={16} />
+                  </div>
+                </div>
+                <div style={{ fontSize: '26px', fontWeight: 900, color: '#5B21B6', marginTop: '6px' }}>
+                  SAR {myMetrics.totalDealValue.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                </div>
+                <div style={{ fontSize: '12px', color: '#7C3AED', marginTop: '2px', fontWeight: 500 }}>
+                  Gross property transaction value
+                </div>
+              </div>
+
               {/* Card 1: Units Sold */}
               <div
                 className="card"
@@ -1999,6 +2080,7 @@ export default function MySalesClient({ profile }: Props) {
                         <th style={{ padding: '12px 18px', textAlign: 'left' }}>Sale Date</th>
                         <th style={{ padding: '12px 18px', textAlign: 'left' }}>Project</th>
                         <th style={{ padding: '12px 18px', textAlign: 'left' }}>Unit / Layout</th>
+                        <th style={{ padding: '12px 18px', textAlign: 'right' }}>Deal Value</th>
                         <th style={{ padding: '12px 18px', textAlign: 'center' }}>Area (m²)</th>
                         <th style={{ padding: '12px 18px', textAlign: 'left' }}>Purchasing Client</th>
                         <th style={{ padding: '12px 18px', textAlign: 'right' }}>Deal Commission</th>
@@ -2030,6 +2112,16 @@ export default function MySalesClient({ profile }: Props) {
                             </td>
                             <td style={{ padding: '12px 18px', fontWeight: 700, color: '#1E40AF' }}>
                               {deal.unit_name}
+                            </td>
+                            {/* Deal Value */}
+                            <td style={{ padding: '12px 18px', textAlign: 'right', whiteSpace: 'nowrap' }}>
+                              {deal.deal_value_sar && Number(deal.deal_value_sar) > 0 ? (
+                                <span style={{ fontWeight: 700, color: '#5B21B6', fontSize: '13px' }}>
+                                  SAR {Number(deal.deal_value_sar).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+                                </span>
+                              ) : (
+                                <span style={{ color: '#CBD5E1' }}>—</span>
+                              )}
                             </td>
                             <td style={{ padding: '12px 18px', textAlign: 'center' }}>
                               {deal.area_sqm ? (

@@ -173,6 +173,7 @@ export default function ProjectCommissionsPageClient({ profile }: Props) {
     return projects.map((project) => {
       const projectComms = commsByProject[project.id] || []
       const totalEarned = projectComms.reduce((sum, c) => sum + Number(c.commission_amount || 0), 0)
+      const totalDealValue = projectComms.reduce((sum, c) => sum + Number(c.deal_value_sar || 0), 0)
       const unitsSold = projectComms.length
       const percentOfTotal = totalPortfolioEarned > 0 ? (totalEarned / totalPortfolioEarned) * 100 : 0
       const lastSaleDate = projectComms.length > 0
@@ -183,6 +184,7 @@ export default function ProjectCommissionsPageClient({ profile }: Props) {
         project,
         commissions: projectComms,
         totalEarned,
+        totalDealValue,
         unitsSold,
         percentOfTotal,
         lastSaleDate,
@@ -193,8 +195,11 @@ export default function ProjectCommissionsPageClient({ profile }: Props) {
   // Summary Metrics
   const summaryMetrics = useMemo(() => {
     const totalEarned = filteredCommissions.reduce((sum, c) => sum + Number(c.commission_amount || 0), 0)
+    const totalDealValue = filteredCommissions.reduce((sum, c) => sum + Number(c.deal_value_sar || 0), 0)
     const totalUnitsSold = filteredCommissions.length
     const totalAreaSold = filteredCommissions.reduce((sum, c) => sum + Number(c.area_sqm || 0), 0)
+    const pricedDealsCount = filteredCommissions.filter((c) => Number(c.deal_value_sar || 0) > 0).length
+    const avgDealValue = pricedDealsCount > 0 ? totalDealValue / pricedDealsCount : 0
     const projectsWithSales = projectAggregates.filter((p) => p.unitsSold > 0)
     
     // Top revenue project
@@ -204,6 +209,9 @@ export default function ProjectCommissionsPageClient({ profile }: Props) {
 
     return {
       totalEarned,
+      totalDealValue,
+      avgDealValue,
+      pricedDealsCount,
       totalUnitsSold,
       totalAreaSold,
       projectsWithSalesCount: projectsWithSales.length,
@@ -606,12 +614,37 @@ export default function ProjectCommissionsPageClient({ profile }: Props) {
         <div
           style={{
             display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(230px, 1fr))',
             gap: '16px',
             marginBottom: '24px',
           }}
         >
-          {/* Card 1: Total Commissions */}
+          {/* Card 1: Gross Property Sales */}
+          <div
+            className="card"
+            style={{
+              padding: '18px 20px',
+              background: 'linear-gradient(135deg, #F5F3FF 0%, #EDE9FE 100%)',
+              border: '1px solid #DDD6FE',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <span style={{ fontSize: '11.5px', fontWeight: 700, color: '#6D28D9', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                Gross Property Sales
+              </span>
+              <div style={{ width: '32px', height: '32px', borderRadius: '8px', backgroundColor: '#DDD6FE', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#5B21B6' }}>
+                <SaudiRiyalIcon size={17} />
+              </div>
+            </div>
+            <div style={{ fontSize: '24px', fontWeight: 800, color: '#5B21B6', marginTop: '6px' }}>
+              SAR {summaryMetrics.totalDealValue.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+            </div>
+            <div style={{ fontSize: '12px', color: '#7C3AED', marginTop: '3px', fontWeight: 500 }}>
+              Gross transaction value ({summaryMetrics.pricedDealsCount} recorded sale{summaryMetrics.pricedDealsCount === 1 ? '' : 's'})
+            </div>
+          </div>
+
+          {/* Card 2: Total Commissions */}
           <div
             className="card"
             style={{
@@ -1211,8 +1244,13 @@ export default function ProjectCommissionsPageClient({ profile }: Props) {
                               <div style={{ fontSize: '15px', fontWeight: 800, color: item.totalEarned > 0 ? '#059669' : '#64748B' }}>
                                 SAR {item.totalEarned.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                               </div>
+                              {item.totalDealValue > 0 && (
+                                <div style={{ fontSize: '11px', color: '#6D28D9', fontWeight: 700, marginTop: '2px' }}>
+                                  Deal Vol: SAR {item.totalDealValue.toLocaleString('en-US')}
+                                </div>
+                              )}
                               {item.totalEarned > 0 && (
-                                <div style={{ fontSize: '11px', color: '#059669', fontWeight: 600, marginTop: '2px' }}>
+                                <div style={{ fontSize: '10.5px', color: '#059669', fontWeight: 600, marginTop: '1px' }}>
                                   {item.percentOfTotal.toFixed(1)}% of total
                                 </div>
                               )}
@@ -1376,12 +1414,13 @@ export default function ProjectCommissionsPageClient({ profile }: Props) {
                           letterSpacing: '0.03em',
                         }}
                       >
-                        <th style={{ padding: '14px', width: '110px' }}>Sale Date</th>
-                        <th style={{ padding: '14px', width: '22%' }}>Project Development</th>
-                        <th style={{ padding: '14px', width: '18%' }}>Unit / Layout &amp; Buyer</th>
-                        <th style={{ padding: '14px', width: '15%' }}>Agent / Broker</th>
-                        <th style={{ padding: '14px', width: '20%' }}>Transaction Notes</th>
-                        <th style={{ padding: '14px', width: '15%', textAlign: 'right' }}>Commission Earned</th>
+                        <th style={{ padding: '14px', width: '100px' }}>Sale Date</th>
+                        <th style={{ padding: '14px', width: '19%' }}>Project Development</th>
+                        <th style={{ padding: '14px', width: '17%' }}>Unit / Layout &amp; Buyer</th>
+                        <th style={{ padding: '14px', width: '13%' }}>Agent / Broker</th>
+                        <th style={{ padding: '14px', width: '13%', textAlign: 'right' }}>Deal Value</th>
+                        <th style={{ padding: '14px', width: '18%' }}>Transaction Notes</th>
+                        <th style={{ padding: '14px', width: '14%', textAlign: 'right' }}>Commission Earned</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -1472,6 +1511,17 @@ export default function ProjectCommissionsPageClient({ profile }: Props) {
                               >
                                 {c.agent_name || 'Company Deal'}
                               </span>
+                            </td>
+
+                            {/* Deal Value */}
+                            <td style={{ padding: '14px', verticalAlign: 'middle', textAlign: 'right', whiteSpace: 'nowrap' }}>
+                              {c.deal_value_sar && Number(c.deal_value_sar) > 0 ? (
+                                <div style={{ fontSize: '13.5px', fontWeight: 700, color: '#5B21B6' }}>
+                                  SAR {Number(c.deal_value_sar).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+                                </div>
+                              ) : (
+                                <span style={{ fontSize: '11px', color: '#94A3B8' }}>—</span>
+                              )}
                             </td>
 
                             {/* Notes */}

@@ -107,6 +107,10 @@ export default function ProjectCommissionsModal({ project, profile, onClose }: P
     return displayedCommissions.reduce((sum, item) => sum + Number(item.area_sqm || 0), 0)
   }, [displayedCommissions])
 
+  const totalDealValue = useMemo(() => {
+    return displayedCommissions.reduce((sum, item) => sum + Number(item.deal_value_sar || 0), 0)
+  }, [displayedCommissions])
+
   function resetForm() {
     setEditingId(null)
     setUnitName('')
@@ -486,7 +490,26 @@ export default function ProjectCommissionsModal({ project, profile, onClose }: P
               </div>
             </div>
 
-            <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+            <div
+              style={{
+                padding: '10px 14px',
+                backgroundColor: '#F5F3FF',
+                border: '1px solid #DDD6FE',
+                borderRadius: '8px',
+              }}
+            >
+              <div style={{ fontSize: '11px', fontWeight: 700, color: '#6D28D9', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                {profile.role === 'ADMIN' ? 'Total Deal Value' : 'My Deal Value'}
+              </div>
+              <div style={{ fontSize: '20px', fontWeight: 800, color: '#5B21B6', marginTop: '2px' }}>
+                SAR {totalDealValue.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              </div>
+              <div style={{ fontSize: '11px', color: '#7C3AED', marginTop: '1px' }}>
+                Across {displayedCommissions.filter(c => Number(c.deal_value_sar || 0) > 0).length} priced deal{displayedCommissions.filter(c => Number(c.deal_value_sar || 0) > 0).length === 1 ? '' : 's'}
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gridColumn: '1 / -1' }}>
               {!isFormOpen && (
                 <button
                   type="button"
@@ -923,12 +946,13 @@ export default function ProjectCommissionsModal({ project, profile, onClose }: P
               >
                 <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12.5px', tableLayout: 'fixed' }}>
                   <colgroup>
-                    <col style={{ width: '23%' }} />
-                    <col style={{ width: '18%' }} />
+                    <col style={{ width: '19%' }} />
                     <col style={{ width: '16%' }} />
-                    <col style={{ width: '11%' }} />
-                    <col style={{ width: '17%' }} />
                     <col style={{ width: '15%' }} />
+                    <col style={{ width: '15%' }} />
+                    <col style={{ width: '10%' }} />
+                    <col style={{ width: '14%' }} />
+                    <col style={{ width: '11%' }} />
                     <col style={{ width: '70px' }} />
                   </colgroup>
                   <thead>
@@ -936,6 +960,7 @@ export default function ProjectCommissionsModal({ project, profile, onClose }: P
                       <th style={{ padding: '10px 12px', textAlign: 'left' }}>Unit / Layout</th>
                       <th style={{ padding: '10px 12px', textAlign: 'left' }}>Sold By (Agent)</th>
                       <th style={{ padding: '10px 12px', textAlign: 'left' }}>Buyer Name</th>
+                      <th style={{ padding: '10px 10px', textAlign: 'right' }}>Deal Value</th>
                       <th style={{ padding: '10px 8px', textAlign: 'center' }}>Area (m²)</th>
                       <th style={{ padding: '10px 12px', textAlign: 'right' }}>Commission</th>
                       <th style={{ padding: '10px 8px', textAlign: 'center' }}>Sale Date</th>
@@ -1033,6 +1058,15 @@ export default function ProjectCommissionsModal({ project, profile, onClose }: P
                               {c.buyer_name}
                             </div>
                           </td>
+                          <td style={{ padding: '10px 10px', textAlign: 'right', whiteSpace: 'nowrap' }}>
+                            {c.deal_value_sar && Number(c.deal_value_sar) > 0 ? (
+                              <span style={{ fontWeight: 700, color: '#5B21B6', fontSize: '12.5px' }}>
+                                SAR {Number(c.deal_value_sar).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+                              </span>
+                            ) : (
+                              <span style={{ fontSize: '11px', color: '#94A3B8' }}>—</span>
+                            )}
+                          </td>
                           <td style={{ padding: '10px 8px', textAlign: 'center', whiteSpace: 'nowrap' }}>
                             {c.area_sqm && Number(c.area_sqm) > 0 ? (
                               <span style={{ fontSize: '11.5px', fontWeight: 700, color: '#92400E', backgroundColor: '#FEF3C7', padding: '2px 6px', borderRadius: '6px', border: '1px solid #FDE68A' }}>
@@ -1077,9 +1111,13 @@ export default function ProjectCommissionsModal({ project, profile, onClose }: P
                   </tbody>
                   <tfoot>
                     <tr style={{ backgroundColor: '#F0FDF4', borderTop: '2px solid #A7F3D0', fontWeight: 800 }}>
-                      <td colSpan={4} style={{ padding: '12px 14px', color: '#065F46', fontSize: '13px' }}>
-                        {profile.role === 'ADMIN' ? 'TOTAL COMMISSION' : 'MY TOTAL COMMISSION'} ({displayedCommissions.length} Units Sold {totalAreaSqm > 0 ? `· ${totalAreaSqm.toLocaleString()} m²` : ''})
+                      <td colSpan={3} style={{ padding: '12px 14px', color: '#065F46', fontSize: '13px' }}>
+                        {profile.role === 'ADMIN' ? 'TOTALS' : 'MY TOTALS'} ({displayedCommissions.length} Units Sold {totalAreaSqm > 0 ? `· ${totalAreaSqm.toLocaleString()} m²` : ''})
                       </td>
+                      <td style={{ padding: '12px 10px', textAlign: 'right', color: '#5B21B6', fontSize: '13px', whiteSpace: 'nowrap' }}>
+                        {totalDealValue > 0 ? `SAR ${totalDealValue.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}` : '—'}
+                      </td>
+                      <td style={{ padding: '12px 8px', textAlign: 'center' }}></td>
                       <td style={{ padding: '12px 12px', textAlign: 'right', color: '#047857', fontSize: '13.5px', whiteSpace: 'nowrap' }}>
                         SAR {totalCommission.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                       </td>
@@ -1141,8 +1179,8 @@ export default function ProjectCommissionsModal({ project, profile, onClose }: P
                         </div>
                       </div>
 
-                      {/* Middle metadata: Agent, Buyer, Date */}
-                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', fontSize: '12px', padding: '8px 0', borderTop: '1px dashed #F1F5F9', borderBottom: '1px dashed #F1F5F9' }}>
+                      {/* Middle metadata: Agent, Buyer, Deal Value */}
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(100px, 1fr))', gap: '8px', fontSize: '12px', padding: '8px 0', borderTop: '1px dashed #F1F5F9', borderBottom: '1px dashed #F1F5F9' }}>
                         <div>
                           <span style={{ fontSize: '10.5px', color: '#94A3B8', textTransform: 'uppercase', fontWeight: 700 }}>Agent</span>
                           <div style={{ fontWeight: 600, color: '#1E293B', marginTop: '1px' }}>{agentDisplay}</div>
@@ -1151,6 +1189,14 @@ export default function ProjectCommissionsModal({ project, profile, onClose }: P
                           <span style={{ fontSize: '10.5px', color: '#94A3B8', textTransform: 'uppercase', fontWeight: 700 }}>Buyer</span>
                           <div style={{ fontWeight: 600, color: '#334155', marginTop: '1px' }}>{c.buyer_name}</div>
                         </div>
+                        {c.deal_value_sar && Number(c.deal_value_sar) > 0 && (
+                          <div>
+                            <span style={{ fontSize: '10.5px', color: '#6D28D9', textTransform: 'uppercase', fontWeight: 700 }}>Deal Value</span>
+                            <div style={{ fontWeight: 700, color: '#5B21B6', marginTop: '1px' }}>
+                              SAR {Number(c.deal_value_sar).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+                            </div>
+                          </div>
+                        )}
                       </div>
 
                       {/* Bottom: Date + Commission */}
@@ -1180,10 +1226,11 @@ export default function ProjectCommissionsModal({ project, profile, onClose }: P
                 >
                   <div>
                     <div style={{ fontSize: '11px', fontWeight: 800, color: '#047857', textTransform: 'uppercase' }}>
-                      {profile.role === 'ADMIN' ? 'Total Commission' : 'My Total Commission'}
+                      {profile.role === 'ADMIN' ? 'Total Summary' : 'My Summary'}
                     </div>
                     <div style={{ fontSize: '11px', color: '#059669', marginTop: '2px' }}>
                       {displayedCommissions.length} Sold {totalAreaSqm > 0 ? `· ${totalAreaSqm.toLocaleString()} m²` : ''}
+                      {totalDealValue > 0 ? ` · Deals: SAR ${totalDealValue.toLocaleString('en-US')}` : ''}
                     </div>
                   </div>
                   <div style={{ fontSize: '16px', fontWeight: 900, color: '#065F46' }}>
