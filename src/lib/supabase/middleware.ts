@@ -57,7 +57,8 @@ export async function updateSession(request: NextRequest) {
   const isApiWebhook =
     pathname.startsWith('/api/leads/webhook') ||
     pathname.startsWith('/api/attendance') ||
-    pathname.startsWith('/api/mortgage-leads')
+    pathname.startsWith('/api/mortgage-leads') ||
+    pathname.startsWith('/api/cron')
 
   if (!user && !isAuthRoute && !isApiWebhook) {
     if (pathname.startsWith('/api/')) {
