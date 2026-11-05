@@ -41,6 +41,8 @@ next-env.d.ts
 /dashboard/
 Reference/
 /Reference/
+backups/
+scripts/
 
 # documentation / local notes & private sql
 FRONTEND_INTEGRATION_GUIDE.md

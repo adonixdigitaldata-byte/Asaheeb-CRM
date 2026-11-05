@@ -36,6 +36,7 @@ import {
 import { createClient } from '@/lib/supabase/client'
 import { SaudiRiyalIcon } from '@/components/SaudiRiyalIcon'
 import type { ConsultationBooking, ConsultationSettings, Profile } from '@/types/database'
+import { getCurrentWeekCycle, isBookingInCycle } from '@/lib/consultations'
 
 interface Props {
   profile: Profile
@@ -106,7 +107,44 @@ export default function ConsultationsCRMView({ profile }: Props) {
         .limit(1)
         .maybeSingle()
 
+      const { data: bookingsData } = await supabase
+        .from('consultation_bookings')
+        .select('*')
+        .order('created_at', { ascending: false })
+
+      const typedBookings = (bookingsData as ConsultationBooking[]) || []
+      if (bookingsData) {
+        setBookings(typedBookings)
+      }
+
+      const activeCycle = getCurrentWeekCycle()
+      const computedSlots = typedBookings.filter(
+        (b) =>
+          b.payment_status === 'SUCCESS' &&
+          b.status !== 'CANCELLED_REFUNDED' &&
+          b.status !== 'PAYMENT_PENDING' &&
+          isBookingInCycle(b, activeCycle)
+      ).length
+
       if (settingsData) {
+        // Auto-synchronize week cycle and slots booked if week rolled over or count differs
+        if (
+          settingsData.current_week_cycle !== activeCycle.cycleString ||
+          settingsData.slots_booked_this_week !== computedSlots
+        ) {
+          await supabase
+            .from('consultation_settings')
+            .update({
+              current_week_cycle: activeCycle.cycleString,
+              slots_booked_this_week: computedSlots,
+              updated_at: new Date().toISOString(),
+            })
+            .eq('id', settingsData.id)
+
+          settingsData.current_week_cycle = activeCycle.cycleString
+          settingsData.slots_booked_this_week = computedSlots
+        }
+
         setSettings(settingsData)
         setEditFee(settingsData.fee_amount)
         setEditCapacity(settingsData.weekly_slot_capacity)
@@ -114,15 +152,6 @@ export default function ConsultationsCRMView({ profile }: Props) {
         setEditIsActive(settingsData.is_active)
         setEditBannerEn(settingsData.custom_urgency_banner_en || '')
         setEditBannerAr(settingsData.custom_urgency_banner_ar || '')
-      }
-
-      const { data: bookingsData } = await supabase
-        .from('consultation_bookings')
-        .select('*')
-        .order('created_at', { ascending: false })
-
-      if (bookingsData) {
-        setBookings(bookingsData as ConsultationBooking[])
       }
     } catch (err) {
       console.error('Failed to fetch CRM consultation data:', err)
@@ -556,7 +585,8 @@ export default function ConsultationsCRMView({ profile }: Props) {
         const ref = `ASB-${Date.now().toString().slice(-6)}`
         const voucher = `VOUCH-500-${Math.random().toString(36).substring(2, 6).toUpperCase()}`
         const fee = settings?.fee_amount || 500
-        const weekCycle = settings?.current_week_cycle || 'Sat Oct 24 – Thu Oct 29, 2026'
+        const activeCycle = getCurrentWeekCycle()
+        const weekCycle = settings?.current_week_cycle || activeCycle.cycleString
 
         const { error } = await supabase.from('consultation_bookings').insert({
           booking_reference: ref,
@@ -610,9 +640,11 @@ export default function ConsultationsCRMView({ profile }: Props) {
       [confirmedPaidBookings]
     )
 
+    const currentWeekCycle = useMemo(() => getCurrentWeekCycle(), [])
+
     const slotsBookedThisWeek = useMemo(() => {
-      return confirmedPaidBookings.length
-    }, [confirmedPaidBookings])
+      return confirmedPaidBookings.filter((b) => isBookingInCycle(b, currentWeekCycle)).length
+    }, [confirmedPaidBookings, currentWeekCycle])
 
     return (
       <div style={{ display: 'flex', flexDirection: 'column', minHeight: '100%', background: 'var(--bg)' }}>
