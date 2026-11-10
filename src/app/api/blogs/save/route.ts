@@ -89,6 +89,25 @@ export async function POST(request: NextRequest) {
 
     const isNew = !existingBlog
 
+    let finalSortOrder = typeof sort_order === 'number' && sort_order > 0 ? sort_order : 0
+    if (isNew && finalSortOrder === 0) {
+      finalSortOrder = 1
+      // Shift other blogs by +1 so new articles automatically appear first unless a manual slot was chosen
+      const { data: existingBlogs } = await serviceClient
+        .from('blogs')
+        .select('id, sort_order')
+        .order('sort_order', { ascending: true })
+
+      if (existingBlogs && existingBlogs.length > 0) {
+        for (const item of existingBlogs) {
+          await serviceClient
+            .from('blogs')
+            .update({ sort_order: (item.sort_order || 0) + 1 })
+            .eq('id', item.id)
+        }
+      }
+    }
+
     const payload = {
       id: slug,
       category: category?.trim() || 'guide',
@@ -128,7 +147,7 @@ export async function POST(request: NextRequest) {
       seo_reviewed_at: seo_review_status === 'OPTIMIZED' ? (seo_reviewed_at || new Date().toISOString()) : (seo_reviewed_at || null),
       featured: typeof featured === 'boolean' ? featured : false,
       is_published: typeof is_published === 'boolean' ? is_published : true,
-      sort_order: typeof sort_order === 'number' ? sort_order : 0,
+      sort_order: finalSortOrder,
       updated_at: new Date().toISOString(),
     }
 

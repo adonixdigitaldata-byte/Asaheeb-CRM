@@ -51,6 +51,7 @@ export default function BlogsClient({ profile }: Props) {
   const [categoryFilter, setCategoryFilter] = useState('ALL')
   const [statusFilter, setStatusFilter] = useState('ALL')
   const [seoFilter, setSeoFilter] = useState('ALL')
+  const [sortBy, setSortBy] = useState<'LATEST' | 'MANUAL' | 'OLDEST' | 'TITLE'>('LATEST')
 
   // Modal States
   const [editingBlog, setEditingBlog] = useState<Blog | null>(null)
@@ -66,6 +67,7 @@ export default function BlogsClient({ profile }: Props) {
       .from('blogs')
       .select('*')
       .order('sort_order', { ascending: true })
+      .order('created_at', { ascending: false })
 
     if (!error && data) {
       setBlogs(data as Blog[])
@@ -188,7 +190,7 @@ export default function BlogsClient({ profile }: Props) {
   const categories = useMemo(() => Array.from(new Set(blogs.map((b) => b.category).filter(Boolean))), [blogs])
 
   const filteredBlogs = useMemo(() => {
-    return blogs.filter((b) => {
+    const list = blogs.filter((b) => {
       if (search.trim()) {
         const q = search.toLowerCase()
         const matchTitle = b.title_en?.toLowerCase().includes(q) || b.title_ar?.toLowerCase().includes(q)
@@ -207,7 +209,33 @@ export default function BlogsClient({ profile }: Props) {
 
       return true
     })
-  }, [blogs, search, categoryFilter, statusFilter, seoFilter])
+
+    return [...list].sort((a, b) => {
+      if (sortBy === 'LATEST') {
+        // Pin featured to top if present
+        if (a.featured && !b.featured) return -1
+        if (!a.featured && b.featured) return 1
+
+        // If sort_orders are equal or default 0, newest created_at floats to top
+        const timeA = new Date(a.created_at || 0).getTime()
+        const timeB = new Date(b.created_at || 0).getTime()
+        if (timeB !== timeA) return timeB - timeA
+        return (a.sort_order || 0) - (b.sort_order || 0)
+      }
+      if (sortBy === 'MANUAL') {
+        return (a.sort_order || 0) - (b.sort_order || 0)
+      }
+      if (sortBy === 'OLDEST') {
+        const timeA = new Date(a.created_at || 0).getTime()
+        const timeB = new Date(b.created_at || 0).getTime()
+        return timeA - timeB
+      }
+      if (sortBy === 'TITLE') {
+        return (a.title_en || '').localeCompare(b.title_en || '')
+      }
+      return 0
+    })
+  }, [blogs, search, categoryFilter, statusFilter, seoFilter, sortBy])
 
   const totalPages = Math.ceil(filteredBlogs.length / pageSize) || 1
   const effectivePage = Math.min(currentPage, totalPages)
@@ -216,13 +244,14 @@ export default function BlogsClient({ profile }: Props) {
   const publishedCount = blogs.filter((b) => b.is_published).length
   const featuredCount = blogs.filter((b) => b.featured).length
   const optimizedCount = blogs.filter((b) => b.seo_review_status === 'OPTIMIZED').length
-  const hasActiveFilters = search.trim() !== '' || categoryFilter !== 'ALL' || statusFilter !== 'ALL' || seoFilter !== 'ALL'
+  const hasActiveFilters = search.trim() !== '' || categoryFilter !== 'ALL' || statusFilter !== 'ALL' || seoFilter !== 'ALL' || sortBy !== 'LATEST'
 
   function resetFilters() {
     setSearch('')
     setCategoryFilter('ALL')
     setStatusFilter('ALL')
     setSeoFilter('ALL')
+    setSortBy('LATEST')
     setCurrentPage(1)
   }
 
@@ -529,6 +558,22 @@ export default function BlogsClient({ profile }: Props) {
               <option value="IN_PROGRESS">In Progress (قيد العمل)</option>
               <option value="NEEDS_REVIEW">Needs Review (يحتاج مراجعة)</option>
               <option value="NEEDS_UPDATE">Needs Update (بحاجة لتحديث)</option>
+            </select>
+          </div>
+
+          {/* Sort By Filter */}
+          <div>
+            <select
+              value={sortBy}
+              onChange={(e) => setSortBy(e.target.value as any)}
+              className="form-select"
+              style={{ fontSize: '12px', height: '36px', width: '100%', fontWeight: 600, color: '#1E293B' }}
+              title="Change article display order"
+            >
+              <option value="LATEST">Sort: Latest Added First (Default)</option>
+              <option value="MANUAL">Sort: Priority Slots (1, 2, 3...)</option>
+              <option value="OLDEST">Sort: Oldest First</option>
+              <option value="TITLE">Sort: Title (A → Z)</option>
             </select>
           </div>
 
