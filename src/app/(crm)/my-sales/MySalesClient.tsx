@@ -58,7 +58,7 @@ export default function MySalesClient({ profile }: Props) {
 
   // Filters & State
   const [search, setSearch] = useState('')
-  const [timeFilter, setTimeFilter] = useState<'ALL' | 'MONTH' | 'WEEK' | 'CUSTOM'>('ALL')
+  const [timeFilter, setTimeFilter] = useState<'ALL' | 'MONTH' | 'WEEK' | 'CUSTOM'>('MONTH')
   const [customStartDate, setCustomStartDate] = useState<string>('')
   const [customEndDate, setCustomEndDate] = useState<string>('')
   const [roleFilter, setRoleFilter] = useState<RoleFilter>('ALL')
@@ -544,8 +544,8 @@ export default function MySalesClient({ profile }: Props) {
                 <div style={{ display: 'inline-flex', backgroundColor: '#F1F5F9', padding: '4px', borderRadius: '10px', border: '1px solid #E2E8F0', gap: '4px' }}>
                   {(
                     [
-                      { id: 'ALL', label: 'All Time' },
                       { id: 'MONTH', label: 'This Month' },
+                      { id: 'ALL', label: 'All Time' },
                       { id: 'WEEK', label: 'This Week' },
                       { id: 'CUSTOM', label: 'Custom' },
                     ] as const
