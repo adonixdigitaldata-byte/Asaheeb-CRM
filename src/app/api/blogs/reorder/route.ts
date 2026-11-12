@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient, createServiceClient } from '@/lib/supabase/server'
+import { triggerWebsiteBlogRevalidation } from '@/lib/website-sync'
 
 export async function POST(request: NextRequest) {
   try {
@@ -29,6 +30,8 @@ export async function POST(request: NextRequest) {
         .update({ sort_order: item.sort_order, updated_at: new Date().toISOString() })
         .eq('id', item.id)
     }
+
+    void triggerWebsiteBlogRevalidation()
 
     return NextResponse.json({ success: true })
   } catch (err: any) {

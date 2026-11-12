@@ -23,6 +23,7 @@ import {
   ExternalLink,
   Globe,
   ShieldCheck,
+  AlertCircle,
 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import type { Blog, Profile } from '@/types/database'
@@ -60,6 +61,31 @@ export default function BlogsClient({ profile }: Props) {
   const [blogToDelete, setBlogToDelete] = useState<Blog | null>(null)
   const [deleting, setDeleting] = useState(false)
   const [reorderModalOpen, setReorderModalOpen] = useState(false)
+
+  // Cache Revalidation State
+  const [syncingCache, setSyncingCache] = useState(false)
+  const [syncToast, setSyncToast] = useState<{ type: 'success' | 'error'; message: string } | null>(null)
+
+  const handleSyncWebsiteCache = async () => {
+    try {
+      setSyncingCache(true)
+      const res = await fetch('/api/blogs/revalidate', { method: 'POST' })
+      const data = await res.json()
+
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || 'Sync failed')
+      }
+
+      setSyncToast({ type: 'success', message: 'Website blog cache has been updated!' })
+      setTimeout(() => setSyncToast(null), 4000)
+    } catch (err: any) {
+      console.error(err)
+      setSyncToast({ type: 'error', message: err?.message || 'Failed to sync website cache. Please try again.' })
+      setTimeout(() => setSyncToast(null), 4500)
+    } finally {
+      setSyncingCache(false)
+    }
+  }
 
   const fetchBlogs = useCallback(async () => {
     setLoading(true)
@@ -311,6 +337,28 @@ export default function BlogsClient({ profile }: Props) {
             <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
           </button>
 
+          <button
+            type="button"
+            onClick={handleSyncWebsiteCache}
+            disabled={syncingCache}
+            className="btn btn-outline btn-sm"
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '6px',
+              fontWeight: 600,
+              color: syncingCache ? '#94A3B8' : '#D97706',
+              borderColor: syncingCache ? '#E2E8F0' : '#FDE68A',
+              backgroundColor: syncingCache ? '#F8FAFC' : '#FFFBEB',
+              cursor: syncingCache ? 'not-allowed' : 'pointer',
+              transition: 'all 0.15s ease',
+            }}
+            title="Purge and update the live website blog cache (/blog)"
+          >
+            <RefreshCw size={13} className={syncingCache ? 'animate-spin' : ''} style={{ color: syncingCache ? '#94A3B8' : '#D97706' }} />
+            <span>{syncingCache ? 'Syncing...' : 'Sync Website Cache'}</span>
+          </button>
+
           {isAdmin && (
             <button
               type="button"
@@ -346,6 +394,34 @@ export default function BlogsClient({ profile }: Props) {
       </div>
 
       <div className="page-body" style={{ paddingBottom: '30px' }}>
+        {/* Sync Cache Feedback Toast */}
+        {syncToast && (
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '10px',
+              padding: '10px 16px',
+              borderRadius: '10px',
+              marginBottom: '16px',
+              fontSize: '13px',
+              fontWeight: 600,
+              backgroundColor: syncToast.type === 'success' ? '#F0FDF4' : '#FEF2F2',
+              color: syncToast.type === 'success' ? '#15803D' : '#B91C1C',
+              border: `1px solid ${syncToast.type === 'success' ? '#BBF7D0' : '#FECACA'}`,
+              boxShadow: '0 2px 8px rgba(0,0,0,0.04)',
+              transition: 'all 0.2s ease',
+            }}
+          >
+            {syncToast.type === 'success' ? (
+              <CheckCircle size={16} style={{ color: '#16A34A', flexShrink: 0 }} />
+            ) : (
+              <AlertCircle size={16} style={{ color: '#DC2626', flexShrink: 0 }} />
+            )}
+            <span>{syncToast.message}</span>
+          </div>
+        )}
+
         {/* Quick Filter Pills */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap', marginBottom: '12px' }}>
           <button

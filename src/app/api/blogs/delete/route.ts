@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient, createServiceClient } from '@/lib/supabase/server'
 import { logCmsActivity } from '@/lib/cms-activity'
+import { triggerWebsiteBlogRevalidation } from '@/lib/website-sync'
 
 export async function POST(request: NextRequest) {
   try {
@@ -51,6 +52,8 @@ export async function POST(request: NextRequest) {
       actorEmail,
       description: `Deleted article "${blog?.title_en || id}" from system`,
     })
+
+    void triggerWebsiteBlogRevalidation()
 
     return NextResponse.json({ success: true })
   } catch (err: any) {

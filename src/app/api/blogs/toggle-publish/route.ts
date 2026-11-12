@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient, createServiceClient } from '@/lib/supabase/server'
 import { logCmsActivity } from '@/lib/cms-activity'
+import { triggerWebsiteBlogRevalidation } from '@/lib/website-sync'
 
 export async function POST(request: NextRequest) {
   try {
@@ -73,6 +74,7 @@ export async function POST(request: NextRequest) {
           description: `Set article "${blog?.title_en || id}" as primary featured insight`,
         })
 
+        void triggerWebsiteBlogRevalidation()
         return NextResponse.json({ success: true, featured: true, sort_order: 1 })
       } else {
         // Unfeaturing
@@ -81,6 +83,7 @@ export async function POST(request: NextRequest) {
           .update({ featured: false, updated_at: new Date().toISOString() })
           .eq('id', id)
 
+        void triggerWebsiteBlogRevalidation()
         return NextResponse.json({ success: true, featured: false })
       }
     }
@@ -111,6 +114,7 @@ export async function POST(request: NextRequest) {
       })
     }
 
+    void triggerWebsiteBlogRevalidation()
     return NextResponse.json({ success: true, ...updatePayload })
   } catch (err: any) {
     return NextResponse.json({ error: err.message || 'Error updating article status' }, { status: 500 })

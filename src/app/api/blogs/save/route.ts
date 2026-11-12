@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient, createServiceClient } from '@/lib/supabase/server'
 import { logCmsActivity } from '@/lib/cms-activity'
+import { triggerWebsiteBlogRevalidation } from '@/lib/website-sync'
 
 export async function POST(request: NextRequest) {
   try {
@@ -250,6 +251,9 @@ export async function POST(request: NextRequest) {
         },
       })
     }
+
+    // Automatically purge and sync public website ISR cache for /blog
+    void triggerWebsiteBlogRevalidation()
 
     return NextResponse.json({ success: true, blog })
   } catch (err: any) {
