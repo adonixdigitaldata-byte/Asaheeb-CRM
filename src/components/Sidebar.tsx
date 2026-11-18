@@ -56,7 +56,7 @@ export default function Sidebar({
         { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
         { href: '/leads', label: 'My Leads', icon: Users },
         { href: '/my-sales', label: 'My Sales', icon: Award },
-        { href: '/partner-contract', label: 'Partnership Agreement', icon: FileCheck },
+        // { href: '/partner-contract', label: 'Partnership Agreement', icon: FileCheck },
       ],
     },
   ]
