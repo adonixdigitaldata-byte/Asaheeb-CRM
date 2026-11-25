@@ -982,6 +982,7 @@ export default function TeamMemberDetailClient({
           <EmployeeDocumentsTab
             member={member}
             isAdmin={isAdmin}
+            isSelfView={currentProfile.id === member.id}
             initialDocuments={initialDocuments}
             initialCustomRecords={initialCustomRecords}
           />

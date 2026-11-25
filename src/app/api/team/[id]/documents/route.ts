@@ -278,7 +278,7 @@ export async function DELETE(
   }
 }
 
-// PUT: Update document metadata (title, category, doc number, dates, notes)
+// PUT: Update document metadata (title, category, doc number, dates, notes) - Admins only
 export async function PUT(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -298,8 +298,8 @@ export async function PUT(
       .single()
 
     const isAdminOrManager = currentProfile?.role === 'ADMIN' || currentProfile?.role === 'SALES_MANAGER'
-    if (!isAdminOrManager && user.id !== id) {
-      return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    if (!isAdminOrManager) {
+      return NextResponse.json({ error: 'Only admins can edit document details. Please request admin deletion if you need to re-upload.' }, { status: 403 })
     }
 
     const body = await request.json()
@@ -334,6 +334,91 @@ export async function PUT(
     return NextResponse.json({ document: updatedDoc })
   } catch (err: any) {
     console.error('Error in PUT /api/team/[id]/documents:', err)
+    return NextResponse.json({ error: err.message || 'Server error' }, { status: 500 })
+  }
+}
+
+// PATCH: Request re-upload (employee asks admin to delete/replace) or cancel request
+export async function PATCH(
+  request: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  try {
+    const { id } = await params
+    const supabase = await createClient()
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    }
+
+    const { data: currentProfile } = await supabase
+      .from('profiles')
+      .select('id, role, name')
+      .eq('id', user.id)
+      .single()
+
+    const isAdminOrManager = currentProfile?.role === 'ADMIN' || currentProfile?.role === 'SALES_MANAGER'
+    // User can request re-upload if it is their own profile or if admin
+    if (!isAdminOrManager && user.id !== id) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    }
+
+    const body = await request.json()
+    const { docId, action, reason } = body
+
+    if (!docId) {
+      return NextResponse.json({ error: 'Missing docId' }, { status: 400 })
+    }
+
+    const serviceSupabase = await createServiceClient()
+
+    const { data: existingDoc, error: fetchErr } = await serviceSupabase
+      .from('employee_documents')
+      .select('id, metadata')
+      .eq('id', docId)
+      .eq('profile_id', id)
+      .single()
+
+    if (fetchErr || !existingDoc) {
+      return NextResponse.json({ error: 'Document not found' }, { status: 404 })
+    }
+
+    const currentMeta = (existingDoc.metadata && typeof existingDoc.metadata === 'object') ? existingDoc.metadata : {}
+    let updatedMeta = { ...currentMeta }
+
+    if (action === 'request_reupload') {
+      updatedMeta = {
+        ...updatedMeta,
+        reupload_requested: true,
+        reupload_reason: reason || 'Employee requested re-upload / correction.',
+        reupload_requested_at: new Date().toISOString(),
+        reupload_requested_by: user.id,
+      }
+    } else if (action === 'cancel_request') {
+      delete updatedMeta.reupload_requested
+      delete updatedMeta.reupload_reason
+      delete updatedMeta.reupload_requested_at
+      delete updatedMeta.reupload_requested_by
+    }
+
+    const { data: updatedDoc, error: updateErr } = await serviceSupabase
+      .from('employee_documents')
+      .update({
+        metadata: updatedMeta,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', docId)
+      .eq('profile_id', id)
+      .select('*, uploader:profiles!employee_documents_uploaded_by_fkey(id, name, email)')
+      .single()
+
+    if (updateErr) {
+      return NextResponse.json({ error: updateErr.message }, { status: 500 })
+    }
+
+    return NextResponse.json({ document: updatedDoc })
+  } catch (err: any) {
+    console.error('Error in PATCH /api/team/[id]/documents:', err)
     return NextResponse.json({ error: err.message || 'Server error' }, { status: 500 })
   }
 }

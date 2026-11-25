@@ -86,9 +86,31 @@ export interface ProjectCommission {
   notes?: string | null
   agent_id?: string | null
   agent_name?: string | null
+  expected_payout_date?: string | null
+  developer_received_amount?: number
+  developer_payment_status?: 'PENDING' | 'PARTIAL' | 'RECEIVED'
+  agent_commission_amount?: number
+  agent_paid_amount?: number
+  agent_payout_status?: 'UNPAID' | 'PARTIAL' | 'PAID'
+  claim_sent_at?: string | null
   created_by?: string | null
   created_at: string
   updated_at: string
+}
+
+export interface CommissionPayment {
+  id: string
+  commission_id?: string | null
+  direction: 'INFLOW' | 'OUTFLOW'
+  recipient_id?: string | null
+  payout_month?: string | null
+  amount: number
+  payment_date: string
+  payment_method: 'BANK_TRANSFER' | 'CHEQUE' | 'CASH' | 'PAYROLL' | 'OTHER'
+  reference_no?: string | null
+  notes?: string | null
+  recorded_by?: string | null
+  created_at: string
 }
 
 export interface AdCampaign {

@@ -28,12 +28,20 @@ import {
   WalletCards,
   Lock,
   KeyRound,
+  FileText,
+  Banknote,
+  Download,
+  AlertTriangle,
 } from 'lucide-react'
 import { SaudiRiyalIcon } from '@/components/SaudiRiyalIcon'
 import { createClient } from '@/lib/supabase/client'
-import type { Profile, Project, ProjectCommission } from '@/types/database'
+import type { Profile, Project, ProjectCommission, CommissionPayment } from '@/types/database'
 import Pagination from '@/components/Pagination'
 import SecurityPinGuard from '@/components/SecurityPinGuard'
+import CommissionCashFlowModal from '@/components/sales/CommissionCashFlowModal'
+import DeveloperReceiptModal from '@/components/sales/DeveloperReceiptModal'
+import ProjectBatchReceiptModal from '@/components/sales/ProjectBatchReceiptModal'
+import AgentMonthlyPayoutModal from '@/components/sales/AgentMonthlyPayoutModal'
 
 interface Props {
   profile: Profile
@@ -85,6 +93,29 @@ export default function MySalesClient({ profile }: Props) {
   const [targetInputY, setTargetInputY] = useState<string>('')
   const [savingTarget, setSavingTarget] = useState(false)
   const [targetSuccessToast, setTargetSuccessToast] = useState<string>('')
+
+  // Cash Flow & Developer Receipt State
+  const [cashFlowFilter, setCashFlowFilter] = useState<'ALL' | 'AWAITING_DEV' | 'OVERDUE_DEV' | 'READY_DISBURSE' | 'SETTLED'>('ALL')
+  const [cashFlowDeal, setCashFlowDeal] = useState<ProjectCommission | null>(null)
+  const [receiptModalData, setReceiptModalData] = useState<{ commission: ProjectCommission; payments: CommissionPayment[] } | null>(null)
+  const [isBatchModalOpen, setIsBatchModalOpen] = useState(false)
+  const [outflowPayments, setOutflowPayments] = useState<CommissionPayment[]>([])
+  const [payoutModalData, setPayoutModalData] = useState<{
+    member: Profile
+    netCommission: number
+    grossVolume: number
+    collectedFromDev: number
+  } | null>(null)
+
+  const handleCommissionUpdated = useCallback((updated: ProjectCommission) => {
+    setCommissions((prev) => prev.map((c) => (c.id === updated.id ? { ...c, ...updated } : c)))
+    setCashFlowDeal((prev) => (prev && prev.id === updated.id ? { ...prev, ...updated } : prev))
+    setReceiptModalData((prev) =>
+      prev && prev.commission.id === updated.id
+        ? { ...prev, commission: { ...prev.commission, ...updated } }
+        : prev
+    )
+  }, [])
 
   const openSetTargetModal = (member: Profile) => {
     setTargetModalMember(member)
@@ -145,8 +176,8 @@ export default function MySalesClient({ profile }: Props) {
   }, [supabase, isAdmin])
 
   // Fetch projects & commissions
-  const fetchSalesData = useCallback(async () => {
-    setLoading(true)
+  const fetchSalesData = useCallback(async (silent = false) => {
+    if (!silent) setLoading(true)
     try {
       // 1. Load projects
       const { data: projData } = await supabase
@@ -161,15 +192,24 @@ export default function MySalesClient({ profile }: Props) {
         ? '/api/projects/commissions'
         : `/api/projects/commissions?agentId=${encodeURIComponent(profile.id)}`
 
-      const commsRes = await fetch(endpoint)
+      const commsRes = await fetch(endpoint, { cache: 'no-store' })
       const commsData = await commsRes.json()
       if (commsData.commissions) {
         setCommissions(commsData.commissions as ProjectCommission[])
       }
+
+      // 3. Load outflow disbursement ledger (monthly + deal-level)
+      try {
+        const outRes = await fetch('/api/projects/commissions/payments?allOutflows=true', { cache: 'no-store' })
+        const outData = await outRes.json()
+        if (outRes.ok && outData.payments) {
+          setOutflowPayments(outData.payments as CommissionPayment[])
+        }
+      } catch {}
     } catch (err) {
       console.error('Error fetching sales:', err)
     } finally {
-      setLoading(false)
+      if (!silent) setLoading(false)
     }
   }, [supabase, profile.id, isAdmin])
 
@@ -247,6 +287,17 @@ export default function MySalesClient({ profile }: Props) {
       }
 
       const progressPct = thresholdX > 0 ? Math.min(100, (grossVolume / thresholdX) * 100) : 100
+      const collectedFromDev = memberDeals.reduce((sum, c) => sum + Number(c.developer_received_amount || 0), 0)
+      const currentMonthPrefix = new Date().toISOString().slice(0, 7)
+      const disbursedAmount = outflowPayments
+        .filter((p) => {
+          if (p.recipient_id !== member.id) return false
+          if (timeFilter === 'MONTH') {
+            return (p.payout_month || p.payment_date.slice(0, 7)) === currentMonthPrefix
+          }
+          return true
+        })
+        .reduce((sum, p) => sum + Number(p.amount || 0), 0)
 
       return {
         member,
@@ -259,6 +310,8 @@ export default function MySalesClient({ profile }: Props) {
         netCommission,
         excessVolume,
         progressPct,
+        collectedFromDev,
+        disbursedAmount,
       }
     })
 
@@ -313,11 +366,62 @@ export default function MySalesClient({ profile }: Props) {
     }
   }, [timeFilteredCommissions, leaderboardData])
 
+  // Cash Flow Summary Totals (based on time-filtered deals + monthly disbursements)
+  const cashFlowTotals = useMemo(() => {
+    let totalExpectedDev = 0
+    let totalReceivedDev = 0
+    let totalExpectedAgent = 0
+    let totalPaidDealAgent = 0
+
+    timeFilteredCommissions.forEach((c) => {
+      totalExpectedDev += Number(c.commission_amount || 0)
+      totalReceivedDev += Number(c.developer_received_amount || 0)
+      totalExpectedAgent += Number(c.agent_commission_amount || 0)
+      totalPaidDealAgent += Number(c.agent_paid_amount || 0)
+    })
+
+    // Add monthly target-adjusted disbursements (where commission_id is null)
+    const currentMonthPrefix = new Date().toISOString().slice(0, 7)
+    const monthlyOutflowTotal = outflowPayments
+      .filter((p) => {
+        if (p.commission_id) return false
+        if (timeFilter === 'MONTH') return (p.payout_month || p.payment_date.slice(0, 7)) === currentMonthPrefix
+        return true
+      })
+      .reduce((sum, p) => sum + Number(p.amount || 0), 0)
+
+    const totalPaidAgent = totalPaidDealAgent + monthlyOutflowTotal
+    // Total earned across leaderboard (after X & Y%) gives accurate payable when target rules apply
+    const totalLeaderboardEarned = leaderboardData.reduce((sum, r) => sum + r.netCommission, 0)
+    const effectiveAgentObligation = Math.max(totalExpectedAgent, totalLeaderboardEarned)
+
+    return {
+      totalExpectedDev,
+      totalReceivedDev,
+      totalPendingDev: Math.max(0, totalExpectedDev - totalReceivedDev),
+      totalExpectedAgent: effectiveAgentObligation,
+      totalPaidAgent,
+      totalPendingAgent: Math.max(0, effectiveAgentObligation - totalPaidAgent),
+      netRetained: totalReceivedDev - totalPaidAgent,
+    }
+  }, [timeFilteredCommissions, outflowPayments, timeFilter, leaderboardData])
+
   // All Transactions Filtered (For Transactions Tab)
   const filteredTransactions = useMemo(() => {
     return timeFilteredCommissions.filter((c) => {
       if (selectedProjectFilter !== 'ALL' && c.project_id !== selectedProjectFilter) return false
       if (selectedAgentFilter !== 'ALL' && c.agent_id !== selectedAgentFilter) return false
+
+      if (cashFlowFilter !== 'ALL') {
+        const devStatus = c.developer_payment_status || 'PENDING'
+        const agentStatus = c.agent_payout_status || 'UNPAID'
+        const todayIso = new Date().toISOString().split('T')[0]
+        const isOverdue = !!(c.expected_payout_date && c.expected_payout_date < todayIso && devStatus !== 'RECEIVED')
+        if (cashFlowFilter === 'AWAITING_DEV' && devStatus === 'RECEIVED') return false
+        if (cashFlowFilter === 'OVERDUE_DEV' && !isOverdue) return false
+        if (cashFlowFilter === 'READY_DISBURSE' && !(Number(c.developer_received_amount || 0) > 0 && agentStatus !== 'PAID')) return false
+        if (cashFlowFilter === 'SETTLED' && !(devStatus === 'RECEIVED' && (Number(c.agent_commission_amount || 0) <= 0 || agentStatus === 'PAID'))) return false
+      }
 
       if (search.trim()) {
         const q = search.toLowerCase()
@@ -332,7 +436,7 @@ export default function MySalesClient({ profile }: Props) {
       }
       return true
     })
-  }, [timeFilteredCommissions, selectedProjectFilter, selectedAgentFilter, search, projects, teamMembers])
+  }, [timeFilteredCommissions, selectedProjectFilter, selectedAgentFilter, cashFlowFilter, search, projects, teamMembers])
 
   // Paginated Leaderboard
   const paginatedLeaderboard = useMemo(() => {
@@ -395,6 +499,20 @@ export default function MySalesClient({ profile }: Props) {
     }
 
     const progressPct = myThresholdX > 0 ? Math.min(100, (totalGrossRevenue / myThresholdX) * 100) : 100
+    const devReceivedTotal = myPersonalDeals.reduce((sum, c) => sum + Number(c.developer_received_amount || 0), 0)
+
+    const currentMonthPrefix = new Date().toISOString().slice(0, 7)
+    const myDisbursedAmount = outflowPayments
+      .filter((p) => {
+        if (p.recipient_id !== profile.id) return false
+        if (timeFilter === 'MONTH') {
+          return (p.payout_month || p.payment_date.slice(0, 7)) === currentMonthPrefix
+        }
+        return true
+      })
+      .reduce((sum, p) => sum + Number(p.amount || 0), 0)
+
+    const myRemainingPayable = Math.max(0, netCommissionPayout - myDisbursedAmount)
 
     return {
       totalUnitsSold,
@@ -404,8 +522,11 @@ export default function MySalesClient({ profile }: Props) {
       netCommissionPayout,
       excessVolume,
       progressPct,
+      devReceivedTotal,
+      myDisbursedAmount,
+      myRemainingPayable,
     }
-  }, [myPersonalDeals, myThresholdX, myRateY])
+  }, [myPersonalDeals, myThresholdX, myRateY, outflowPayments, profile.id, timeFilter])
 
   // Jump from Leaderboard row to Transactions filtered to that agent
   const handleInspectAgent = (agentId: string) => {
@@ -1388,25 +1509,32 @@ export default function MySalesClient({ profile }: Props) {
 
                               {/* Net Commission */}
                               <td style={{ padding: '10px 8px', textAlign: 'right' }}>
-                                <span
-                                  style={{
-                                    display: 'inline-block',
-                                    padding: '3px 8px',
-                                    borderRadius: '5px',
-                                    backgroundColor: row.netCommission > 0 ? '#ECFDF5' : '#F8FAFC',
-                                    color: row.netCommission > 0 ? '#065F46' : '#94A3B8',
-                                    fontWeight: 900,
-                                    fontSize: '12px',
-                                    whiteSpace: 'nowrap',
-                                  }}
-                                >
-                                  SAR {row.netCommission.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                                </span>
+                                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '2px' }}>
+                                  <span
+                                    style={{
+                                      display: 'inline-block',
+                                      padding: '3px 8px',
+                                      borderRadius: '5px',
+                                      backgroundColor: row.netCommission > 0 ? '#ECFDF5' : '#F8FAFC',
+                                      color: row.netCommission > 0 ? '#065F46' : '#94A3B8',
+                                      fontWeight: 900,
+                                      fontSize: '12px',
+                                      whiteSpace: 'nowrap',
+                                    }}
+                                  >
+                                    SAR {row.netCommission.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                  </span>
+                                  {(row.disbursedAmount > 0 || row.netCommission > 0) && (
+                                    <span style={{ fontSize: '10px', fontWeight: 700, color: row.disbursedAmount >= row.netCommission && row.netCommission > 0 ? '#059669' : '#B45309' }}>
+                                      Paid: SAR {row.disbursedAmount.toLocaleString('en-US', { minimumFractionDigits: 0 })}
+                                    </span>
+                                  )}
+                                </div>
                               </td>
 
                               {/* Action */}
                               <td style={{ padding: '10px 6px', textAlign: 'center' }}>
-                                <div style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', justifyContent: 'center' }}>
+                                <div style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', justifyContent: 'center', flexWrap: 'wrap' }}>
                                   <button
                                     type="button"
                                     onClick={() => openSetTargetModal(row.member)}
@@ -1429,6 +1557,36 @@ export default function MySalesClient({ profile }: Props) {
                                   >
                                     <Target size={11} color="#1D4ED8" />
                                     <span>Target</span>
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      setPayoutModalData({
+                                        member: row.member,
+                                        netCommission: row.netCommission,
+                                        grossVolume: row.grossVolume,
+                                        collectedFromDev: row.collectedFromDev,
+                                      })
+                                    }
+                                    className="btn-secondary"
+                                    style={{
+                                      padding: '4px 7px',
+                                      fontSize: '10.5px',
+                                      fontWeight: 700,
+                                      borderRadius: '5px',
+                                      display: 'inline-flex',
+                                      alignItems: 'center',
+                                      gap: '3px',
+                                      cursor: 'pointer',
+                                      backgroundColor: '#ECFDF5',
+                                      color: '#059669',
+                                      border: '1px solid #A7F3D0',
+                                      whiteSpace: 'nowrap',
+                                    }}
+                                    title="Manage Monthly Target-Adjusted Payouts"
+                                  >
+                                    <Banknote size={11} color="#059669" />
+                                    <span>Payouts</span>
                                   </button>
                                   <button
                                     type="button"
@@ -1490,6 +1648,133 @@ export default function MySalesClient({ profile }: Props) {
 
             {/* TAB 2: ALL CLOSED TRANSACTIONS STREAM */}
             {adminTab === 'TRANSACTIONS' && (
+              <div>
+                {/* Cash Flow Summary Strip */}
+                <div
+                  style={{
+                    display: 'grid',
+                    gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))',
+                    gap: '12px',
+                    marginBottom: '16px',
+                  }}
+                >
+                  <div className="card" style={{ padding: '14px 16px', background: '#FFFFFF', border: '1px solid #E2E8F0', borderRadius: '12px' }}>
+                    <div style={{ fontSize: '10.5px', fontWeight: 800, color: '#64748B', textTransform: 'uppercase' }}>
+                      Expected from Developers
+                    </div>
+                    <div style={{ fontSize: '18px', fontWeight: 900, color: '#0F172A', marginTop: '4px' }}>
+                      SAR {cashFlowTotals.totalExpectedDev.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+                    </div>
+                    <div style={{ fontSize: '11px', color: '#64748B', marginTop: '2px' }}>
+                      Gross brokerage commissions
+                    </div>
+                  </div>
+
+                  <div className="card" style={{ padding: '14px 16px', background: '#ECFDF5', border: '1px solid #A7F3D0', borderRadius: '12px' }}>
+                    <div style={{ fontSize: '10.5px', fontWeight: 800, color: '#047857', textTransform: 'uppercase' }}>
+                      Received (Inflow)
+                    </div>
+                    <div style={{ fontSize: '18px', fontWeight: 900, color: '#065F46', marginTop: '4px' }}>
+                      SAR {cashFlowTotals.totalReceivedDev.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+                    </div>
+                    <div style={{ fontSize: '11px', color: '#B45309', fontWeight: 700, marginTop: '2px' }}>
+                      Pending: SAR {cashFlowTotals.totalPendingDev.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+                    </div>
+                  </div>
+
+                  <div className="card" style={{ padding: '14px 16px', background: '#EFF6FF', border: '1px solid #BFDBFE', borderRadius: '12px' }}>
+                    <div style={{ fontSize: '10.5px', fontWeight: 800, color: '#1D4ED8', textTransform: 'uppercase' }}>
+                      Disbursed to Team (Outflow)
+                    </div>
+                    <div style={{ fontSize: '18px', fontWeight: 900, color: '#1E3A8A', marginTop: '4px' }}>
+                      SAR {cashFlowTotals.totalPaidAgent.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+                    </div>
+                    <div style={{ fontSize: '11px', color: '#B45309', fontWeight: 700, marginTop: '2px' }}>
+                      Payable: SAR {cashFlowTotals.totalPendingAgent.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+                    </div>
+                  </div>
+
+                  <div className="card" style={{ padding: '14px 16px', background: '#F8FAFC', border: '1px solid #CBD5E1', borderRadius: '12px' }}>
+                    <div style={{ fontSize: '10.5px', fontWeight: 800, color: '#475569', textTransform: 'uppercase' }}>
+                      Net Cash Retained
+                    </div>
+                    <div style={{ fontSize: '18px', fontWeight: 900, color: cashFlowTotals.netRetained >= 0 ? '#0F172A' : '#DC2626', marginTop: '4px' }}>
+                      SAR {cashFlowTotals.netRetained.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+                    </div>
+                    <div style={{ fontSize: '11px', color: '#64748B', marginTop: '2px' }}>
+                      Inflow minus team payouts
+                    </div>
+                  </div>
+                </div>
+
+                {/* Overdue Developer Payouts Banner */}
+                {(() => {
+                  const todayIso = new Date().toISOString().split('T')[0]
+                  const overdueDeals = timeFilteredCommissions.filter(
+                    (c) => c.expected_payout_date && c.expected_payout_date < todayIso && (c.developer_payment_status || 'PENDING') !== 'RECEIVED'
+                  )
+                  if (overdueDeals.length === 0) return null
+                  const overdueTotal = overdueDeals.reduce(
+                    (sum, c) => sum + Math.max(0, Number(c.commission_amount || 0) - Number(c.developer_received_amount || 0)),
+                    0
+                  )
+                  return (
+                    <div
+                      style={{
+                        marginBottom: '16px',
+                        padding: '12px 18px',
+                        borderRadius: '12px',
+                        backgroundColor: '#FEF2F2',
+                        border: '1.5px solid #FCA5A5',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        flexWrap: 'wrap',
+                        gap: '10px',
+                      }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+                        <span
+                          style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '5px',
+                            padding: '3px 9px',
+                            borderRadius: '999px',
+                            backgroundColor: '#DC2626',
+                            color: '#FFFFFF',
+                            fontSize: '11px',
+                            fontWeight: 800,
+                          }}
+                        >
+                          <AlertTriangle size={12} /> {overdueDeals.length} OVERDUE FROM DEVELOPER
+                        </span>
+                        <span style={{ fontSize: '12.5px', fontWeight: 700, color: '#991B1B' }}>
+                          SAR {overdueTotal.toLocaleString('en-US', { minimumFractionDigits: 2 })} has crossed its expected payout date.
+                        </span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setCashFlowFilter(cashFlowFilter === 'OVERDUE_DEV' ? 'ALL' : 'OVERDUE_DEV')
+                          setCurrentPage(1)
+                        }}
+                        className="btn btn-xs"
+                        style={{
+                          backgroundColor: cashFlowFilter === 'OVERDUE_DEV' ? '#FFFFFF' : '#DC2626',
+                          color: cashFlowFilter === 'OVERDUE_DEV' ? '#DC2626' : '#FFFFFF',
+                          border: '1px solid #DC2626',
+                          fontWeight: 700,
+                          padding: '5px 12px',
+                          borderRadius: '6px',
+                        }}
+                      >
+                        {cashFlowFilter === 'OVERDUE_DEV' ? 'Show All Deals' : 'Filter Overdue Deals'}
+                      </button>
+                    </div>
+                  )
+                })()}
+
               <div
                 className="card"
                 style={{
@@ -1523,7 +1808,24 @@ export default function MySalesClient({ profile }: Props) {
                     </span>
                   </div>
 
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                    {/* Cash Flow Status Filter */}
+                    <select
+                      value={cashFlowFilter}
+                      onChange={(e) => {
+                        setCashFlowFilter(e.target.value as any)
+                        setCurrentPage(1)
+                      }}
+                      className="form-select"
+                      style={{ width: 'auto', minWidth: '135px', maxWidth: '170px', height: '34px', fontSize: '12px', fontWeight: 600 }}
+                    >
+                      <option value="ALL">All Cash Flow</option>
+                      <option value="AWAITING_DEV">Awaiting Developer</option>
+                      <option value="OVERDUE_DEV">Overdue from Developer</option>
+                      <option value="READY_DISBURSE">Ready to Disburse</option>
+                      <option value="SETTLED">Fully Settled</option>
+                    </select>
+
                     {/* Project Filter */}
                     <select
                       value={selectedProjectFilter}
@@ -1532,7 +1834,7 @@ export default function MySalesClient({ profile }: Props) {
                         setCurrentPage(1)
                       }}
                       className="form-select"
-                      style={{ height: '34px', fontSize: '12px', fontWeight: 600 }}
+                      style={{ width: 'auto', minWidth: '135px', maxWidth: '175px', height: '34px', fontSize: '12px', fontWeight: 600 }}
                     >
                       <option value="ALL">All Projects</option>
                       {projects.map((p) => (
@@ -1550,7 +1852,7 @@ export default function MySalesClient({ profile }: Props) {
                         setCurrentPage(1)
                       }}
                       className="form-select"
-                      style={{ height: '34px', fontSize: '12px', fontWeight: 600 }}
+                      style={{ width: 'auto', minWidth: '145px', maxWidth: '185px', height: '34px', fontSize: '12px', fontWeight: 600 }}
                     >
                       <option value="ALL">All Agents / Partners</option>
                       {teamMembers.map((m) => (
@@ -1572,9 +1874,91 @@ export default function MySalesClient({ profile }: Props) {
                           setCurrentPage(1)
                         }}
                         className="form-input"
-                        style={{ height: '34px', fontSize: '12px', paddingLeft: '32px', width: '180px' }}
+                        style={{ height: '34px', fontSize: '12px', paddingLeft: '32px', width: '165px' }}
                       />
                     </div>
+
+                    {/* Project Batch Claim / Receipt */}
+                    <button
+                      type="button"
+                      onClick={() => setIsBatchModalOpen(true)}
+                      className="btn btn-primary btn-sm"
+                      style={{
+                        height: '34px',
+                        fontSize: '12px',
+                        fontWeight: 700,
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '6px',
+                        backgroundColor: '#1E40AF',
+                        borderColor: '#1E40AF',
+                      }}
+                      title="Generate one consolidated Claim Note or Settlement Receipt for multiple units in a project"
+                    >
+                      <FileText size={13} /> Project Batch Claim
+                    </button>
+
+                    {/* Export Cash Flow CSV */}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const headers = [
+                          'Sale Date',
+                          'Project',
+                          'Unit',
+                          'Buyer',
+                          'Agent',
+                          'Deal Value (SAR)',
+                          'Expected Commission (SAR)',
+                          'Received from Developer (SAR)',
+                          'Pending Receivable (SAR)',
+                          'Expected Payout Date',
+                          'Developer Status',
+                          'Team Payout Status',
+                        ]
+                        const rows = filteredTransactions.map((d) => {
+                          const p = projects.find((pr) => pr.id === d.project_id)
+                          const a = teamMembers.find((tm) => tm.id === d.agent_id)
+                          const exp = Number(d.commission_amount || 0)
+                          const rec = Number(d.developer_received_amount || 0)
+                          const pend = Math.max(0, exp - rec)
+                          return [
+                            d.sale_date || '',
+                            `"${(p?.name_en || '').replace(/"/g, '""')}"`,
+                            `"${(d.unit_name || '').replace(/"/g, '""')}"`,
+                            `"${(d.buyer_name || '').replace(/"/g, '""')}"`,
+                            `"${(a?.name || d.agent_name || '').replace(/"/g, '""')}"`,
+                            Number(d.deal_value_sar || 0),
+                            exp,
+                            rec,
+                            pend,
+                            d.expected_payout_date || '',
+                            d.developer_payment_status || 'PENDING',
+                            d.agent_payout_status || 'UNPAID',
+                          ].join(',')
+                        })
+                        const csv = [headers.join(','), ...rows].join('\n')
+                        const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
+                        const url = URL.createObjectURL(blob)
+                        const link = document.createElement('a')
+                        link.href = url
+                        link.download = `asaheeb-commission-cashflow-${new Date().toISOString().slice(0, 10)}.csv`
+                        link.click()
+                        URL.revokeObjectURL(url)
+                      }}
+                      className="btn btn-outline btn-sm"
+                      style={{
+                        height: '34px',
+                        fontSize: '12px',
+                        fontWeight: 700,
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '5px',
+                      }}
+                      title="Export filtered cash flow ledger to CSV"
+                    >
+                      <Download size={13} /> Export CSV
+                    </button>
                   </div>
                 </div>
 
@@ -1599,21 +1983,25 @@ export default function MySalesClient({ profile }: Props) {
                     <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12.5px' }}>
                       <thead>
                         <tr style={{ backgroundColor: '#F8FAFC', borderBottom: '1px solid var(--border)', color: '#475569', fontSize: '11px', fontWeight: 700, textTransform: 'uppercase' }}>
-                          <th style={{ padding: '12px 18px', textAlign: 'left' }}>Sale Date</th>
-                          <th style={{ padding: '12px 18px', textAlign: 'left' }}>Project</th>
-                          <th style={{ padding: '12px 18px', textAlign: 'left' }}>Unit / Layout</th>
-                          <th style={{ padding: '12px 18px', textAlign: 'left' }}>Sold By (Agent)</th>
-                          <th style={{ padding: '12px 18px', textAlign: 'left' }}>Purchasing Client</th>
-                          <th style={{ padding: '12px 18px', textAlign: 'right' }}>Deal Value</th>
-                          <th style={{ padding: '12px 18px', textAlign: 'center' }}>Area (m²)</th>
-                          <th style={{ padding: '12px 18px', textAlign: 'right' }}>Deal Commission</th>
-                          <th style={{ padding: '12px 18px', textAlign: 'left' }}>Notes</th>
+                          <th style={{ padding: '10px 12px', textAlign: 'left' }}>Date &amp; Project</th>
+                          <th style={{ padding: '10px 12px', textAlign: 'left' }}>Unit &amp; Client</th>
+                          <th style={{ padding: '10px 12px', textAlign: 'left' }}>Agent</th>
+                          <th style={{ padding: '10px 12px', textAlign: 'right' }}>Deal Value</th>
+                          <th style={{ padding: '10px 12px', textAlign: 'right' }}>Commission</th>
+                          <th style={{ padding: '10px 12px', textAlign: 'left' }}>Cash Flow</th>
+                          <th style={{ padding: '10px 12px', textAlign: 'right' }}>Actions</th>
                         </tr>
                       </thead>
                       <tbody>
                         {paginatedTransactions.map((deal, idx) => {
                           const project = projects.find((p) => p.id === deal.project_id)
                           const agent = teamMembers.find((m) => m.id === deal.agent_id)
+                          const devStatus = deal.developer_payment_status || 'PENDING'
+                          const devReceived = Number(deal.developer_received_amount || 0)
+                          const devExpected = Number(deal.commission_amount || 0)
+                          const agentStatus = deal.agent_payout_status || 'UNPAID'
+                          const agentPaid = Number(deal.agent_paid_amount || 0)
+                          const agentShare = Number(deal.agent_commission_amount || 0)
                           return (
                             <tr
                               key={deal.id}
@@ -1624,28 +2012,36 @@ export default function MySalesClient({ profile }: Props) {
                               onMouseEnter={(e) => ((e.currentTarget as HTMLElement).style.backgroundColor = '#F8FAFC')}
                               onMouseLeave={(e) => ((e.currentTarget as HTMLElement).style.backgroundColor = 'transparent')}
                             >
-                              <td style={{ padding: '12px 18px', whiteSpace: 'nowrap', color: '#475569', fontWeight: 600 }}>
-                                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                                  <Calendar size={13} color="#059669" />
+                              {/* Date & Project */}
+                              <td style={{ padding: '10px 12px', maxWidth: '170px' }}>
+                                <div style={{ fontWeight: 700, color: '#0F172A', fontSize: '12.5px', lineHeight: 1.3 }}>
+                                  {project ? project.name_en : '—'}
+                                </div>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '5px', fontSize: '11px', color: '#64748B', marginTop: '2px' }}>
+                                  <Calendar size={11} color="#059669" />
                                   <span>{deal.sale_date || '—'}</span>
+                                  {project?.city_en && <span>· {project.city_en}</span>}
                                 </div>
                               </td>
 
-                              <td style={{ padding: '12px 18px' }}>
-                                <div style={{ fontWeight: 700, color: '#0F172A' }}>{project ? project.name_en : '—'}</div>
-                                {project?.city_en && <div style={{ fontSize: '11px', color: '#64748B' }}>{project.city_en}</div>}
+                              {/* Unit & Client */}
+                              <td style={{ padding: '10px 12px', maxWidth: '190px' }}>
+                                <div style={{ fontWeight: 700, color: '#1E40AF', fontSize: '12.5px', lineHeight: 1.3 }}>
+                                  {deal.unit_name}
+                                </div>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '11px', color: '#475569', marginTop: '2px' }}>
+                                  <User size={11} color="#94A3B8" />
+                                  <span>{deal.buyer_name || '—'}</span>
+                                </div>
                               </td>
 
-                              <td style={{ padding: '12px 18px', fontWeight: 700, color: '#1E40AF' }}>
-                                {deal.unit_name}
-                              </td>
-
-                              <td style={{ padding: '12px 18px' }}>
+                              {/* Agent */}
+                              <td style={{ padding: '10px 12px', maxWidth: '140px' }}>
                                 <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                                   <div
                                     style={{
-                                      width: '24px',
-                                      height: '24px',
+                                      width: '22px',
+                                      height: '22px',
                                       borderRadius: '50%',
                                       backgroundColor: '#EFF6FF',
                                       color: '#1D4ED8',
@@ -1654,60 +2050,208 @@ export default function MySalesClient({ profile }: Props) {
                                       display: 'flex',
                                       alignItems: 'center',
                                       justifyContent: 'center',
+                                      flexShrink: 0,
                                     }}
                                   >
                                     {agent?.name ? agent.name[0].toUpperCase() : 'A'}
                                   </div>
-                                  <span style={{ fontWeight: 600, color: '#334155' }}>
+                                  <span style={{ fontWeight: 600, color: '#334155', fontSize: '12px', lineHeight: 1.3 }}>
                                     {agent?.name || 'Assigned Agent'}
                                   </span>
                                 </div>
                               </td>
 
-                              <td style={{ padding: '12px 18px', color: '#334155' }}>
-                                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                                  <User size={13} color="#94A3B8" />
-                                  <span>{deal.buyer_name || '—'}</span>
-                                </div>
-                              </td>
-
-                              {/* Deal Value */}
-                              <td style={{ padding: '12px 18px', textAlign: 'right', whiteSpace: 'nowrap' }}>
+                              {/* Deal Value & Area */}
+                              <td style={{ padding: '10px 12px', textAlign: 'right', whiteSpace: 'nowrap' }}>
                                 {deal.deal_value_sar && Number(deal.deal_value_sar) > 0 ? (
-                                  <span style={{ fontWeight: 700, color: '#5B21B6', fontSize: '13px' }}>
+                                  <div style={{ fontWeight: 700, color: '#5B21B6', fontSize: '12.5px' }}>
                                     SAR {Number(deal.deal_value_sar).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
-                                  </span>
+                                  </div>
                                 ) : (
-                                  <span style={{ color: '#CBD5E1' }}>—</span>
+                                  <div style={{ color: '#CBD5E1' }}>—</div>
                                 )}
-                              </td>
-
-                              <td style={{ padding: '12px 18px', textAlign: 'center' }}>
                                 {deal.area_sqm ? (
                                   <span
                                     style={{
                                       display: 'inline-block',
-                                      padding: '2px 8px',
-                                      borderRadius: '6px',
+                                      marginTop: '2px',
+                                      padding: '1px 6px',
+                                      borderRadius: '5px',
                                       backgroundColor: '#FEF3C7',
                                       color: '#92400E',
                                       fontWeight: 700,
-                                      fontSize: '11.5px',
+                                      fontSize: '10.5px',
                                     }}
                                   >
                                     {Number(deal.area_sqm).toFixed(0)} m²
                                   </span>
-                                ) : (
-                                  <span style={{ color: '#CBD5E1' }}>—</span>
+                                ) : null}
+                              </td>
+
+                              {/* Deal Commission & Note */}
+                              <td style={{ padding: '10px 12px', textAlign: 'right', whiteSpace: 'nowrap' }}>
+                                <div style={{ fontWeight: 800, color: '#065F46', fontSize: '12.5px' }}>
+                                  SAR {devExpected.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                </div>
+                                {deal.notes && (
+                                  <div
+                                    title={deal.notes}
+                                    style={{
+                                      fontSize: '10.5px',
+                                      color: '#64748B',
+                                      maxWidth: '130px',
+                                      marginLeft: 'auto',
+                                      overflow: 'hidden',
+                                      textOverflow: 'ellipsis',
+                                      whiteSpace: 'nowrap',
+                                    }}
+                                  >
+                                    {deal.notes}
+                                  </div>
                                 )}
                               </td>
 
-                              <td style={{ padding: '12px 18px', textAlign: 'right', fontWeight: 800, color: '#065F46' }}>
-                                SAR {Number(deal.commission_amount || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                              {/* Cash Flow Status */}
+                              <td style={{ padding: '10px 12px', whiteSpace: 'nowrap' }}>
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
+                                  {(() => {
+                                    const todayIso = new Date().toISOString().split('T')[0]
+                                    const isOverdue = !!(
+                                      deal.expected_payout_date &&
+                                      deal.expected_payout_date < todayIso &&
+                                      devStatus !== 'RECEIVED'
+                                    )
+                                    const overdueDays = isOverdue && deal.expected_payout_date
+                                      ? Math.max(1, Math.ceil((new Date(todayIso).getTime() - new Date(deal.expected_payout_date).getTime()) / (1000 * 60 * 60 * 24)))
+                                      : 0
+                                    return (
+                                      <>
+                                        <span
+                                          style={{
+                                            display: 'inline-flex',
+                                            alignItems: 'center',
+                                            gap: '4px',
+                                            width: 'fit-content',
+                                            padding: '2px 7px',
+                                            borderRadius: '6px',
+                                            fontSize: '10.5px',
+                                            fontWeight: 700,
+                                            backgroundColor:
+                                              devStatus === 'RECEIVED' ? '#ECFDF5' : isOverdue ? '#FEF2F2' : devStatus === 'PARTIAL' ? '#FEF3C7' : '#F1F5F9',
+                                            color:
+                                              devStatus === 'RECEIVED' ? '#059669' : isOverdue ? '#DC2626' : devStatus === 'PARTIAL' ? '#B45309' : '#64748B',
+                                            border: isOverdue ? '1px solid #FECACA' : 'none',
+                                          }}
+                                          title={deal.expected_payout_date ? `Expected Payout Date: ${deal.expected_payout_date}` : undefined}
+                                        >
+                                          {isOverdue && <AlertTriangle size={10} />}
+                                          Dev: {devStatus === 'RECEIVED' ? 'Received' : isOverdue ? `Overdue (${overdueDays}d)` : devStatus === 'PARTIAL' ? `Partial (${devReceived.toLocaleString('en-US')})` : 'Pending'}
+                                        </span>
+                                        {deal.expected_payout_date && devStatus !== 'RECEIVED' && (
+                                          <span style={{ fontSize: '10px', color: isOverdue ? '#DC2626' : '#64748B', fontWeight: isOverdue ? 700 : 500 }}>
+                                            Due: {deal.expected_payout_date}
+                                          </span>
+                                        )}
+                                      </>
+                                    )
+                                  })()}
+                                  {(() => {
+                                    const isMonthlyTargetAgent = Number(agent?.commission_threshold_sar || 0) > 0 && agentShare <= 0 && agentPaid <= 0
+                                    if (isMonthlyTargetAgent) {
+                                      const lbRow = leaderboardData.find((r) => r.member.id === deal.agent_id)
+                                      const cyclePaid = lbRow?.disbursedAmount || 0
+                                      const cycleEarned = lbRow?.netCommission || 0
+                                      const isCycleSettled = cycleEarned > 0 && cyclePaid >= cycleEarned
+                                      return (
+                                        <span
+                                          style={{
+                                            display: 'inline-block',
+                                            width: 'fit-content',
+                                            padding: '2px 7px',
+                                            borderRadius: '6px',
+                                            fontSize: '10.5px',
+                                            fontWeight: 700,
+                                            backgroundColor: isCycleSettled ? '#ECFDF5' : '#EEF2FF',
+                                            color: isCycleSettled ? '#059669' : '#4338CA',
+                                          }}
+                                          title="Commission is calculated & disbursed monthly above target X on the Team Leaderboard"
+                                        >
+                                          Team: {isCycleSettled ? 'Cycle Settled' : cyclePaid > 0 ? `Cycle Paid (${cyclePaid.toLocaleString('en-US')})` : 'Monthly Target'}
+                                        </span>
+                                      )
+                                    }
+                                    return (
+                                      <span
+                                        style={{
+                                          display: 'inline-block',
+                                          width: 'fit-content',
+                                          padding: '2px 7px',
+                                          borderRadius: '6px',
+                                          fontSize: '10.5px',
+                                          fontWeight: 700,
+                                          backgroundColor:
+                                            agentStatus === 'PAID' ? '#EFF6FF' : agentStatus === 'PARTIAL' ? '#FEF3C7' : '#FFF1F2',
+                                          color:
+                                            agentStatus === 'PAID' ? '#1D4ED8' : agentStatus === 'PARTIAL' ? '#B45309' : '#BE123C',
+                                        }}
+                                      >
+                                        Team: {agentStatus === 'PAID' ? 'Paid' : agentStatus === 'PARTIAL' ? `Paid ${agentPaid.toLocaleString('en-US')}` : agentShare > 0 ? `Due ${agentShare.toLocaleString('en-US')}` : 'Unpaid'}
+                                      </span>
+                                    )
+                                  })()}
+                                </div>
                               </td>
 
-                              <td style={{ padding: '12px 18px', color: '#64748B', maxWidth: '200px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                                {deal.notes || '—'}
+                              {/* Actions */}
+                              <td style={{ padding: '10px 12px', textAlign: 'right', whiteSpace: 'nowrap' }}>
+                                <div style={{ display: 'inline-flex', flexDirection: 'column', alignItems: 'flex-end', gap: '4px' }}>
+                                  <button
+                                    type="button"
+                                    onClick={() => setCashFlowDeal(deal)}
+                                    className="btn btn-outline btn-xs"
+                                    style={{
+                                      display: 'inline-flex',
+                                      alignItems: 'center',
+                                      gap: '4px',
+                                      padding: '3px 8px',
+                                      fontSize: '10.5px',
+                                      fontWeight: 700,
+                                      color: '#059669',
+                                      borderColor: '#A7F3D0',
+                                      backgroundColor: '#ECFDF5',
+                                    }}
+                                    title="Record developer payment or agent disbursement"
+                                  >
+                                    <Banknote size={11} /> Cash Flow
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={async () => {
+                                      try {
+                                        const res = await fetch(`/api/projects/commissions/payments?commissionId=${encodeURIComponent(deal.id)}`)
+                                        const data = await res.json()
+                                        setReceiptModalData({ commission: deal, payments: data.payments || [] })
+                                      } catch {
+                                        setReceiptModalData({ commission: deal, payments: [] })
+                                      }
+                                    }}
+                                    className="btn btn-outline btn-xs"
+                                    style={{
+                                      display: 'inline-flex',
+                                      alignItems: 'center',
+                                      gap: '4px',
+                                      padding: '3px 8px',
+                                      fontSize: '10.5px',
+                                      fontWeight: 700,
+                                      color: '#1D4ED8',
+                                      borderColor: '#BFDBFE',
+                                      backgroundColor: '#EFF6FF',
+                                    }}
+                                    title="Generate Developer Commission Claim or Payment Receipt"
+                                  >
+                                    <FileText size={11} /> {deal.claim_sent_at ? 'Receipt ✓' : 'Claim'}
+                                  </button>
+                                </div>
                               </td>
                             </tr>
                           )
@@ -1735,6 +2279,7 @@ export default function MySalesClient({ profile }: Props) {
                     />
                   </div>
                 )}
+              </div>
               </div>
             )}
 
@@ -1926,8 +2471,8 @@ export default function MySalesClient({ profile }: Props) {
                 <div style={{ fontSize: '24px', fontWeight: 900, color: '#166534', marginTop: '6px' }}>
                   SAR {myMetrics.totalGrossRevenue.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                 </div>
-                <div style={{ fontSize: '12px', color: '#15803D', marginTop: '2px', fontWeight: 500 }}>
-                  Total brokerage deal volume
+                <div style={{ fontSize: '12px', color: '#15803D', marginTop: '2px', fontWeight: 600 }}>
+                  Dev Collected: SAR {myMetrics.devReceivedTotal.toLocaleString('en-US', { minimumFractionDigits: 0 })}
                 </div>
               </div>
 
@@ -1953,8 +2498,13 @@ export default function MySalesClient({ profile }: Props) {
                 <div style={{ fontSize: '26px', fontWeight: 900, color: '#065F46', marginTop: '6px' }}>
                   SAR {myMetrics.netCommissionPayout.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                 </div>
-                <div style={{ fontSize: '12px', color: '#059669', marginTop: '2px', fontWeight: 600 }}>
-                  {myRateY > 0 ? `${myRateY}% share on volume above target` : 'Full recognized commission'}
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap', marginTop: '4px', fontSize: '11.5px', fontWeight: 700 }}>
+                  <span style={{ color: '#047857', background: '#FFFFFF', padding: '1px 7px', borderRadius: '5px', border: '1px solid #A7F3D0' }}>
+                    Paid: SAR {myMetrics.myDisbursedAmount.toLocaleString('en-US', { minimumFractionDigits: 0 })}
+                  </span>
+                  <span style={{ color: myMetrics.myRemainingPayable > 0 ? '#B45309' : '#059669', background: '#FFFFFF', padding: '1px 7px', borderRadius: '5px', border: myMetrics.myRemainingPayable > 0 ? '1px solid #FDE68A' : '1px solid #A7F3D0' }}>
+                    {myMetrics.myRemainingPayable > 0 ? `Pending: SAR ${myMetrics.myRemainingPayable.toLocaleString('en-US', { minimumFractionDigits: 0 })}` : 'Settled ✓'}
+                  </span>
                 </div>
               </div>
             </div>
@@ -2084,6 +2634,7 @@ export default function MySalesClient({ profile }: Props) {
                         <th style={{ padding: '12px 18px', textAlign: 'center' }}>Area (m²)</th>
                         <th style={{ padding: '12px 18px', textAlign: 'left' }}>Purchasing Client</th>
                         <th style={{ padding: '12px 18px', textAlign: 'right' }}>Deal Commission</th>
+                        <th style={{ padding: '12px 18px', textAlign: 'left' }}>Payout Status</th>
                         <th style={{ padding: '12px 18px', textAlign: 'left' }}>Notes</th>
                       </tr>
                     </thead>
@@ -2150,6 +2701,75 @@ export default function MySalesClient({ profile }: Props) {
                             </td>
                             <td style={{ padding: '12px 18px', textAlign: 'right', fontWeight: 800, color: '#065F46' }}>
                               SAR {Number(deal.commission_amount || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            </td>
+                            <td style={{ padding: '12px 18px', whiteSpace: 'nowrap' }}>
+                              <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
+                                {(() => {
+                                  const devExp = Number(deal.commission_amount || 0)
+                                  const devRec = Number(deal.developer_received_amount || 0)
+                                  const devSt = deal.developer_payment_status || 'PENDING'
+                                  return (
+                                    <span
+                                      style={{
+                                        display: 'inline-block',
+                                        width: 'fit-content',
+                                        padding: '2px 7px',
+                                        borderRadius: '6px',
+                                        fontSize: '10.5px',
+                                        fontWeight: 700,
+                                        backgroundColor:
+                                          devSt === 'RECEIVED' ? '#ECFDF5' : devSt === 'PARTIAL' ? '#FEF3C7' : '#F1F5F9',
+                                        color:
+                                          devSt === 'RECEIVED' ? '#059669' : devSt === 'PARTIAL' ? '#B45309' : '#64748B',
+                                      }}
+                                    >
+                                      Dev: {devSt === 'RECEIVED' ? `Received (SAR ${devRec.toLocaleString('en-US')})` : devSt === 'PARTIAL' ? `SAR ${devRec.toLocaleString('en-US')} / ${devExp.toLocaleString('en-US')}` : 'Awaiting'}
+                                    </span>
+                                  )
+                                })()}
+                                {(() => {
+                                  const isMonthlyTargetAgent = myThresholdX > 0 && Number(deal.agent_commission_amount || 0) <= 0 && Number(deal.agent_paid_amount || 0) <= 0
+                                  if (isMonthlyTargetAgent) {
+                                    const cyclePaid = myMetrics.myDisbursedAmount
+                                    const cycleEarned = myMetrics.netCommissionPayout
+                                    const isSettled = cycleEarned > 0 && cyclePaid >= cycleEarned
+                                    return (
+                                      <span
+                                        style={{
+                                          display: 'inline-block',
+                                          width: 'fit-content',
+                                          padding: '2px 7px',
+                                          borderRadius: '6px',
+                                          fontSize: '10.5px',
+                                          fontWeight: 700,
+                                          backgroundColor: isSettled ? '#ECFDF5' : cyclePaid > 0 ? '#EFF6FF' : '#FFF1F2',
+                                          color: isSettled ? '#059669' : cyclePaid > 0 ? '#1D4ED8' : '#BE123C',
+                                        }}
+                                      >
+                                        My Payout: {isSettled ? 'Cycle Settled ✓' : cyclePaid > 0 ? `Cycle Paid (SAR ${cyclePaid.toLocaleString('en-US')})` : 'Pending'}
+                                      </span>
+                                    )
+                                  }
+                                  return (
+                                    <span
+                                      style={{
+                                        display: 'inline-block',
+                                        width: 'fit-content',
+                                        padding: '2px 7px',
+                                        borderRadius: '6px',
+                                        fontSize: '10.5px',
+                                        fontWeight: 700,
+                                        backgroundColor:
+                                          deal.agent_payout_status === 'PAID' ? '#EFF6FF' : deal.agent_payout_status === 'PARTIAL' ? '#FEF3C7' : '#FFF1F2',
+                                        color:
+                                          deal.agent_payout_status === 'PAID' ? '#1D4ED8' : deal.agent_payout_status === 'PARTIAL' ? '#B45309' : '#BE123C',
+                                      }}
+                                    >
+                                      My Payout: {deal.agent_payout_status === 'PAID' ? 'Paid' : deal.agent_payout_status === 'PARTIAL' ? `Paid SAR ${Number(deal.agent_paid_amount || 0).toLocaleString('en-US')}` : 'Pending'}
+                                    </span>
+                                  )
+                                })()}
+                              </div>
                             </td>
                             <td style={{ padding: '12px 18px', color: '#64748B' }}>
                               {deal.notes || '—'}
@@ -2453,6 +3073,64 @@ export default function MySalesClient({ profile }: Props) {
             </form>
           </div>
         </div>
+      )}
+
+      {/* Commission Cash Flow Modal */}
+      {cashFlowDeal && (
+        <CommissionCashFlowModal
+          commission={cashFlowDeal}
+          project={projects.find((p) => p.id === cashFlowDeal.project_id)}
+          agent={teamMembers.find((m) => m.id === cashFlowDeal.agent_id)}
+          onClose={() => setCashFlowDeal(null)}
+          onUpdated={handleCommissionUpdated}
+          onOpenReceipt={(comm, payments) => {
+            setReceiptModalData({ commission: comm, payments })
+          }}
+        />
+      )}
+
+      {/* Developer Claim Note & Payment Receipt Modal */}
+      {receiptModalData && (
+        <DeveloperReceiptModal
+          commission={receiptModalData.commission}
+          payments={receiptModalData.payments}
+          project={projects.find((p) => p.id === receiptModalData.commission.project_id)}
+          onClose={() => setReceiptModalData(null)}
+          onUpdated={handleCommissionUpdated}
+        />
+      )}
+
+      {/* Project-Wide Batch Claim & Settlement Receipt Modal */}
+      {isBatchModalOpen && (
+        <ProjectBatchReceiptModal
+          projects={projects}
+          commissions={commissions}
+          initialProjectId={selectedProjectFilter}
+          onClose={() => setIsBatchModalOpen(false)}
+          onBatchUpdated={(updatedList) => {
+            setCommissions((prev) =>
+              prev.map((c) => {
+                const match = updatedList.find((u) => u.id === c.id)
+                return match ? { ...c, ...match } : c
+              })
+            )
+          }}
+        />
+      )}
+
+      {/* Agent / Manager Monthly Payout Modal (Target-Adjusted) */}
+      {payoutModalData && (
+        <AgentMonthlyPayoutModal
+          member={payoutModalData.member}
+          payoutMonth={timeFilter === 'MONTH' ? new Date().toISOString().slice(0, 7) : 'ALL'}
+          earnedCommission={payoutModalData.netCommission}
+          grossVolume={payoutModalData.grossVolume}
+          collectedFromDevelopers={payoutModalData.collectedFromDev}
+          onClose={() => setPayoutModalData(null)}
+          onPayoutChanged={() => {
+            fetchSalesData(true)
+          }}
+        />
       )}
 
       {/* Toast Notification */}

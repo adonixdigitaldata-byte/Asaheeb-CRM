@@ -22,6 +22,7 @@ import {
   Award,
   FileCheck,
   Sparkles,
+  FolderLock,
 } from 'lucide-react'
 import { logout } from '@/app/login/actions'
 import type { Profile } from '@/types/database'
@@ -82,6 +83,7 @@ export default function Sidebar({
         { href: '/payroll', label: 'Payroll & Compensation', icon: Banknote },
         { href: '/expenses', label: 'Expense Tracker', icon: WalletCards },
         { href: '/payslips', label: 'My Payslips', icon: Receipt },
+        { href: '/my-documents', label: 'My Documents', icon: FolderLock },
       ],
     },
     {
@@ -115,6 +117,7 @@ export default function Sidebar({
         { href: '/attendance', label: 'Attendance & Leaves', icon: Clock },
         { href: '/assets', label: 'Company Assets', icon: Laptop },
         { href: '/payslips', label: 'My Payslips', icon: Receipt },
+        { href: '/my-documents', label: 'My Documents', icon: FolderLock },
       ],
     },
     {
@@ -145,6 +148,7 @@ export default function Sidebar({
         { href: '/attendance', label: 'Attendance & Leaves', icon: Clock },
         { href: '/assets', label: 'Company Assets', icon: Laptop },
         { href: '/payslips', label: 'My Payslips', icon: Receipt },
+        { href: '/my-documents', label: 'My Documents', icon: FolderLock },
       ],
     },
     {
@@ -286,7 +290,12 @@ export default function Sidebar({
 
         {/* Footer Profile & Logout */}
         <div className="sidebar-footer">
-          <div className="user-badge">
+          <Link
+            href={isChannelPartner ? '/dashboard' : '/my-documents'}
+            className="user-badge"
+            style={{ textDecoration: 'none', cursor: isChannelPartner ? 'default' : 'pointer' }}
+            title={isChannelPartner ? 'Channel Partner Profile' : 'View My Profile & Documents'}
+          >
             <div className="avatar-circle">
               {profile?.name ? profile.name.charAt(0).toUpperCase() : 'A'}
             </div>
@@ -300,7 +309,7 @@ export default function Sidebar({
                 </span>
               </div>
             </div>
-          </div>
+          </Link>
 
           <form action={logout}>
             <button

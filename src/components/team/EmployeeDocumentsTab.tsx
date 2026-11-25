@@ -33,6 +33,7 @@ import {
   Check,
   Filter,
   Paperclip,
+  RotateCcw,
 } from 'lucide-react'
 import type {
   EmployeeDocument,
@@ -46,6 +47,7 @@ import type {
 interface Props {
   member: Profile
   isAdmin: boolean
+  isSelfView?: boolean
   initialDocuments: EmployeeDocument[]
   initialCustomRecords: EmployeeCustomRecord[]
 }
@@ -71,6 +73,7 @@ const CUSTOM_PER_PAGE = 6
 export default function EmployeeDocumentsTab({
   member,
   isAdmin,
+  isSelfView = false,
   initialDocuments = [],
   initialCustomRecords = [],
 }: Props) {
@@ -91,6 +94,12 @@ export default function EmployeeDocumentsTab({
   const [isExperienceModalOpen, setIsExperienceModalOpen] = useState(false)
   const [isCustomFieldModalOpen, setIsCustomFieldModalOpen] = useState(false)
   const [previewDoc, setPreviewDoc] = useState<EmployeeDocument | null>(null)
+
+  // Re-upload Request Modal State
+  const [reuploadDoc, setReuploadDoc] = useState<EmployeeDocument | null>(null)
+  const [reuploadReason, setReuploadReason] = useState('')
+  const [isReuploadModalOpen, setIsReuploadModalOpen] = useState(false)
+  const [isSubmittingReupload, setIsSubmittingReupload] = useState(false)
 
   // Modals for Editing
   const [editingDoc, setEditingDoc] = useState<EmployeeDocument | null>(null)
@@ -406,6 +415,64 @@ export default function EmployeeDocumentsTab({
       showNotice('Document removed.')
     } catch (err: any) {
       showNotice(err.message || 'Error deleting document', 'error')
+    }
+  }
+
+  // Handle Employee Re-upload Request
+  async function submitReuploadRequest(e: React.FormEvent) {
+    e.preventDefault()
+    if (!reuploadDoc || !reuploadReason.trim()) return
+
+    setIsSubmittingReupload(true)
+    try {
+      const res = await fetch(`/api/team/${member.id}/documents`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          docId: reuploadDoc.id,
+          action: 'request_reupload',
+          reason: reuploadReason.trim(),
+        }),
+      })
+
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || 'Failed to submit request')
+
+      setDocuments((prev) =>
+        prev.map((d) => (d.id === reuploadDoc.id ? { ...d, ...data.document } : d))
+      )
+      setIsReuploadModalOpen(false)
+      setReuploadDoc(null)
+      setReuploadReason('')
+      showNotice('Re-upload request sent to admin. Admin can delete the document to let you re-upload.')
+    } catch (err: any) {
+      showNotice(err.message || 'Error submitting request', 'error')
+    } finally {
+      setIsSubmittingReupload(false)
+    }
+  }
+
+  // Handle Cancelling Re-upload Request
+  async function handleCancelReuploadRequest(docId: string) {
+    try {
+      const res = await fetch(`/api/team/${member.id}/documents`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          docId,
+          action: 'cancel_request',
+        }),
+      })
+
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || 'Failed to cancel request')
+
+      setDocuments((prev) =>
+        prev.map((d) => (d.id === docId ? { ...d, ...data.document } : d))
+      )
+      showNotice('Re-upload request cancelled.')
+    } catch (err: any) {
+      showNotice(err.message || 'Error cancelling request', 'error')
     }
   }
 
@@ -745,7 +812,7 @@ export default function EmployeeDocumentsTab({
             </div>
 
             {/* Upload Button */}
-            {isAdmin && (
+            {(isAdmin || isSelfView) && (
               <button
                 type="button"
                 onClick={() => {
@@ -856,7 +923,43 @@ export default function EmployeeDocumentsTab({
                                   ({(doc.file_size_bytes / (1024 * 1024)).toFixed(1)} MB)
                                 </span>
                               )}
+                              {(doc.metadata as any)?.reupload_requested && (
+                                <span
+                                  style={{
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: 3,
+                                    fontSize: 10.5,
+                                    fontWeight: 700,
+                                    color: '#B45309',
+                                    background: '#FEF3C7',
+                                    border: '1px solid #FCD34D',
+                                    padding: '1px 6px',
+                                    borderRadius: 4,
+                                    whiteSpace: 'nowrap',
+                                  }}
+                                  title={(doc.metadata as any)?.reupload_reason || 'Re-upload requested'}
+                                >
+                                  <AlertTriangle size={10} /> Re-upload Requested
+                                </span>
+                              )}
                             </div>
+                            {(doc.metadata as any)?.reupload_requested && (doc.metadata as any)?.reupload_reason && (
+                              <div
+                                style={{
+                                  fontSize: 11,
+                                  color: '#92400E',
+                                  marginTop: 4,
+                                  background: '#FFFBEB',
+                                  border: '1px dashed #FDE68A',
+                                  borderRadius: 4,
+                                  padding: '2px 8px',
+                                  display: 'inline-block',
+                                }}
+                              >
+                                <strong>Request Note:</strong> &ldquo;{(doc.metadata as any).reupload_reason}&rdquo;
+                              </div>
+                            )}
                           </div>
                         </div>
                       </td>
@@ -1010,7 +1113,7 @@ export default function EmployeeDocumentsTab({
                             {isDrive ? <ExternalLink size={12} /> : <Download size={12} />}
                           </a>
 
-                          {/* Edit Details */}
+                          {/* Edit Details - Admin Only */}
                           {isAdmin && (
                             <button
                               type="button"
@@ -1023,17 +1126,69 @@ export default function EmployeeDocumentsTab({
                             </button>
                           )}
 
-                          {/* Delete */}
+                          {/* Delete - Admin Only */}
                           {isAdmin && (
                             <button
                               type="button"
                               onClick={() => handleDeleteDocument(doc.id)}
-                              className="btn btn-outline btn-xs"
-                              title="Delete document"
-                              style={{ padding: '4px 6px', color: 'var(--danger)' }}
+                              className="btn btn-xs"
+                              title={(doc.metadata as any)?.reupload_requested ? 'Approve request and delete so employee can re-upload' : 'Delete document'}
+                              style={{
+                                padding: (doc.metadata as any)?.reupload_requested ? '3px 8px' : '4px 6px',
+                                background: (doc.metadata as any)?.reupload_requested ? '#DC2626' : undefined,
+                                color: (doc.metadata as any)?.reupload_requested ? '#FFFFFF' : 'var(--danger)',
+                                border: (doc.metadata as any)?.reupload_requested ? 'none' : '1px solid var(--border)',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: 4,
+                                fontWeight: (doc.metadata as any)?.reupload_requested ? 700 : undefined,
+                                fontSize: (doc.metadata as any)?.reupload_requested ? 11 : undefined,
+                              }}
                             >
                               <Trash2 size={12} />
+                              {(doc.metadata as any)?.reupload_requested && <span>Approve &amp; Delete</span>}
                             </button>
+                          )}
+
+                          {/* Request Re-upload - Non-Admin (Self View) */}
+                          {!isAdmin && (
+                            <>
+                              {(doc.metadata as any)?.reupload_requested ? (
+                                <button
+                                  type="button"
+                                  onClick={() => handleCancelReuploadRequest(doc.id)}
+                                  className="btn btn-outline btn-xs"
+                                  title="Cancel re-upload request"
+                                  style={{ padding: '3px 8px', fontSize: 11, color: '#64748B' }}
+                                >
+                                  Cancel Request
+                                </button>
+                              ) : (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setReuploadDoc(doc)
+                                    setReuploadReason('')
+                                    setIsReuploadModalOpen(true)
+                                  }}
+                                  className="btn btn-outline btn-xs"
+                                  title="Request Admin to delete this document so you can re-upload"
+                                  style={{
+                                    padding: '3px 8px',
+                                    fontSize: 11,
+                                    fontWeight: 700,
+                                    color: '#D97706',
+                                    borderColor: '#FDE68A',
+                                    background: '#FFFBEB',
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: 4,
+                                  }}
+                                >
+                                  <RotateCcw size={11} /> Request Re-upload
+                                </button>
+                              )}
+                            </>
                           )}
                         </div>
                       </td>
@@ -1072,7 +1227,7 @@ export default function EmployeeDocumentsTab({
               Documented track record with linked certificates, relieving letters, and previous payslips.
             </p>
           </div>
-          {isAdmin && (
+          {(isAdmin || isSelfView) && (
             <button
               type="button"
               onClick={() => {
@@ -1098,9 +1253,29 @@ export default function EmployeeDocumentsTab({
           <div style={{ textAlign: 'center', padding: '36px 0', color: 'var(--text-secondary)' }}>
             <Briefcase size={32} style={{ color: 'var(--text-tertiary)', marginBottom: 6 }} />
             <div style={{ fontSize: 13, fontWeight: 600 }}>No previous work history added</div>
-            <div style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>
-              Click &quot;Add Work Experience&quot; to log prior real estate or corporate experience and attach verification proofs.
+            <div style={{ fontSize: 12, color: 'var(--text-tertiary)', marginBottom: 12 }}>
+              Log prior real estate or corporate experience and attach verification proofs.
             </div>
+            {(isAdmin || isSelfView) && (
+              <button
+                type="button"
+                onClick={() => {
+                  setExpCompany('')
+                  setExpRole('')
+                  setExpLocation('')
+                  setExpStartDate('')
+                  setExpEndDate('')
+                  setExpIsCurrent(false)
+                  setExpSummary('')
+                  setExpLinkedDocIds([])
+                  setIsExperienceModalOpen(true)
+                }}
+                className="btn btn-outline btn-xs"
+                style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
+              >
+                <Plus size={12} /> Add Work Experience
+              </button>
+            )}
           </div>
         ) : (
           <div style={{ padding: '16px 20px', display: 'flex', flexDirection: 'column', gap: 14 }}>
@@ -1323,7 +1498,7 @@ export default function EmployeeDocumentsTab({
               Arbitrary metadata like Emergency Contacts, Blood Group, Home Country Address, or Special Tags.
             </p>
           </div>
-          {isAdmin && (
+          {(isAdmin || isSelfView) && (
             <button
               type="button"
               onClick={() => setIsCustomFieldModalOpen(true)}
@@ -1339,9 +1514,19 @@ export default function EmployeeDocumentsTab({
           <div style={{ textAlign: 'center', padding: '32px 0', color: 'var(--text-secondary)' }}>
             <User size={30} style={{ color: 'var(--text-tertiary)', marginBottom: 6 }} />
             <div style={{ fontSize: 13, fontWeight: 600 }}>No custom fields recorded</div>
-            <div style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>
+            <div style={{ fontSize: 12, color: 'var(--text-tertiary)', marginBottom: 12 }}>
               Add emergency contacts, blood group, home country data, or custom notes.
             </div>
+            {(isAdmin || isSelfView) && (
+              <button
+                type="button"
+                onClick={() => setIsCustomFieldModalOpen(true)}
+                className="btn btn-outline btn-xs"
+                style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
+              >
+                <Plus size={12} /> Add Custom Field
+              </button>
+            )}
           </div>
         ) : (
           <div
@@ -2593,6 +2778,126 @@ export default function EmployeeDocumentsTab({
                 >
                   {isSubmittingCf && <Loader2 size={14} className="animate-spin" />}
                   Save Changes
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ============================================================ */}
+      {/* MODAL: REQUEST RE-UPLOAD / DELETION */}
+      {/* ============================================================ */}
+      {isReuploadModalOpen && reuploadDoc && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            backgroundColor: 'rgba(0, 0, 0, 0.5)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 9999,
+            padding: 20,
+          }}
+          onClick={() => setIsReuploadModalOpen(false)}
+        >
+          <div
+            className="card"
+            style={{
+              width: '100%',
+              maxWidth: 500,
+              padding: 24,
+              boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.2)',
+              position: 'relative',
+              background: 'var(--surface)',
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <div
+                  style={{
+                    width: 36,
+                    height: 36,
+                    borderRadius: '50%',
+                    background: '#FEF3C7',
+                    color: '#D97706',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                  }}
+                >
+                  <RotateCcw size={18} />
+                </div>
+                <div>
+                  <h4 style={{ fontSize: 16, fontWeight: 800, margin: 0, color: 'var(--text-primary)' }}>
+                    Request Document Re-upload
+                  </h4>
+                  <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
+                    Notify admin to review and delete this record
+                  </div>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsReuploadModalOpen(false)}
+                style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-secondary)' }}
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            <div style={{ background: '#F8FAFC', padding: '12px 14px', borderRadius: 8, border: '1px solid #E2E8F0', marginBottom: 16 }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: '#64748B', textTransform: 'uppercase' }}>Selected Document</div>
+              <div style={{ fontSize: 13.5, fontWeight: 800, color: '#0F172A', marginTop: 2 }}>{reuploadDoc.title}</div>
+              <div style={{ fontSize: 11.5, color: '#64748B' }}>{reuploadDoc.file_name}</div>
+            </div>
+
+            <div style={{ fontSize: 12.5, color: 'var(--text-secondary)', marginBottom: 16, lineHeight: 1.5 }}>
+              To ensure data integrity, team documents cannot be deleted directly once uploaded.
+              Please submit a short reason. Once your administrator deletes this document, the slot will be unlocked so you can upload the correct version.
+            </div>
+
+            <form onSubmit={submitReuploadRequest}>
+              <div style={{ marginBottom: 18 }}>
+                <label style={{ display: 'block', fontSize: 12.5, fontWeight: 700, color: 'var(--text-primary)', marginBottom: 6 }}>
+                  Reason for Re-upload <span style={{ color: 'var(--danger)' }}>*</span>
+                </label>
+                <textarea
+                  required
+                  rows={3}
+                  value={reuploadReason}
+                  onChange={(e) => setReuploadReason(e.target.value)}
+                  placeholder="e.g. Uploaded wrong page / document renewed / typo in reference number"
+                  className="input"
+                  style={{ width: '100%', resize: 'vertical', fontSize: 13 }}
+                />
+              </div>
+
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
+                <button
+                  type="button"
+                  className="btn btn-outline"
+                  onClick={() => setIsReuploadModalOpen(false)}
+                  disabled={isSubmittingReupload}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="btn btn-primary"
+                  disabled={isSubmittingReupload || !reuploadReason.trim()}
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 6,
+                    background: '#D97706',
+                    borderColor: '#D97706',
+                  }}
+                >
+                  {isSubmittingReupload ? <Loader2 size={14} className="animate-spin" /> : <RotateCcw size={14} />}
+                  <span>Submit Request to Admin</span>
                 </button>
               </div>
             </form>

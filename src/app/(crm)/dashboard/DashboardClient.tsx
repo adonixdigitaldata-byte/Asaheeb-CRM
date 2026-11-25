@@ -108,6 +108,7 @@ interface Props {
   myPendingFollowupLeadIds: string[]
   agentHealthStats?: AgentHealthStat[]
   stageHealthStats?: StageHealthStat[]
+  overdueCommissions?: any[]
 }
 
 function getWhatsAppUrl(phone?: string | null): string | null {
@@ -212,6 +213,7 @@ export default function DashboardClient({
   myPendingFollowupLeadIds,
   agentHealthStats = [],
   stageHealthStats = [],
+  overdueCommissions = [],
 }: Props) {
   const router = useRouter()
   const isAdmin = profile.role === 'ADMIN'
@@ -789,6 +791,94 @@ export default function DashboardClient({
 
               </div>
             )}
+          </div>
+        )}
+
+        {/* -- ADMIN ONLY: OVERDUE DEVELOPER COMMISSION PAYOUTS ALERT ------- */}
+        {isAdmin && overdueCommissions.length > 0 && (
+          <div
+            style={{
+              marginBottom: 24,
+              padding: '16px 20px',
+              borderRadius: 14,
+              background: 'linear-gradient(135deg, #FEF2F2 0%, #FFFBEB 100%)',
+              border: '1.5px solid #FCA5A5',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              flexWrap: 'wrap',
+              gap: 14,
+              boxShadow: '0 2px 10px rgba(220, 38, 38, 0.08)',
+            }}
+          >
+            <div style={{ flex: '1 1 360px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <span
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 5,
+                    padding: '3px 9px',
+                    borderRadius: 999,
+                    background: '#DC2626',
+                    color: '#FFFFFF',
+                    fontSize: 11,
+                    fontWeight: 800,
+                  }}
+                >
+                  <AlertTriangle size={12} /> {overdueCommissions.length} OVERDUE DEVELOPER PAYOUT{overdueCommissions.length > 1 ? 'S' : ''}
+                </span>
+                <span style={{ fontSize: 13.5, fontWeight: 800, color: '#991B1B' }}>
+                  Pending: SAR{' '}
+                  {overdueCommissions
+                    .reduce((sum, c) => sum + Math.max(0, Number(c.commission_amount || 0) - Number(c.developer_received_amount || 0)), 0)
+                    .toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                </span>
+              </div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 8 }}>
+                {overdueCommissions.slice(0, 4).map((c) => {
+                  const pend = Math.max(0, Number(c.commission_amount || 0) - Number(c.developer_received_amount || 0))
+                  return (
+                    <span
+                      key={c.id}
+                      style={{
+                        fontSize: 11.5,
+                        color: '#7F1D1D',
+                        background: '#FFFFFF',
+                        border: '1px solid #FECACA',
+                        borderRadius: 6,
+                        padding: '3px 8px',
+                        fontWeight: 600,
+                      }}
+                    >
+                      <strong>{c.project?.name_en || 'Project'}</strong> · {c.unit_name} (Due: {c.expected_payout_date}) — SAR {pend.toLocaleString('en-US')}
+                    </span>
+                  )
+                })}
+                {overdueCommissions.length > 4 && (
+                  <span style={{ fontSize: 11.5, color: '#991B1B', fontWeight: 700, alignSelf: 'center' }}>
+                    +{overdueCommissions.length - 4} more
+                  </span>
+                )}
+              </div>
+            </div>
+
+            <Link
+              href="/my-sales"
+              className="btn btn-sm"
+              style={{
+                background: '#DC2626',
+                color: '#FFFFFF',
+                border: 'none',
+                fontWeight: 800,
+                padding: '8px 16px',
+                borderRadius: 8,
+                textDecoration: 'none',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              Review in Sales &amp; Commissions →
+            </Link>
           </div>
         )}
 

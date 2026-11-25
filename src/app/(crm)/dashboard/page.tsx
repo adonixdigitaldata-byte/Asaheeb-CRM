@@ -233,7 +233,7 @@ export default async function DashboardPage() {
 
     // Team radar queries: strictly for ADMIN only (using batching to ensure no truncation)
     isAdmin
-      ? supabase.from('profiles').select('id, name, email, role').in('role', ['AGENT', 'SALES_MANAGER']).order('name')
+      ? supabase.from('profiles').select('id, name, email, role').in('role', ['AGENT', 'SALES_MANAGER']).eq('is_active', true).order('name')
       : Promise.resolve({ data: [] }),
 
     isAdmin
@@ -538,6 +538,22 @@ export default async function DashboardPage() {
   })
   const personalDoneToday = uniqueLeadsWorkedToday.size
 
+  // Overdue developer commission payouts (Admin only)
+  let overdueCommissions: any[] = []
+  if (isAdmin) {
+    try {
+      const { data: overdueCommsData } = await supabase
+        .from('project_commissions')
+        .select('id, unit_name, buyer_name, commission_amount, developer_received_amount, developer_payment_status, expected_payout_date, project:projects(name_en)')
+        .lt('expected_payout_date', riyadhDateStr)
+        .neq('developer_payment_status', 'RECEIVED')
+        .order('expected_payout_date', { ascending: true })
+      if (overdueCommsData) {
+        overdueCommissions = overdueCommsData
+      }
+    } catch {}
+  }
+
   return (
     <DashboardClient
       profile={profile as Profile}
@@ -555,6 +571,7 @@ export default async function DashboardPage() {
       myPendingFollowupLeadIds={(myPendingFups ?? []).map((f: any) => f.lead_id as string)}
       agentHealthStats={agentHealthStats}
       stageHealthStats={stageHealthStats}
+      overdueCommissions={overdueCommissions}
     />
   )
 }
